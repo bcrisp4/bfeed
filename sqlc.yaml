@@ -9,7 +9,7 @@ sql:
         out: "internal/store/sqlite/sqlc"
         sql_package: "database/sql"
         emit_json_tags: false
-        emit_pointers_for_null_types: true
+        emit_pointers_for_null_types: false
         overrides:
           - db_type: "INTEGER"
             go_type: "int64"
