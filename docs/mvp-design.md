@@ -472,7 +472,8 @@ Each step is independently testable and leaves the tree green.
 
 ## 20. Path back to the full design
 
-When the MVP is in daily use, layer deferred features back in the `design.md` order that
-unblocks the most value — likely: full-text search → image proxy → full-content scrape →
-adaptive scheduler → REST API → OPML → retention cleaner → auth/multi-user → Prometheus.
-Each is additive; none invalidates MVP code or data.
+**Everything deferred is tracked exhaustively in [`roadmap.md`](./roadmap.md)** — the single
+source of truth for what's left out, each item mapped to its `design.md` section and the
+additive surface (table/column/package/route/env) it introduces, plus a suggested iteration
+sequence. As features ship they move to the roadmap's **Done** section. Each is additive; none
+invalidates MVP code or data.
