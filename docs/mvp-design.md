@@ -50,8 +50,10 @@ Everything not on that loop is deferred. Leanest possible first ship; iterate fr
   params (`utm_*`, `fbclid`, …) from links and drop 1×1 tracking-pixel images. **Raw HTML
   never reaches the DB.** (Image-proxy rewrite is deferred; images load from origin in the MVP.)
 - **Store** entries; upsert by `(feed_id, guid)` (GUID = feed id, else `hash(url|title)`);
-  content hash detects in-place edits. **Tombstone** `(feed_id, guid)` on entry/feed delete so
-  re-polling can't resurrect deleted entries.
+  content hash detects in-place edits. **Tombstone** `(feed_id, guid)` on single-entry delete
+  (and TTL expiry, later) so re-polling the same feed can't resurrect it. Deleting a whole feed
+  cascades its entries *and* their tombstones away (a re-subscribe gets a fresh `feed_id`, so
+  per-feed tombstones would not apply to it).
 - **Background poller** — fixed interval, one bounded worker pool, conditional GET (304 → no
   reparse), per-host concurrency semaphore, exponential backoff + jitter on error.
 - **Web UI** — server-rendered `html/template` + htmx; mobile-first, single-column, serif body.
@@ -195,7 +197,7 @@ type FeedStore interface {
     ListFeeds(ctx context.Context, userID ID) ([]*Feed, error)
     ListDueFeeds(ctx context.Context, now time.Time, limit int) ([]*Feed, error) // next_check_at<=now, !disabled
     UpdateFeed(ctx context.Context, f *Feed) error
-    DeleteFeed(ctx context.Context, userID, feedID ID) error          // cascade entries, write tombstones
+    DeleteFeed(ctx context.Context, userID, feedID ID) error          // cascade entries + tombstones (writes none)
 }
 
 type EntryStore interface {
@@ -445,7 +447,8 @@ a drain timeout.
 
 **Data integrity**
 6. A tombstoned `(feed_id, guid)` is never re-created by polling.
-7. Deleting a feed removes its entries and leaves tombstones.
+7. Deleting a feed removes its entries (and their per-feed tombstones cascade away). Single-entry
+   deletes leave a tombstone that blocks re-poll resurrection while the feed exists.
 8. `(feed_id, guid)` is unique; re-fetched entries upsert, never duplicate.
 
 **Isolation (forward-compatible)**
