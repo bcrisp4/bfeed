@@ -61,14 +61,14 @@ INTEGER-epoch time columns, bounded worker pools, and FTS5 for search.
 | DB access | **sqlc** (SQL → typed Go over `database/sql`) | No ORM runtime; idiomatic; supports FTS5/pragmas; testable against real SQLite. |
 | Migrations | **goose** (library mode, embedded SQL) | Pure Go, boring, embedded via `embed.FS`. |
 | Feed parsing | **`mmcdole/gofeed`** | Mature; RSS, Atom, and JSON Feed in one API. |
-| Content extraction | **`codeberg.org/readeck/go-readability`** | go-shiori/go-readability is **archived (2025-12-30)**; this is the maintained fork (MIT, pure Go, no cgo). Use the **v0/main** line (API-compatible drop-in); `/v2` is faster but breaks (some `Article` fields → methods). |
+| Content extraction | **`codeberg.org/readeck/go-readability/v2`** | go-shiori/go-readability is **archived (2025-12-30)**; this maintained fork (MIT, pure Go, no cgo) is the replacement. Greenfield → start on **v2** (tracks Readability.js v0.6; best speed/memory). API note: some `Article` values are accessed as methods, not fields. |
 | HTML sanitisation | **`microcosm-cc/bluemonday`** | Mature allowlist sanitiser; strips active content. |
 | HTTP server/router | **stdlib `net/http`** (Go 1.22 `ServeMux`) | Method+pattern routing in stdlib; minimal deps; `httptest`-friendly. |
 | Templating | stdlib **`html/template`** + **htmx** | Server-rendered HTML fragments; auto-escaping; tiny client. |
 | Password hashing | **argon2id** (`golang.org/x/crypto/argon2`) | OWASP first choice; memory-hard; pure Go; no bcrypt 72-byte footgun. |
 | Concurrency limiting | `golang.org/x/sync` (`semaphore`, `errgroup`) + **`golang.org/x/time/rate`** | Per-host concurrency caps *and* per-host token-bucket rate limits; structured fan-out. |
 | Logging | stdlib **`log/slog`** | Required; structured, leveled. |
-| Metrics | **`prometheus/client_golang`** | Required; `/metrics`. Reuse its built-in `collectors.NewDBStatsCollector`. |
+| Metrics | **`prometheus/client_golang`** | Required; `/metrics`. DB metrics come only from its built-in `collectors.NewDBStatsCollector` (`go_sql_*`). |
 
 > All non-stdlib libraries are mature and pure-Go. Confirm `modernc.org/sqlite` enables FTS5
 > and STRICT (SQLite ≥ 3.37) at the chosen version during the first implementation session.
@@ -115,7 +115,7 @@ imports everything to wire it.
 
 ```
 cmd/
-  bfeed/              composition root: config load, wiring, http server, lifecycle
+  bfeed/              composition root + CLI subcommand dispatch (§22): config, wiring, lifecycle
 internal/
   core/               domain types, services, consumer-owned interfaces (no adapter imports)
     types.go            User, Feed, Entry, Category, APIToken, Session, Tombstone, ...
@@ -136,7 +136,7 @@ internal/
   imgproxy/           image proxy handler: signed URLs, SSRF guard, cache (see §10.6)
   web/                HTML handlers, templates (embed.FS), sessions, CSRF, PWA assets, themes
   api/                REST handlers, bearer auth, token scoping, admin guard
-  obs/                slog setup, Prometheus registry + metric defs, DB instrumentation
+  observability/      slog setup, Prometheus registry + metric definitions
   clock/              real Clock (time.Now); fake clock lives in tests
 ```
 
@@ -459,7 +459,7 @@ func NewPoller(
   computes a stable `GUID` (feed id, else `hash(url|title)`) and content `Hash`.
 
 ### 10.4 `extract` — full-content scrape
-- Wraps `readeck/go-readability`. Given a fetched page, returns main-article HTML.
+- Wraps `readeck/go-readability` **v2**. Given a fetched page, returns main-article HTML.
 - Used only for `FetchFullContent` feeds (or entries with no usable content), in the scrape
   stage. Output is **sanitised before storage** like any other content.
 
@@ -483,9 +483,16 @@ leak the reader's IP/User-Agent to origin and third-party tracker servers on ren
   and metadata IPs**; enforce a `Content-Type: image/*` allowlist on the response.
 - **Caching:** small on-disk (or bounded in-memory LRU) cache keyed by URL hash with a size
   cap and TTL, so repeated renders don't re-fetch. Serves with long client cache headers.
-- **Config:** `BFEED_IMAGE_PROXY=on|off` (default **on**), cache size/dir, max image bytes.
+- **Signing key:** an HMAC secret resolved at startup — use `BFEED_IMAGE_PROXY_SECRET` if set
+  (operator-managed); otherwise read it from the `app_settings` table, generating a random
+  32-byte key with `crypto/rand` on first run and persisting it there. It lives in the same
+  SQLite volume as the data, so it is stable across restarts. Rotating it invalidates
+  signatures embedded in already-served pages (harmless — pages re-render on next load) but
+  not the on-disk image cache (keyed by URL hash, not signature).
+- **Config:** `BFEED_IMAGE_PROXY=on|off` (default **on**), `BFEED_IMAGE_PROXY_SECRET`
+  (optional), cache size/dir, max image bytes.
 
-### 10.7 `web` / 10.8 `api` / 10.9 `obs`
+### 10.7 `web` / 10.8 `api` / 10.9 `observability`
 See §18, §17, §20.
 
 ## 11. Data model & schema
@@ -594,6 +601,11 @@ CREATE TABLE sessions (
   created_at INTEGER NOT NULL
 ) STRICT, WITHOUT ROWID;                          -- text PK, small rows, exact-match lookups
 CREATE INDEX idx_sessions_user ON sessions(user_id);
+
+CREATE TABLE app_settings (                       -- generated server secrets (e.g. image-proxy HMAC key)
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT, WITHOUT ROWID;                          -- small key/value store
 
 -- FTS5 full-text index over entries (external content — no duplicate text copy)
 CREATE VIRTUAL TABLE entries_fts USING fts5(
@@ -791,14 +803,15 @@ Errors return `{ "error": { "code", "message" } }`; core sentinels map to status
 detail goes to logs: per-feed poll timing, per-feed errors with URL/status, request ids,
 user/feed ids.
 
-**Prometheus** (low-cardinality only). DB instrumentation **reuses existing tooling**:
-- **Connection-pool metrics** via the built-in `collectors.NewDBStatsCollector(db, "bfeed")`
-  (zero new deps) → `go_sql_*` (open/in-use/idle conns, wait count/duration).
-- **Query latency** via a thin hand-rolled wrapper around the sqlc `Querier`, recording a
-  `HistogramVec` keyed by **method name** → `bfeed_db_query_duration_seconds{query}`. (A
-  driver wrapper would only see raw SQL; otelsql is reserved for if we ever add tracing.)
-- **DB size/freelist** via a small custom collector running `PRAGMA page_count*page_size` and
-  `PRAGMA freelist_count` → `bfeed_db_size_bytes`, `bfeed_db_freelist_pages`.
+**Prometheus** (low-cardinality only). For the database, **reuse only the built-in
+`collectors.NewDBStatsCollector(db, "bfeed")`** (zero new deps) → `go_sql_*` connection-pool
+gauges (max/open/in-use/idle conns, `wait_count`, `wait_duration`). No hand-rolled DB
+collectors. Two observability questions therefore move off Prometheus, consistent with the
+requirement to use logs for high-cardinality/low-level detail:
+- *How long do DB operations take?* — slow queries are timed and logged via slog;
+  `go_sql_wait_*` surfaces pool contention.
+- *How big is the database?* — emitted as a periodic slog line (also visible via
+  container/host filesystem metrics); not a custom gauge.
 
 **Errors are a single counter with closed-enum labels** (Prometheus best practice — avoid
 metric-name proliferation): `bfeed_errors_total{component, reason}` where
@@ -818,8 +831,8 @@ bomb). Paired attempt counters enable error-ratio queries.
 | Queued / in progress? | `bfeed_poll_queue_depth`, `bfeed_poll_inflight`, `bfeed_scrape_queue_depth`, `bfeed_scrape_inflight` (gauges) |
 | Feed-poll attempts (denominator)? | `bfeed_feed_polls_total{result}` (counter) |
 | Errors (all kinds)? | `bfeed_errors_total{component, reason}` (counter) |
-| Database size? | `bfeed_db_size_bytes` (gauge) |
-| DB operation latency? | `bfeed_db_query_duration_seconds{query}` (histogram) |
+| Database size? | periodic slog line + host/container disk metrics (no custom gauge) |
+| DB operation latency? | slog slow-query log + `go_sql_wait_*` (pool contention) |
 
 HTTP: `bfeed_http_requests_total{route,method,status}`, `bfeed_http_request_duration_seconds{route}`.
 
@@ -857,10 +870,39 @@ BFEED_SESSION_TTL              720h        # 30d
 BFEED_ADMIN_USERNAME / BFEED_ADMIN_PASSWORD   # bootstrap admin, first run only
 # privacy
 BFEED_IMAGE_PROXY              on          # default ON
+BFEED_IMAGE_PROXY_SECRET                   # optional HMAC key; generated + persisted if unset
 BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
 ```
 
-## 22. Concurrency & lifecycle
+## 22. Command-line interface
+
+One binary, multiple subcommands; dispatch in `cmd/bfeed` using stdlib `flag` (boring — only
+a handful of commands, no need for a framework). Config is read from the environment (§21);
+flags override where useful. The distroless/static image has no shell, so admin and health
+operations are subcommands, not shell scripts.
+
+```
+bfeed serve                  run the HTTP server + background poller/cleaner (default if omitted)
+bfeed migrate <up|down|status>   manage schema migrations (goose); `serve` also auto-migrates on boot
+bfeed user <create|list|set-password|delete> --username NAME [--admin]
+                             manage users (alternative to env bootstrap); password from prompt/stdin
+bfeed token <create|list|revoke> --username NAME [--name LABEL] [--read-only]
+                             manage a user's API tokens; `create` prints the token once
+bfeed import <file.opml> --username NAME       OPML import
+bfeed export --username NAME [-o file.opml]    OPML export
+bfeed healthcheck            probe local /healthz and exit 0/1 — for the container HEALTHCHECK
+bfeed version                version, git commit, build date
+```
+
+- `serve` is the default when no subcommand is given.
+- Every command shares one config-load → DB-open → migrate path, then acts on the single
+  SQLite file. Offline admin commands rely on WAL + `busy_timeout` to coexist with a running
+  `serve`. These commands are thin CLI adapters over the same core services (§9) — no logic
+  lives in `cmd`.
+- `healthcheck` exists because distroless ships no `curl`/`wget`; the container `HEALTHCHECK`
+  invokes `bfeed healthcheck`.
+
+## 23. Concurrency & lifecycle
 
 - `cmd/bfeed` builds a root `context.Context` cancelled on SIGINT/SIGTERM.
 - Startup: load+validate config → open SQLite (pragmas, writer pool) → run migrations (goose)
@@ -870,7 +912,7 @@ BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
   pools finish/abort current fetch on ctx → `PRAGMA optimize` → close DB. Use
   `errgroup`/`sync.WaitGroup` to wait for clean drain within a timeout.
 
-## 23. Error handling conventions
+## 24. Error handling conventions
 
 - Core defines sentinel errors (`ErrNotFound`, `ErrConflict`, `ErrUnauthorized`,
   `ErrValidation`). Adapters wrap driver errors with `%w` and map to sentinels.
@@ -879,7 +921,7 @@ BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
 - No silent failures: every swallowed/decided-non-fatal error is logged with context and, if
   operationally relevant, counted in `bfeed_errors_total`.
 
-## 24. Testing strategy (TDD: Red/Green/Refactor)
+## 25. Testing strategy (TDD: Red/Green/Refactor)
 
 - **Core services:** unit-tested with in-memory fakes implementing the port interfaces and a
   **fake `Clock`** — fast, deterministic. Invariant tests live here, including the adaptive
@@ -896,7 +938,7 @@ BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
 - **End-to-end smoke:** wire real components, subscribe to a local test feed, assert entries
   appear, search works, mark-read/star/delete behave, adaptive reschedule advances.
 
-## 25. Deployment
+## 26. Deployment
 
 - Single static binary (`CGO_ENABLED=0`), templates/assets/migrations embedded — ship nothing
   but the SQLite file.
@@ -905,7 +947,7 @@ BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
 - Runs as non-root; data dir is a mounted volume holding `bfeed.db` (+ WAL/SHM) and the image
   cache. Restart-safe (migrations idempotent, scheduler self-heals from `next_check_at`).
 
-## 26. Invariants (the contract)
+## 27. Invariants (the contract)
 
 These hold across all sessions. Tests must defend them.
 
@@ -950,18 +992,21 @@ These hold across all sessions. Tests must defend them.
 20. Interfaces are declared by the consuming core; adapters depend on core, not vice-versa.
 21. Time-dependent logic uses the injected `Clock`, never `time.Now()` directly.
 
-## 27. Open questions / future
+## 28. Open questions / future
 
 - **License** (requirements: TBD) — pick an OSI license (e.g. AGPL-3.0 or MIT) before release.
 - **Per-feed interval override** — adaptivity is global today; a per-feed min/max pin could be
   added if a feed needs special cadence.
-- **readeck/go-readability v2** — adopt for speed once we accept its `Article` field→method
-  breaking changes; start on the API-compatible v0 line.
 - **Read/write connection split** — adopt only if single-writer + `busy_timeout` proves
   insufficient under load.
-- **Search stemming** — add a `porter` tokenizer layer if exact-form matching proves limiting.
+- **Search stemming** — the default `unicode61` tokenizer matches only exact word forms
+  (after case/accent folding), so a search for `run` will not match `running` or `runs`.
+  FTS5's `porter` tokenizer stems words to a common root at both index and query time so
+  inflected forms match each other — higher recall, traded against some precision
+  (`universe`/`university` collide) and the ability to match an exact form. Default stays
+  `unicode61`; the tokenizer is a config option to flip to `porter` if search feels too literal.
 
-## 28. Decision log (deltas from first draft)
+## 29. Decision log (deltas from first draft)
 
 - Per-user feeds (Miniflux model); fetch-time per-feed content scrape; sqlc; stdlib `net/http`.
 - argon2id over bcrypt; `Clock` kept as the time port name.
@@ -974,10 +1019,14 @@ These hold across all sessions. Tests must defend them.
 - TTL cleanup restricted to **read AND not-saved** entries; default **365d**, **per-user** configurable.
 - Image proxy promoted from an aside to a fully-scoped feature, **default ON**.
 - Dropped invented service-worker/offline reading.
-- DB metrics reuse client_golang's `DBStatsCollector` + sqlc-method-name latency wrapper;
-  errors collapsed into one `bfeed_errors_total{component,reason}`.
+- DB metrics: errors collapsed into one `bfeed_errors_total{component,reason}`.
+- **R2:** readability → **v2** (greenfield, latest); `obs` package renamed `observability`;
+  dropped all custom DB collectors (`go_sql_*` only — DB size/op-latency routed to logs +
+  host metrics); image-proxy HMAC key resolved from `BFEED_IMAGE_PROXY_SECRET` else generated
+  once and persisted in the new `app_settings` table; added CLI design (§22); clarified the
+  search-stemming trade-off.
 
-## 29. Research basis & sources
+## 30. Research basis & sources
 
 Key external references behind the researched decisions (verified during design):
 
