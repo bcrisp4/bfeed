@@ -1,0 +1,191 @@
+package core
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"strings"
+	"time"
+)
+
+type FeedServiceConfig struct {
+	Reschedule RescheduleConfig
+	Jitter     func(time.Duration) time.Duration
+}
+
+type FeedService struct {
+	store   Store
+	fetcher Fetcher
+	parser  FeedParser
+	san     Sanitizer
+	clk     Clock
+	log     *slog.Logger
+	cfg     FeedServiceConfig
+}
+
+func NewFeedService(store Store, fetcher Fetcher, parser FeedParser, san Sanitizer, clk Clock, log *slog.Logger, cfg FeedServiceConfig) *FeedService {
+	return &FeedService{store: store, fetcher: fetcher, parser: parser, san: san, clk: clk, log: log, cfg: cfg}
+}
+
+var _ FeedPoller = (*FeedService)(nil)
+
+func (s *FeedService) List(ctx context.Context, userID ID) ([]*Feed, error) {
+	return s.store.ListFeeds(ctx, userID)
+}
+
+func (s *FeedService) Delete(ctx context.Context, userID, feedID ID) error {
+	return s.store.DeleteFeed(ctx, userID, feedID)
+}
+
+// Subscribe validates the URL, fetches it (discovering the feed if HTML), parses,
+// creates the feed, runs an initial poll to populate entries, and sets NextCheckAt.
+func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (*Feed, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
+	}
+	feedURL, pf, resp, err := s.resolveFeed(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	now := s.clk.Now()
+	f := &Feed{
+		UserID: userID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
+		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	id, err := s.store.CreateFeed(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	f.ID = id
+	if err := s.ingest(ctx, f, pf); err != nil {
+		return nil, err
+	}
+	f.CheckedAt = &now
+	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	f.ErrorCount = 0
+	if err := s.store.UpdateFeed(ctx, f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// resolveFeed fetches rawURL; if it parses as a feed, use it. Otherwise try HTML
+// discovery and fetch the first discovered feed URL.
+func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *ParsedFeed, *FetchResponse, error) {
+	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: rawURL})
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("%w: fetch failed: %v", ErrValidation, err)
+	}
+	if resp.Status != 200 || len(resp.Body) == 0 {
+		return "", nil, nil, fmt.Errorf("%w: feed returned status %d", ErrValidation, resp.Status)
+	}
+	if pf, perr := s.parser.Parse(resp.Body, rawURL); perr == nil && pf.Title != "" || perr == nil && len(pf.Entries) > 0 {
+		return rawURL, pf, resp, nil
+	}
+	urls, derr := s.parser.Discover(resp.Body, rawURL)
+	if derr != nil || len(urls) == 0 {
+		return "", nil, nil, fmt.Errorf("%w: no feed found at URL", ErrValidation)
+	}
+	resp2, err := s.fetcher.Fetch(ctx, FetchRequest{URL: urls[0]})
+	if err != nil || resp2.Status != 200 {
+		return "", nil, nil, fmt.Errorf("%w: discovered feed unreachable", ErrValidation)
+	}
+	pf, perr := s.parser.Parse(resp2.Body, urls[0])
+	if perr != nil {
+		return "", nil, nil, fmt.Errorf("%w: discovered feed unparseable", ErrValidation)
+	}
+	return urls[0], pf, resp2, nil
+}
+
+func (s *FeedService) Refresh(ctx context.Context, userID, feedID ID) error {
+	f, err := s.store.GetFeed(ctx, userID, feedID)
+	if err != nil {
+		return err
+	}
+	return s.PollFeed(ctx, f)
+}
+
+// PollFeed implements FeedPoller: fetch (conditional) → parse → sanitise → upsert → reschedule.
+// Fetch/parse errors are recorded on the feed and swallowed (background workers continue).
+func (s *FeedService) PollFeed(ctx context.Context, f *Feed) error {
+	now := s.clk.Now()
+	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: f.FeedURL, ETag: f.ETag, LastModified: f.LastModified})
+	if err != nil {
+		return s.recordError(ctx, f, now, err.Error(), 0)
+	}
+	if resp.NotModified {
+		return s.recordSuccess(ctx, f, now, resp, nil)
+	}
+	if resp.Status == 429 || resp.Status >= 500 {
+		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), resp.RetryAfter)
+	}
+	if resp.Status != 200 {
+		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), 0)
+	}
+	pf, err := s.parser.Parse(resp.Body, f.FeedURL)
+	if err != nil {
+		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0)
+	}
+	return s.recordSuccess(ctx, f, now, resp, pf)
+}
+
+func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error {
+	if pf == nil {
+		return nil
+	}
+	entries := make([]*Entry, 0, len(pf.Entries))
+	for _, pe := range pf.Entries {
+		entries = append(entries, &Entry{
+			UserID: f.UserID, FeedID: f.ID, GUID: pe.GUID, URL: pe.URL, Title: pe.Title,
+			Author: pe.Author, Content: s.san.Sanitize(pe.Content, f.FeedURL),
+			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: pe.PublishedAt,
+			Status: StatusUnread, CreatedAt: s.clk.Now(),
+			Hash: pe.Hash,
+		})
+	}
+	_, err := s.store.UpsertEntries(ctx, f.ID, entries)
+	return err
+}
+
+func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
+	if pf != nil {
+		if err := s.ingest(ctx, f, pf); err != nil {
+			return err
+		}
+		f.Title = orKeep(pf.Title, f.Title)
+		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)
+		f.Description = orKeep(pf.Description, f.Description)
+	}
+	if resp.ETag != "" {
+		f.ETag = resp.ETag
+	}
+	if resp.LastModified != "" {
+		f.LastModified = resp.LastModified
+	}
+	f.ErrorCount = 0
+	f.LastError = ""
+	f.CheckedAt = &now
+	f.UpdatedAt = now
+	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	return s.store.UpdateFeed(ctx, f)
+}
+
+func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, msg string, retryAfter time.Duration) error {
+	f.ErrorCount++
+	f.LastError = msg
+	f.CheckedAt = &now
+	f.UpdatedAt = now
+	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, f.ErrorCount, retryAfter, s.cfg.Jitter)
+	s.log.Warn("feed poll error", "feed_id", int64(f.ID), "url", f.FeedURL, "error", msg)
+	return s.store.UpdateFeed(ctx, f)
+}
+
+func orKeep(newv, old string) string {
+	if strings.TrimSpace(newv) != "" {
+		return newv
+	}
+	return old
+}
