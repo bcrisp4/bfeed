@@ -73,22 +73,6 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 	return result.RowsAffected()
 }
 
-const deleteFeedTombstones = `-- name: DeleteFeedTombstones :exec
-INSERT INTO tombstones (feed_id, guid, deleted_at)
-SELECT entries.feed_id, entries.guid, ? FROM entries WHERE entries.feed_id = ?
-ON CONFLICT(feed_id, guid) DO UPDATE SET deleted_at = excluded.deleted_at
-`
-
-type DeleteFeedTombstonesParams struct {
-	DeletedAt int64
-	FeedID    int64
-}
-
-func (q *Queries) DeleteFeedTombstones(ctx context.Context, arg DeleteFeedTombstonesParams) error {
-	_, err := q.db.ExecContext(ctx, deleteFeedTombstones, arg.DeletedAt, arg.FeedID)
-	return err
-}
-
 const getFeed = `-- name: GetFeed :one
 SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at FROM feeds WHERE id = ? AND user_id = ?
 `

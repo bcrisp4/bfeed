@@ -1,5 +1,5 @@
 -- name: GetEntryByGUID :one
-SELECT id FROM entries WHERE feed_id = ? AND guid = ?;
+SELECT id, hash FROM entries WHERE feed_id = ? AND guid = ?;
 
 -- name: TombstoneExists :one
 SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?;
@@ -12,7 +12,7 @@ RETURNING id;
 
 -- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
-  published_at = ?, url = ?, hash = ? WHERE id = ?;
+  published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?;
 
 -- name: GetEntry :one
 SELECT * FROM entries WHERE id = ? AND user_id = ?;

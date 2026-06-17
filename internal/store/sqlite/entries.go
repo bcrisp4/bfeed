@@ -28,7 +28,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, mapErr(err)
 		}
-		existingID, err := q.GetEntryByGUID(ctx, sqlc.GetEntryByGUIDParams{FeedID: int64(feedID), Guid: e.GUID})
+		existing, err := q.GetEntryByGUID(ctx, sqlc.GetEntryByGUIDParams{FeedID: int64(feedID), Guid: e.GUID})
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			id, err := q.InsertEntry(ctx, sqlc.InsertEntryParams{
@@ -54,11 +54,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 			return nil, mapErr(err)
 		default:
 			// Existing: update only if content hash changed (in-place edit).
-			cur, err := q.GetEntry(ctx, sqlc.GetEntryParams{ID: existingID, UserID: int64(e.UserID)})
-			if err != nil {
-				return nil, mapErr(err)
-			}
-			if cur.Hash != e.Hash {
+			if existing.Hash != e.Hash {
 				if err := q.UpdateEntryContent(ctx, sqlc.UpdateEntryContentParams{
 					Title:       e.Title,
 					Author:      e.Author,
@@ -67,7 +63,8 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 					PublishedAt: toUnix(e.PublishedAt),
 					Url:         e.URL,
 					Hash:        e.Hash,
-					ID:          existingID,
+					ID:          existing.ID,
+					UserID:      int64(e.UserID),
 				}); err != nil {
 					return nil, mapErr(err)
 				}
@@ -151,40 +148,12 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 
 	var out []*core.Entry
 	for rows.Next() {
-		// Scan into local typed variables to avoid sqlc null-type dependency.
-		var (
-			id, userIDVal, feedID    int64
-			guid, url, title, author string
-			content, summary         string
-			publishedAt              int64
-			status                   string
-			starred                  int64
-			readAt                   sql.NullInt64
-			createdAt                int64
-			hash                     string
-		)
-		if err := rows.Scan(&id, &userIDVal, &feedID, &guid, &url, &title, &author,
-			&content, &summary, &publishedAt, &status, &starred, &readAt, &createdAt, &hash); err != nil {
+		var r sqlc.Entry
+		if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
+			&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
 			return nil, nil, mapErr(err)
 		}
-		e := &core.Entry{
-			ID:          core.ID(id),
-			UserID:      core.ID(userIDVal),
-			FeedID:      core.ID(feedID),
-			GUID:        guid,
-			URL:         url,
-			Title:       title,
-			Author:      author,
-			Content:     content,
-			Summary:     summary,
-			PublishedAt: fromUnix(publishedAt),
-			Status:      core.EntryStatus(status),
-			Starred:     starred != 0,
-			ReadAt:      ptrUnix(readAt),
-			CreatedAt:   fromUnix(createdAt),
-			Hash:        hash,
-		}
-		out = append(out, e)
+		out = append(out, entryFromRow(r))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, mapErr(err)
@@ -244,8 +213,12 @@ func (s *Store) DeleteEntry(ctx context.Context, userID, entryID core.ID) error 
 	}); err != nil {
 		return mapErr(err)
 	}
-	if _, err := q.DeleteEntry(ctx, sqlc.DeleteEntryParams{ID: int64(entryID), UserID: int64(userID)}); err != nil {
+	n, err := q.DeleteEntry(ctx, sqlc.DeleteEntryParams{ID: int64(entryID), UserID: int64(userID)})
+	if err != nil {
 		return mapErr(err)
+	}
+	if n == 0 {
+		return core.ErrNotFound
 	}
 	return mapErr(tx.Commit())
 }

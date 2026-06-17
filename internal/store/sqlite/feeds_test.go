@@ -64,6 +64,61 @@ func TestGetFeedWrongUserNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteFeedRemovesEntries(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	// Create a feed and upsert 2 entries.
+	fid, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://del.test/f",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	e1 := &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g1", URL: "https://del.test/1",
+		Title: "T1", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h1"}
+	e2 := &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g2", URL: "https://del.test/2",
+		Title: "T2", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h2"}
+	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{e1, e2}); err != nil {
+		t.Fatalf("UpsertEntries: %v", err)
+	}
+
+	// Delete the feed.
+	if err := s.DeleteFeed(ctx, core.DefaultUserID, fid); err != nil {
+		t.Fatalf("DeleteFeed: %v", err)
+	}
+
+	// Feed must be gone.
+	if _, err := s.GetFeed(ctx, core.DefaultUserID, fid); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetFeed after delete = %v, want ErrNotFound", err)
+	}
+
+	// Entries must be cascaded away.
+	entries, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{FeedID: &fid})
+	if err != nil {
+		t.Fatalf("ListEntries after feed delete: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries after feed delete, got %d", len(entries))
+	}
+
+	// Deleting a non-existent feed must return ErrNotFound.
+	if err := s.DeleteFeed(ctx, core.DefaultUserID, fid); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("double-delete err = %v, want ErrNotFound", err)
+	}
+
+	// Deleting with wrong user must return ErrNotFound.
+	fid2, _ := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://del2.test/f",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err := s.DeleteFeed(ctx, 999, fid2); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("wrong-user delete err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestListDueFeeds(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

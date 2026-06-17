@@ -22,10 +22,5 @@ UPDATE feeds SET
   updated_at = ?
 WHERE id = ? AND user_id = ?;
 
--- name: DeleteFeedTombstones :exec
-INSERT INTO tombstones (feed_id, guid, deleted_at)
-SELECT entries.feed_id, entries.guid, ? FROM entries WHERE entries.feed_id = ?
-ON CONFLICT(feed_id, guid) DO UPDATE SET deleted_at = excluded.deleted_at;
-
 -- name: DeleteFeed :execrows
 DELETE FROM feeds WHERE id = ? AND user_id = ?;

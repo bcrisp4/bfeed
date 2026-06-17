@@ -59,7 +59,7 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 }
 
 const getEntryByGUID = `-- name: GetEntryByGUID :one
-SELECT id FROM entries WHERE feed_id = ? AND guid = ?
+SELECT id, hash FROM entries WHERE feed_id = ? AND guid = ?
 `
 
 type GetEntryByGUIDParams struct {
@@ -67,11 +67,16 @@ type GetEntryByGUIDParams struct {
 	Guid   string
 }
 
-func (q *Queries) GetEntryByGUID(ctx context.Context, arg GetEntryByGUIDParams) (int64, error) {
+type GetEntryByGUIDRow struct {
+	ID   int64
+	Hash string
+}
+
+func (q *Queries) GetEntryByGUID(ctx context.Context, arg GetEntryByGUIDParams) (GetEntryByGUIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getEntryByGUID, arg.FeedID, arg.Guid)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i GetEntryByGUIDRow
+	err := row.Scan(&i.ID, &i.Hash)
+	return i, err
 }
 
 const insertEntry = `-- name: InsertEntry :one
@@ -148,7 +153,7 @@ func (q *Queries) TombstoneExists(ctx context.Context, arg TombstoneExistsParams
 
 const updateEntryContent = `-- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
-  published_at = ?, url = ?, hash = ? WHERE id = ?
+  published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?
 `
 
 type UpdateEntryContentParams struct {
@@ -160,6 +165,7 @@ type UpdateEntryContentParams struct {
 	Url         string
 	Hash        string
 	ID          int64
+	UserID      int64
 }
 
 func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContentParams) error {
@@ -172,6 +178,7 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 		arg.Url,
 		arg.Hash,
 		arg.ID,
+		arg.UserID,
 	)
 	return err
 }

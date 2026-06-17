@@ -111,28 +111,25 @@ func (s *Store) UpdateFeed(ctx context.Context, f *core.Feed) error {
 	}))
 }
 
+// DeleteFeed deletes the feed and cascades to all associated entries and
+// tombstones via FK ON DELETE CASCADE. It does NOT write new tombstones —
+// tombstones exist only to block re-poll resurrection of individually-deleted
+// entries while the feed exists; once the feed is gone, a re-subscribe gets a
+// new feed_id and old tombstones can never match.
+// Returns ErrNotFound if the feed does not exist or belongs to another user.
 func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
 	if _, err := s.GetFeed(ctx, userID, feedID); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	n, err := s.q.DeleteFeed(ctx, sqlc.DeleteFeedParams{
+		ID:     int64(feedID),
+		UserID: int64(userID),
+	})
 	if err != nil {
 		return mapErr(err)
 	}
-	defer tx.Rollback()
-	qtx := s.q.WithTx(tx)
-	deletedAt := time.Now().UTC().Unix()
-	if err := qtx.DeleteFeedTombstones(ctx, sqlc.DeleteFeedTombstonesParams{
-		DeletedAt: deletedAt,
-		FeedID:    int64(feedID),
-	}); err != nil {
-		return mapErr(err)
+	if n == 0 {
+		return core.ErrNotFound
 	}
-	if _, err := qtx.DeleteFeed(ctx, sqlc.DeleteFeedParams{
-		ID:     int64(feedID),
-		UserID: int64(userID),
-	}); err != nil {
-		return mapErr(err)
-	}
-	return mapErr(tx.Commit())
+	return nil
 }
