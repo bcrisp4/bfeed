@@ -25,7 +25,7 @@ type Fetcher interface {
 
 type ParsedFeed struct {
 	Title, SiteURL, Description string
-	Entries                    []ParsedEntry
+	Entries                     []ParsedEntry
 }
 
 type ParsedEntry struct {
