@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>Sample</title>
+  <link>https://sample.test/</link>
+  <description>A sample feed</description>
+  <item>
+    <title>First post</title>
+    <link>/posts/1</link>
+    <guid>post-1</guid>
+    <description>&lt;p&gt;hello&lt;/p&gt;</description>
+    <pubDate>Mon, 02 Jan 2006 15:04:05 GMT</pubDate>
+  </item>
+</channel></rss>

@@ -32,6 +32,7 @@ type ParsedEntry struct {
 	GUID, URL, Title, Author string
 	Content, Summary         string // RAW; sanitise before persistence
 	PublishedAt              time.Time
+	Hash                     string // sha256(title|content|summary)
 }
 
 type FeedParser interface {
