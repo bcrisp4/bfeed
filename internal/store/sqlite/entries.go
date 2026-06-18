@@ -17,7 +17,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 
 	var inserted []*core.Entry
@@ -140,7 +140,7 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: orderCol is allowlisted; values are bound params
 		`SELECT id, user_id, feed_id, guid, url, title, author, content, summary,
 		        published_at, status, starred, read_at, created_at, hash
 		 FROM entries WHERE %s ORDER BY %s DESC, id DESC LIMIT ?`,
@@ -185,7 +185,7 @@ func (s *Store) SetStatus(ctx context.Context, userID core.ID, ids []core.ID, st
 		readAt = nil
 	}
 	ph, args := placeholders(ids)
-	q := fmt.Sprintf(`UPDATE entries SET status = ?, read_at = ? WHERE user_id = ? AND id IN (%s)`, ph)
+	q := fmt.Sprintf(`UPDATE entries SET status = ?, read_at = ? WHERE user_id = ? AND id IN (%s)`, ph) //nolint:gosec // G201: %s is a generated ?-placeholder list
 	all := append([]any{string(st), readAt, int64(userID)}, args...)
 	_, err := s.db.ExecContext(ctx, q, all...)
 	return mapErr(err)
@@ -196,7 +196,7 @@ func (s *Store) SetStarred(ctx context.Context, userID core.ID, ids []core.ID, s
 		return nil
 	}
 	ph, args := placeholders(ids)
-	q := fmt.Sprintf(`UPDATE entries SET starred = ? WHERE user_id = ? AND id IN (%s)`, ph)
+	q := fmt.Sprintf(`UPDATE entries SET starred = ? WHERE user_id = ? AND id IN (%s)`, ph) //nolint:gosec // G201: %s is a generated ?-placeholder list
 	all := append([]any{b2i(starred), int64(userID)}, args...)
 	_, err := s.db.ExecContext(ctx, q, all...)
 	return mapErr(err)
@@ -211,7 +211,7 @@ func (s *Store) DeleteEntry(ctx context.Context, userID, entryID core.ID) error 
 	if err != nil {
 		return mapErr(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 	if err := q.InsertTombstone(ctx, sqlc.InsertTombstoneParams{
 		FeedID:    int64(e.FeedID),

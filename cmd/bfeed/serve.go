@@ -49,7 +49,7 @@ func runServe() int {
 		if d <= 0 {
 			return 0
 		}
-		return time.Duration(rand.Int63n(int64(d) / 4)) // up to 25%
+		return time.Duration(rand.Int63n(int64(d) / 4)) //nolint:gosec // G404: jitter, not security-sensitive
 	}
 	feedSvc := core.NewFeedService(store, fetcher, parse.New(), sanitize.New(), clock.Real{}, log,
 		core.FeedServiceConfig{
@@ -63,7 +63,11 @@ func runServe() int {
 	pollerDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollerDone) }()
 
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: web.New(feedSvc, entrySvc, log)}
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           web.New(feedSvc, entrySvc, log),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	go func() {
 		log.Info("listening", "addr", cfg.ListenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

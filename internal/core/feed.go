@@ -83,7 +83,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (
 func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *ParsedFeed, *FetchResponse, error) {
 	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: rawURL})
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("%w: fetch failed: %v", ErrValidation, err)
+		return "", nil, nil, fmt.Errorf("%w: fetch failed: %w", ErrValidation, err)
 	}
 	if resp.Status != 200 || len(resp.Body) == 0 {
 		return "", nil, nil, fmt.Errorf("%w: feed returned status %d", ErrValidation, resp.Status)

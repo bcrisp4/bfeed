@@ -105,7 +105,7 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 		return out, nil
 	}
 	// Drain body on non-200/304 responses so net/http can reuse the TCP connection.
-	io.Copy(io.Discard, io.LimitReader(resp.Body, c.cfg.MaxBytes)) //nolint:errcheck
+	io.Copy(io.Discard, io.LimitReader(resp.Body, c.cfg.MaxBytes)) //nolint:errcheck,gosec // draining body for conn reuse
 	return out, nil
 }
 
