@@ -77,10 +77,14 @@ func TestDeleteFeedRemovesEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFeed: %v", err)
 	}
-	e1 := &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g1", URL: "https://del.test/1",
-		Title: "T1", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h1"}
-	e2 := &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g2", URL: "https://del.test/2",
-		Title: "T2", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h2"}
+	e1 := &core.Entry{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g1", URL: "https://del.test/1",
+		Title: "T1", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h1",
+	}
+	e2 := &core.Entry{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "del-g2", URL: "https://del.test/2",
+		Title: "T2", Content: "c", PublishedAt: now, CreatedAt: now, Hash: "h2",
+	}
 	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{e1, e2}); err != nil {
 		t.Fatalf("UpsertEntries: %v", err)
 	}
