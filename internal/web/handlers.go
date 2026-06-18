@@ -91,7 +91,9 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Mark read on open.
-	_ = h.entries.MarkRead(r.Context(), uid, []core.ID{id}, true)
+	if err := h.entries.MarkRead(r.Context(), uid, []core.ID{id}, true); err != nil {
+		h.log.Warn("mark read on open", "entry_id", int64(id), "error", err)
+	}
 	// Single-entry: direct feed lookup (only one feed involved).
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
 	vm := toEntryVM(e, feedTitle)
@@ -124,7 +126,9 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_ = h.feeds.Refresh(r.Context(), uid, id)
+	if err := h.feeds.Refresh(r.Context(), uid, id); err != nil {
+		h.log.Warn("refresh feed", "feed_id", int64(id), "error", err)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -140,7 +144,10 @@ func (h *Handler) deleteFeed(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
+// toggleEntry is the shared skeleton for toggleRead and toggleStar.
+// It fetches the entry, calls mutate (which performs the state change), re-fetches
+// the (possibly updated) entry, and renders the entryrow fragment.
+func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, mutate func(ctx context.Context, id core.ID, cur *core.Entry) error) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -150,8 +157,9 @@ func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	read := e.Status != core.StatusRead
-	_ = h.entries.MarkRead(r.Context(), uid, []core.ID{id}, read)
+	if err := mutate(r.Context(), id, e); err != nil {
+		h.log.Warn("toggle entry", "entry_id", int64(id), "error", err)
+	}
 	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
 		e = updated
 	}
@@ -161,24 +169,17 @@ func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
+	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
+		read := cur.Status != core.StatusRead
+		return h.entries.MarkRead(ctx, uid, []core.ID{id}, read)
+	})
+}
+
 func (h *Handler) toggleStar(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(w, r)
-	if !ok {
-		return
-	}
-	e, err := h.entries.Get(r.Context(), uid, id)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	_ = h.entries.Star(r.Context(), uid, []core.ID{id}, !e.Starred)
-	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
-		e = updated
-	}
-	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
-	if err := h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle)); err != nil {
-		h.log.Error("template execute", "template", "entryrow/entryrow", "error", err)
-	}
+	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
+		return h.entries.Star(ctx, uid, []core.ID{id}, !cur.Starred)
+	})
 }
 
 func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +187,9 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_ = h.entries.Delete(r.Context(), uid, id)
+	if err := h.entries.Delete(r.Context(), uid, id); err != nil {
+		h.log.Warn("delete entry", "entry_id", int64(id), "error", err)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -195,6 +198,7 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) feedTitleMap(ctx context.Context) map[core.ID]string {
 	feeds, err := h.feeds.List(ctx, uid)
 	if err != nil {
+		h.log.Error("list feeds for title map", "error", err)
 		return map[core.ID]string{}
 	}
 	m := make(map[core.ID]string, len(feeds))
@@ -206,16 +210,12 @@ func (h *Handler) feedTitleMap(ctx context.Context) map[core.ID]string {
 
 // singleFeedTitle looks up the title for one feed; used by single-entry handlers.
 func (h *Handler) singleFeedTitle(ctx context.Context, feedID core.ID) string {
-	feeds, err := h.feeds.List(ctx, uid)
+	f, err := h.feeds.Get(ctx, uid, feedID)
 	if err != nil {
+		h.log.Warn("get feed for title", "feed_id", int64(feedID), "error", err)
 		return ""
 	}
-	for _, f := range feeds {
-		if f.ID == feedID {
-			return f.Title
-		}
-	}
-	return ""
+	return f.Title
 }
 
 func parseID(w http.ResponseWriter, r *http.Request) (core.ID, bool) {

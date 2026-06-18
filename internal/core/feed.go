@@ -30,6 +30,10 @@ func NewFeedService(store Store, fetcher Fetcher, parser FeedParser, san Sanitiz
 
 var _ FeedPoller = (*FeedService)(nil)
 
+func (s *FeedService) Get(ctx context.Context, userID, feedID ID) (*Feed, error) {
+	return s.store.GetFeed(ctx, userID, feedID)
+}
+
 func (s *FeedService) List(ctx context.Context, userID ID) ([]*Feed, error) {
 	return s.store.ListFeeds(ctx, userID)
 }
@@ -61,12 +65,14 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (
 	}
 	f.ID = id
 	if err := s.ingest(ctx, f, pf); err != nil {
+		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
 		return nil, err
 	}
 	f.CheckedAt = &now
 	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
 	f.ErrorCount = 0
 	if err := s.store.UpdateFeed(ctx, f); err != nil {
+		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
 		return nil, err
 	}
 	return f, nil
