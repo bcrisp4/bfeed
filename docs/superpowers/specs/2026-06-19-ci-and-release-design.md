@@ -234,7 +234,11 @@ The existing `Dockerfile` (multi-stage, builds from source) stays for local
   "License: TBD" line with an Apache-2.0 link.
 - **`CLAUDE.md`**: update the Commands section — the lint bar becomes
   `golangci-lint run` (gofumpt/goimports via golangci v2), `make` targets
-  documented, sqlc-sync mentioned as CI-enforced.
+  documented, sqlc-sync mentioned as CI-enforced; add a pointer to `docs/releasing.md`.
+- **`docs/releasing.md`** (new): how to cut a release — annotated semver tag
+  (`git tag -a vX.Y.Z`), what the pipeline produces, how to verify (`gh release
+  view`, `podman pull`, `gh attestation verify`), prerelease behaviour, and
+  rollback guidance. Linked from README's `## Docs` section and from CLAUDE.md.
 - **One-time gofumpt reformat** of all existing `.go` files — **separate commit**,
   done before/independent of wiring CI, so the CI-enabling commits stay reviewable.
 
@@ -246,7 +250,8 @@ The existing `Dockerfile` (multi-stage, builds from source) stays for local
 4. `ci: add CI workflow (test, lint, sqlc-sync)`.
 5. `ci: add release pipeline (goreleaser binaries + GHCR image)` — `.goreleaser.yaml`,
    `Dockerfile.release`, `release.yml`.
-6. `docs: update CLAUDE.md build/lint commands`.
+6. `docs: add release process guide` — `docs/releasing.md` + README pointer.
+7. `docs: update CLAUDE.md build/lint commands` + link release guide.
 
 (Exact grouping can flex; the gofumpt reformat MUST stand alone.)
 
