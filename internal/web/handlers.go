@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -246,6 +247,6 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		Starred:   e.Starred,
 		FeedID:    e.FeedID,
 		FeedTitle: feedTitle,
-		Published: e.PublishedAt.Format("2006-01-02 15:04"),
+		Published: humanizeSince(e.PublishedAt, time.Now()),
 	}
 }
