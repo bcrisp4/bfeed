@@ -39,3 +39,21 @@ func TestSanitizeDropsTrackingPixel(t *testing.T) {
 		t.Fatalf("real image dropped: %s", out)
 	}
 }
+
+// Regression guards: active-URL schemes must be neutralised by the bluemonday allowlist.
+
+func TestSanitizeNeutralisesJavascriptLinks(t *testing.T) {
+	in := `<a href="javascript:alert(1)">x</a>`
+	out := New().Sanitize(in, "https://b.test/")
+	if strings.Contains(out, "javascript:") {
+		t.Fatalf("javascript: scheme not neutralised: %s", out)
+	}
+}
+
+func TestSanitizeNeutralisesDataURIScriptSrc(t *testing.T) {
+	in := `<img src="data:text/html,<script>alert(1)</script>">`
+	out := New().Sanitize(in, "https://b.test/")
+	if strings.Contains(strings.ToLower(out), "data:text/html") {
+		t.Fatalf("data:text/html URI not neutralised in img src: %s", out)
+	}
+}

@@ -102,7 +102,10 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 			return nil, fmt.Errorf("read body: %w", err)
 		}
 		out.Body = body
+		return out, nil
 	}
+	// Drain body on non-200/304 responses so net/http can reuse the TCP connection.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, c.cfg.MaxBytes)) //nolint:errcheck
 	return out, nil
 }
 

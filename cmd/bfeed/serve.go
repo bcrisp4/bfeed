@@ -60,7 +60,8 @@ func runServe() int {
 	poller := core.NewPoller(store, feedSvc, clock.Real{}, log,
 		core.PollerConfig{Tick: cfg.PollTick, BatchSize: cfg.BatchSize, Workers: cfg.FeedWorkers})
 
-	go poller.Run(ctx)
+	pollerDone := make(chan struct{})
+	go func() { poller.Run(ctx); close(pollerDone) }()
 
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: web.New(feedSvc, entrySvc, log)}
 	go func() {
@@ -77,6 +78,11 @@ func runServe() int {
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Error("shutdown", "error", err)
+	}
+	select {
+	case <-pollerDone:
+	case <-time.After(15 * time.Second):
+		log.Warn("poller did not drain in time")
 	}
 	return 0
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 
@@ -53,7 +54,12 @@ func runHealthcheck() int {
 	if err != nil {
 		return 1
 	}
-	resp, err := http.Get("http://127.0.0.1" + cfg.ListenAddr + "/healthz") //nolint:gosec
+	_, port, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		// Fall back: treat ListenAddr as ":port" style or bare addr.
+		port = cfg.ListenAddr
+	}
+	resp, err := http.Get("http://127.0.0.1:" + port + "/healthz") //nolint:gosec
 	if err != nil || resp.StatusCode != 200 {
 		return 1
 	}

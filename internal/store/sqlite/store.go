@@ -50,5 +50,8 @@ func mapErr(err error) error {
 	if strings.Contains(msg, "UNIQUE constraint failed") {
 		return core.ErrConflict
 	}
+	if strings.Contains(msg, "FOREIGN KEY constraint failed") {
+		return core.ErrConflict
+	}
 	return err
 }

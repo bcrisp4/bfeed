@@ -118,9 +118,6 @@ func (s *Store) UpdateFeed(ctx context.Context, f *core.Feed) error {
 // new feed_id and old tombstones can never match.
 // Returns ErrNotFound if the feed does not exist or belongs to another user.
 func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
-	if _, err := s.GetFeed(ctx, userID, feedID); err != nil {
-		return err
-	}
 	n, err := s.q.DeleteFeed(ctx, sqlc.DeleteFeedParams{
 		ID:     int64(feedID),
 		UserID: int64(userID),

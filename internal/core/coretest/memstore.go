@@ -102,7 +102,6 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	}
 	for eid, e := range s.entries {
 		if e.FeedID == id {
-			s.tombstones[tkey(id, e.GUID)] = true
 			delete(s.entries, eid)
 		}
 	}

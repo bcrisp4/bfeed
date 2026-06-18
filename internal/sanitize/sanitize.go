@@ -63,7 +63,7 @@ func (s *Sanitizer) preprocess(in, baseURL string) string {
 			if c.Type == html.ElementNode && c.Data == "a" {
 				setAttr(c, "href", cleanURL(base, attr(c, "href")))
 			}
-			if c.Type == html.ElementNode && (c.Data == "img" || c.Data == "a") {
+			if c.Type == html.ElementNode && c.Data == "img" {
 				if a := attr(c, "src"); a != "" {
 					setAttr(c, "src", resolveURL(base, a))
 				}
