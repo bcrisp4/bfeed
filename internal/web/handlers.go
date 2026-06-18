@@ -70,10 +70,14 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 	}
 	// htmx "load more" requests only the rows; full-page requests get the full layout.
 	if r.Header.Get("HX-Request") == "true" && r.URL.Query().Get("cursor") != "" {
-		_ = h.tmpl["entries"].ExecuteTemplate(w, "entrylist", vm)
+		if err := h.tmpl["entries"].ExecuteTemplate(w, "entrylist", vm); err != nil {
+			h.log.Error("template execute", "template", "entries/entrylist", "error", err)
+		}
 		return
 	}
-	_ = h.tmpl["entries"].ExecuteTemplate(w, "layout", vm)
+	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "entries/layout", "error", err)
+	}
 }
 
 func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +95,9 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	// Single-entry: direct feed lookup (only one feed involved).
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
 	vm := toEntryVM(e, feedTitle)
-	_ = h.tmpl["entry"].ExecuteTemplate(w, "layout", vm)
+	if err := h.tmpl["entry"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "entry/layout", "error", err)
+	}
 }
 
 func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +106,9 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	_ = h.tmpl["feeds"].ExecuteTemplate(w, "layout", map[string]any{"Feeds": feeds})
+	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", map[string]any{"Feeds": feeds}); err != nil {
+		h.log.Error("template execute", "template", "feeds/layout", "error", err)
+	}
 }
 
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
@@ -144,9 +152,13 @@ func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	read := e.Status != core.StatusRead
 	_ = h.entries.MarkRead(r.Context(), uid, []core.ID{id}, read)
-	e, _ = h.entries.Get(r.Context(), uid, id)
+	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
+		e = updated
+	}
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
-	_ = h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle))
+	if err := h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle)); err != nil {
+		h.log.Error("template execute", "template", "entryrow/entryrow", "error", err)
+	}
 }
 
 func (h *Handler) toggleStar(w http.ResponseWriter, r *http.Request) {
@@ -160,9 +172,13 @@ func (h *Handler) toggleStar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.entries.Star(r.Context(), uid, []core.ID{id}, !e.Starred)
-	e, _ = h.entries.Get(r.Context(), uid, id)
+	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
+		e = updated
+	}
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
-	_ = h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle))
+	if err := h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle)); err != nil {
+		h.log.Error("template execute", "template", "entryrow/entryrow", "error", err)
+	}
 }
 
 func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
