@@ -41,6 +41,10 @@ func (h *Handler) starred(w http.ResponseWriter, r *http.Request) {
 	h.renderList(w, r, "Starred", "/starred", core.EntryFilter{Starred: &star})
 }
 
+func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
+	h.renderList(w, r, "History", "/history", core.EntryFilter{Order: core.OrderReadAtDesc})
+}
+
 func (h *Handler) feedEntries(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
