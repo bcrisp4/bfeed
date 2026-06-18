@@ -135,3 +135,29 @@ func TestHotListUsesIndex(t *testing.T) {
 		t.Fatalf("hot list query not using covering index:\n%s", plan)
 	}
 }
+
+func TestHistoryUsesIndex(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	rows, err := s.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN SELECT id FROM entries WHERE user_id=1 AND read_at IS NOT NULL ORDER BY read_at DESC, id DESC LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("history query sorts in memory:\n%s", plan)
+	}
+	if !strings.Contains(plan, "idx_entries_readhist") {
+		t.Fatalf("history query not using partial index:\n%s", plan)
+	}
+}
