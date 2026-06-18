@@ -1,0 +1,14 @@
+{{define "content"}}
+<h1>Feeds</h1>
+{{range .Feeds}}
+<div class="entry" id="feed-{{.ID}}">
+  <h2><a href="/feeds/{{.ID}}">{{.Title}}</a></h2>
+  <div class="meta">{{.FeedURL}}{{if .LastError}} · <span style="color:#c0392b">error: {{.LastError}}</span>{{end}}</div>
+  <div class="actions">
+    <button hx-post="/feeds/{{.ID}}/refresh" hx-target="#feed-{{.ID}}" hx-swap="none">Refresh</button>
+    <button hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
+      hx-confirm="Delete feed and all its entries?">Delete</button>
+  </div>
+</div>
+{{else}}<p>No feeds yet. Subscribe from the <a href="/">home page</a>.</p>{{end}}
+{{end}}

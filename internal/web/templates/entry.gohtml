@@ -1,0 +1,7 @@
+{{define "content"}}
+<p class="meta"><a href="/feeds/{{.FeedID}}">{{.FeedTitle}}</a> · {{.Published}}</p>
+<h1>{{.Title}}</h1>
+{{if .Author}}<p class="meta">by {{.Author}}</p>{{end}}
+<p><a href="{{.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a></p>
+<article>{{.Content}}</article>
+{{end}}
