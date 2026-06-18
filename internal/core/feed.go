@@ -82,7 +82,7 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	if resp.Status != 200 || len(resp.Body) == 0 {
 		return "", nil, nil, fmt.Errorf("%w: feed returned status %d", ErrValidation, resp.Status)
 	}
-	if pf, perr := s.parser.Parse(resp.Body, rawURL); perr == nil && pf.Title != "" || perr == nil && len(pf.Entries) > 0 {
+	if pf, perr := s.parser.Parse(resp.Body, rawURL); perr == nil && pf != nil && (pf.Title != "" || len(pf.Entries) > 0) {
 		return rawURL, pf, resp, nil
 	}
 	urls, derr := s.parser.Discover(resp.Body, rawURL)

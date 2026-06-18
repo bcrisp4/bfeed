@@ -6,6 +6,7 @@ package coretest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ func NewMemStore() *MemStore {
 
 var _ core.Store = (*MemStore)(nil)
 
-func tkey(f core.ID, g string) string { return string(rune(f)) + "|" + g }
+func tkey(f core.ID, g string) string { return fmt.Sprintf("%d|%s", f, g) }
 
 func (s *MemStore) CreateFeed(_ context.Context, f *core.Feed) (core.ID, error) {
 	s.mu.Lock()
@@ -75,6 +76,10 @@ func (s *MemStore) ListDueFeeds(_ context.Context, now time.Time, limit int) ([]
 			cp := *f
 			out = append(out, &cp)
 		}
+	}
+	// Order is unspecified in this test double; truncate to honor limit.
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

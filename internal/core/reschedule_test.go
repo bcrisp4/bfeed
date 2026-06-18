@@ -42,3 +42,13 @@ func TestRescheduleHonorsRetryAfter(t *testing.T) {
 		t.Fatalf("retry-after not honored: %v", d)
 	}
 }
+
+func TestRescheduleRetryAfterBeatsBackoff(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	cfg := RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour}
+	// errorCount=1 → backoff 30m; Retry-After 2h must win.
+	d := PollReschedule(now, cfg, 1, 2*time.Hour, noJitter).Sub(now)
+	if d != 2*time.Hour {
+		t.Fatalf("retry-after should beat backoff: got %v", d)
+	}
+}
