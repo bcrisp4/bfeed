@@ -19,12 +19,39 @@ GHCR container image with SBOMs and signed provenance.
 | Target platforms | `linux/amd64` + `linux/arm64` (binaries and image) |
 | Lint | golangci-lint **v2**, mirror pi5 (gofumpt + goimports), generated code excluded |
 | Image build | **goreleaser owns images** (`dockers` + `docker_manifests`) from prebuilt binaries |
-| Go toolchain | Add `toolchain go1.26.4` to `go.mod`; Dockerfile base already `golang:1.26` |
+| Container engine | **podman** everywhere — `use: podman` in goreleaser (local + CI), `make image` uses podman. GitHub `ubuntu-latest` ships podman; gives local/CI parity. |
+| Go toolchain | Add `toolchain go1.26.4` to `go.mod` (= current latest); Dockerfile base already `golang:1.26` |
 | gofumpt reformat | One-time, in **its own commit** (separate from feature commits) |
 | License | **Apache-2.0** — `LICENSE` file + README update; archives ship it |
+| Tool versions | Pin to **latest available** as of 2026-06-19 (table below) |
 
 Out of scope (YAGNI): Codecov upload (coverage → step summary only), darwin/windows
 binaries, Homebrew tap, Cosign beyond GitHub attestation, hardware-test path.
+
+## Tool & action versions (checked 2026-06-19 — latest available)
+
+Pin everything; SHA-pin all GitHub Actions (tag is a comment, SHA is the anchor).
+
+| Tool / action | Version | Pin (SHA for actions) |
+|---|---|---|
+| Go toolchain | `go1.26.4` | `go.mod` `toolchain` directive |
+| golangci-lint | `v2.12.2` | action input `version: v2.12.2` |
+| sqlc | `v1.31.1` | `go install …/sqlc@v1.31.1` |
+| goreleaser | `v2.16.0` | action input `version: "~> v2"` (tracks latest v2) |
+| syft (SBOM) | `v1.45.1` | `sbom-action/download-syft` (fetches latest) |
+| govulncheck | latest | `go run …/govulncheck@latest` |
+| actions/checkout | `v7.0.0` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` |
+| actions/setup-go | `v6.4.0` | `4a3601121dd01d1626a1e23e37211e3254c1c06c` |
+| golangci/golangci-lint-action | `v9.2.1` | `82606bf257cbaff209d206a39f5134f0cfbfd2ee` |
+| goreleaser/goreleaser-action | `v7.2.2` | `5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89` |
+| anchore/sbom-action | `v0.24.0` | `e22c389904149dbc22b58101806040fa8d37a610` |
+| docker/setup-qemu-action | `v4.1.0` | `06116385d9baf250c9f4dcb4858b16962ea869c3` |
+| actions/attest-build-provenance | `v4.1.0` | `a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32` |
+
+No `docker/setup-buildx-action` (podman builds multi-arch natively via QEMU —
+`setup-qemu-action` registers the binfmt handlers) and no `docker/login-action`
+(GHCR auth via an explicit `podman login` step). Re-check all "latest" tags at
+implementation time and bump if newer.
 
 ## Why this differs from pi5_exporter
 
@@ -39,9 +66,13 @@ bfeed is **not** a copy of pi5's config. Deltas:
    goose migrations are committed-but-never-hand-edited.
 5. **Cross-compile is trivial** (pure Go) — arm64 builds natively on the amd64
    runner; no QEMU compile. The COPY-only release image means QEMU (for the arm64
-   image's `docker build`) only runs a `COPY` + metadata, never a `go build`.
+   image build) only runs a `COPY` + metadata, never a `go build`.
 6. **goreleaser builds the images** (pi5 used a separate `build-push-action` job
    compiling from source). One tool stamps the version into binaries and images.
+7. **podman, not docker** — pi5 used docker/buildx. bfeed uses podman as the
+   container engine both locally (per user preference) and in CI via goreleaser's
+   `use: podman`, so the local `make image` path and the release path use the same
+   tool. No buildx; podman does multi-arch via QEMU binfmt.
 
 ## Deliverables
 
@@ -77,12 +108,17 @@ run:        # build + run with required env
             BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=text \
               go run ./cmd/bfeed serve
 
+# container image — podman, local host arch, from the dev Dockerfile
+image:      podman build -t $(BINARY):$(VERSION) .
+
 clean:      rm -f $(BINARY)
 ```
 
 `.PHONY` on all. `lint`/`fmt` delegate to golangci-lint so the Makefile and CI
 never drift. `run` bakes in the **required** `BFEED_BASE_URL` (per CLAUDE.md it has
-no default and is mandatory).
+no default and is mandatory). `image` uses **podman** (single-arch, host) against
+the existing multi-stage `Dockerfile` for local dev; the multi-arch release image
+is goreleaser's job (also podman).
 
 ### 2. `.golangci.yml`
 
@@ -112,7 +148,7 @@ Jobs:
   -coverprofile=coverage.out ./...`; coverage summary (`go tool cover -func | tail
   -1`) → `$GITHUB_STEP_SUMMARY`; then cross-compile arm64 to `/dev/null`
   (`GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /dev/null ./cmd/bfeed`).
-- **lint**: golangci-lint-action `version: v2.12` (match pi5) + `govulncheck`
+- **lint**: golangci-lint-action `version: v2.12.2` (latest) + `govulncheck`
   (`go run golang.org/x/vuln/cmd/govulncheck@latest ./...`).
 - **sqlc** (bfeed-specific): install pinned sqlc
   (`go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1` — the version currently
@@ -131,11 +167,12 @@ Trigger: semver tags only — `v[0-9]+.[0-9]+.[0-9]+` and `v[0-9]+.[0-9]+.[0-9]+
 - Permissions: `contents: write` (release), `packages: write` (GHCR),
   `id-token: write` + `attestations: write` (keyless provenance).
 - Steps: checkout `fetch-depth: 0` (changelog) + `persist-credentials: false`;
-  setup-go (`go-version-file`); `docker/setup-qemu-action` + `docker/setup-buildx-action`
-  (needed for the arm64 image's COPY-only build); `anchore/sbom-action/download-syft`;
-  GHCR `docker/login-action` (`${{ github.actor }}` / `secrets.GITHUB_TOKEN`);
-  `goreleaser/goreleaser-action` `version: ~> v2`, `args: release --clean`,
-  `env GITHUB_TOKEN`.
+  setup-go (`go-version-file`); `docker/setup-qemu-action` (registers QEMU binfmt
+  handlers — podman uses these for the arm64 COPY-only image; **no buildx**);
+  `anchore/sbom-action/download-syft`; **podman login to GHCR** —
+  `echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin`
+  (podman is preinstalled on `ubuntu-latest`); `goreleaser/goreleaser-action`
+  `version: "~> v2"`, `args: release --clean`, `env GITHUB_TOKEN`.
 - **Attestation**: `actions/attest-build-provenance` over `dist/checksums.txt`
   (binary archives). For the image: read the published manifest digest(s) from
   `dist/artifacts.json` (jq `select(.type=="Docker Manifest")` / published image
@@ -158,13 +195,14 @@ v2. Sections:
 - **checksum**: sha256, `checksums.txt`.
 - **sboms**: `artifacts: archive` (Syft, per-archive).
 - **dockers**: two entries (amd64, arm64), each `dockerfile: Dockerfile.release`,
-  `use: buildx`, `goos: linux` + respective `goarch`, image template
+  **`use: podman`**, `goos: linux` + respective `goarch`, image template
   `ghcr.io/bcrisp4/bfeed:{{ .Version }}-{amd64|arm64}`, `build_flag_templates`
   carrying `--platform=linux/{arch}` and OCI labels
   (`org.opencontainers.image.{version,revision,source}`).
-- **docker_manifests**: combine the two arch images into
+- **docker_manifests**: **`use: podman`**; combine the two arch images into
   `ghcr.io/bcrisp4/bfeed:{{ .Version }}`, `:{{ .Major }}.{{ .Minor }}`, and
   `:latest` (prerelease-aware — `:latest` only for non-prerelease tags).
+  (goreleaser drives `podman manifest` under the hood; verify at implementation.)
 - **changelog**: `use: github`, exclude `^docs:`, `^test:`, `^chore:`, `^ci:`.
 - **release**: `github: {owner: bcrisp4, name: bfeed}`, `prerelease: auto`.
 
@@ -186,7 +224,7 @@ CMD ["serve"]
 ```
 
 The existing `Dockerfile` (multi-stage, builds from source) stays for local
-`docker build` dev. This works because the binary is fully self-contained
+`make image` (podman) dev. This works because the binary is fully self-contained
 (migrations, templates, `static/` all `go:embed`-ed).
 
 ### 7. Repo edits
@@ -227,6 +265,12 @@ The existing `Dockerfile` (multi-stage, builds from source) stays for local
   goreleaser versions — fallback (binary-only attestation) documented above.
 - **gofumpt reformat churn** could be sizeable; isolating it in commit 1 keeps the
   rest reviewable.
+- **podman + goreleaser multi-arch + manifests** is less trodden than docker/buildx.
+  `use: podman` is documented and `ubuntu-latest` ships podman, but validate the
+  full `goreleaser release --snapshot` (images + manifest) locally with podman
+  before cutting a real tag. Fallback if podman manifest push misbehaves in CI:
+  switch the goreleaser `dockers`/`docker_manifests` `use:` to `buildx` for CI only
+  (local `make image` stays podman) — but try podman-everywhere first.
 - **sqlc version pin** in CI must match the version used to generate the committed
   code, or the sync check produces spurious diffs. Pinned to v1.31.1 (locally
   installed); no version stamp in the generated header to confirm against, so the
