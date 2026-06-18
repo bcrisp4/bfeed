@@ -127,7 +127,7 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	if f.Cursor != nil {
 		// Strictly older than the cursor (newest-first keyset).
 		where = append(where, "(published_at < ? OR (published_at = ? AND id < ?))")
-		args = append(args, toUnix(f.Cursor.PublishedAt), toUnix(f.Cursor.PublishedAt), int64(f.Cursor.ID))
+		args = append(args, f.Cursor.Key, f.Cursor.Key, int64(f.Cursor.ID))
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > 200 {
@@ -161,7 +161,7 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	var next *core.Cursor
 	if len(out) > limit {
 		last := out[limit-1]
-		next = &core.Cursor{PublishedAt: last.PublishedAt, ID: last.ID}
+		next = &core.Cursor{Key: last.PublishedAt.Unix(), ID: last.ID}
 		out = out[:limit]
 	}
 	return out, next, nil

@@ -4,12 +4,12 @@ import (
 	"encoding/base64"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// EncodeCursor serialises a keyset position as base64("<unixsecs>:<id>").
+// EncodeCursor serialises a keyset position as base64("<key>:<id>"),
+// where key is the active order column in unix seconds.
 func EncodeCursor(c Cursor) string {
-	raw := strconv.FormatInt(c.PublishedAt.UTC().Unix(), 10) + ":" + strconv.FormatInt(int64(c.ID), 10)
+	raw := strconv.FormatInt(c.Key, 10) + ":" + strconv.FormatInt(int64(c.ID), 10)
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
@@ -23,10 +23,10 @@ func DecodeCursor(s string) *Cursor {
 	if len(parts) != 2 {
 		return nil
 	}
-	sec, err1 := strconv.ParseInt(parts[0], 10, 64)
+	key, err1 := strconv.ParseInt(parts[0], 10, 64)
 	id, err2 := strconv.ParseInt(parts[1], 10, 64)
 	if err1 != nil || err2 != nil {
 		return nil
 	}
-	return &Cursor{PublishedAt: time.Unix(sec, 0).UTC(), ID: ID(id)}
+	return &Cursor{Key: key, ID: ID(id)}
 }
