@@ -124,9 +124,16 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 		where = append(where, "starred = ?")
 		args = append(args, b2i(*f.Starred))
 	}
+	// Order column: history (read_at) vs default (published_at). The column name
+	// comes from this closed switch, never from user input.
+	orderCol := "published_at"
+	if f.Order == core.OrderReadAtDesc {
+		orderCol = "read_at"
+		where = append(where, "read_at IS NOT NULL") // history membership
+	}
 	if f.Cursor != nil {
 		// Strictly older than the cursor (newest-first keyset).
-		where = append(where, "(published_at < ? OR (published_at = ? AND id < ?))")
+		where = append(where, fmt.Sprintf("(%s < ? OR (%s = ? AND id < ?))", orderCol, orderCol))
 		args = append(args, f.Cursor.Key, f.Cursor.Key, int64(f.Cursor.ID))
 	}
 	limit := f.Limit
@@ -136,8 +143,8 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	query := fmt.Sprintf(
 		`SELECT id, user_id, feed_id, guid, url, title, author, content, summary,
 		        published_at, status, starred, read_at, created_at, hash
-		 FROM entries WHERE %s ORDER BY published_at DESC, id DESC LIMIT ?`,
-		strings.Join(where, " AND "))
+		 FROM entries WHERE %s ORDER BY %s DESC, id DESC LIMIT ?`,
+		strings.Join(where, " AND "), orderCol)
 	args = append(args, int64(limit+1)) // fetch one extra to detect next page
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -161,7 +168,7 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	var next *core.Cursor
 	if len(out) > limit {
 		last := out[limit-1]
-		next = &core.Cursor{Key: last.PublishedAt.Unix(), ID: last.ID}
+		next = &core.Cursor{Key: sortKey(last, f.Order), ID: last.ID}
 		out = out[:limit]
 	}
 	return out, next, nil
@@ -231,4 +238,12 @@ func placeholders(ids []core.ID) (string, []any) {
 		args[i] = int64(id)
 	}
 	return strings.Join(parts, ","), args
+}
+
+// sortKey returns the unix-seconds value of the entry's active order column.
+func sortKey(e *core.Entry, ord core.Order) int64 {
+	if ord == core.OrderReadAtDesc && e.ReadAt != nil {
+		return e.ReadAt.Unix()
+	}
+	return e.PublishedAt.Unix()
 }

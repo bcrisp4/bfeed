@@ -161,3 +161,67 @@ func TestHistoryUsesIndex(t *testing.T) {
 		t.Fatalf("history query not using partial index:\n%s", plan)
 	}
 }
+
+func TestHistoryOrderAndKeyset(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fid := seedFeed(t, s)
+
+	// Insert 5 entries (ids increase with insertion order).
+	ids := make([]core.ID, 5)
+	for i := 0; i < 5; i++ {
+		p := time.Unix(int64(1_700_000_100+i), 0).UTC()
+		ins, err := s.UpsertEntries(ctx, fid, []*core.Entry{mkEntry(fid, string(rune('a'+i)), p)})
+		if err != nil || len(ins) != 1 {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+		ids[i] = ins[0].ID
+	}
+
+	// Set read_at directly (SetStatus uses wall-clock; we need known values).
+	// id[1] and id[2] tie on read_at=1002 -> id DESC must order id2 before id1.
+	// id[4] stays unread (read_at NULL) -> excluded from history.
+	for id, ra := range map[core.ID]int64{ids[0]: 1000, ids[1]: 1002, ids[2]: 1002, ids[3]: 1004} {
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE entries SET status='read', read_at=? WHERE id=?`, ra, int64(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []core.ID{ids[3], ids[2], ids[1], ids[0]} // read_at desc, id desc tiebreak
+
+	// Page 1.
+	page1, cur, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Order: core.OrderReadAtDesc, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 2 || page1[0].ID != want[0] || page1[1].ID != want[1] {
+		t.Fatalf("page1 ids = %d,%d want %d,%d", idOf(page1, 0), idOf(page1, 1), want[0], want[1])
+	}
+	if cur == nil || cur.Key != 1002 || cur.ID != ids[2] {
+		t.Fatalf("cursor = %+v", cur)
+	}
+
+	// Page 2 via keyset.
+	page2, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Order: core.OrderReadAtDesc, Limit: 2, Cursor: cur})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2) != 2 || page2[0].ID != want[2] || page2[1].ID != want[3] {
+		t.Fatalf("page2 ids = %d,%d want %d,%d", idOf(page2, 0), idOf(page2, 1), want[2], want[3])
+	}
+
+	// The unread entry (ids[4]) must never appear.
+	for _, e := range append(page1, page2...) {
+		if e.ID == ids[4] {
+			t.Fatal("unread entry leaked into history")
+		}
+	}
+}
+
+func idOf(es []*core.Entry, i int) core.ID {
+	if i < len(es) {
+		return es[i].ID
+	}
+	return -1
+}

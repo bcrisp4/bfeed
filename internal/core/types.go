@@ -67,7 +67,8 @@ type Tombstone struct {
 type Order int
 
 const (
-	OrderPublishedDesc Order = iota // default: newest first
+	OrderPublishedDesc Order = iota // default: newest published first
+	OrderReadAtDesc                 // history: most-recently-read first
 )
 
 // Cursor is the keyset pagination position: the active order-column value
