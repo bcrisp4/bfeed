@@ -88,7 +88,7 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| History view (recently-read, by `read_at`) | §9.2, §18 | `idx_entries_readhist`; `/history` route | Cheap | deferred |
+| History view (recently-read, by `read_at`) | §9.2, §18 | `idx_entries_readhist`; `/history` route | Cheap | done (iter 2) |
 | Bulk mark-all-read | §9.2 | bulk UPDATE + button | High value for daily driver | deferred |
 | Feed enable/disable via UI | §9.1 | toggle route (schema `feeds.disabled` already present; poller already respects it) | UI only; backend ready | deferred |
 | Starred view | §18 | `/starred` route | **Shipped in MVP** (star action would be a half-feature without it) — see mvp-design §12 | done (MVP) |
@@ -154,7 +154,8 @@ So a future iteration can see at a glance what it adds.
 - Columns: `users.password_hash`, `users.is_admin`, `users.entry_ttl_days`;
   `feeds.category_id`, `feeds.fetch_full_content`; per-feed interval-override columns.
 - Indexes: `idx_categories_user`, `idx_api_tokens_user`, `idx_sessions_user`,
-  `idx_tombstones_age`, `idx_entries_readhist`, `idx_entries_ttl`.
+  `idx_tombstones_age`, `idx_entries_ttl`.
+  (`idx_entries_readhist` shipped in iter 2 with the history view.)
 
 ### B2. Config (env) additions
 - Scheduling: `BFEED_BATCH_SIZE`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`,
@@ -207,3 +208,4 @@ Sequence is a guide, not a contract — reorder by what hurts most in daily use.
 
 _(Move shipped items here with their iteration number.)_
 - Starred view (`/starred`) — MVP.
+- History view (`/history`, read entries by `read_at`) — iter 2.

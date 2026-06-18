@@ -34,7 +34,7 @@ Everything not on that loop is deferred. Leanest possible first ship; iterate fr
 | Data portability | — | OPML import/export (§19) |
 | Mobile install | — | PWA add-to-home (manifest/icons) (§18) |
 | Theme | — | Light/dark/system toggle (§18) |
-| Reading extras | — | History view, bulk mark-all-read (§9.2) |
+| Reading extras | — | Bulk mark-all-read (§9.2) |
 | Observability | **slog only** | Prometheus metrics, `/metrics` (§20) |
 
 ## 3. What's IN (the MVP feature set)
@@ -298,8 +298,8 @@ CREATE TABLE tombstones (
 
 > Deferred features add tables/columns additively: `categories` + `feeds.category_id`,
 > `api_tokens`, `sessions`, `app_settings`, `entries_fts` (+ triggers), `users.password_hash`,
-> `users.is_admin`, `users.entry_ttl_days`, `feeds.fetch_full_content`, `idx_entries_readhist`,
-> `idx_entries_ttl`. None require rewriting MVP tables.
+> `users.is_admin`, `users.entry_ttl_days`, `feeds.fetch_full_content`, `idx_entries_ttl`.
+> None require rewriting MVP tables.
 
 Queries authored as SQL, compiled by **sqlc**. Pagination is **keyset** on `(published_at, id)`,
 never OFFSET. Driver errors mapped to core sentinels.
@@ -364,6 +364,7 @@ GET  /                      unread list (home), keyset "load more"
 GET  /feeds                 all feeds (with last error surfaced)
 GET  /feeds/{id}            entries for one feed
 GET  /starred               starred entries (completes the star action; uses idx_entries_starred)
+GET  /history               read entries ordered by read_at desc (uses idx_entries_readhist)
 GET  /entries/{id}          single entry read view (sanitised HTML)
 POST /feeds                 subscribe (URL form field; discovery if HTML)
 POST /feeds/{id}/refresh    force refresh now            (htmx fragment)

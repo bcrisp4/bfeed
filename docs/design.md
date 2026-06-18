@@ -569,7 +569,7 @@ CREATE INDEX idx_entries_user_status_pub ON entries(user_id, status, published_a
 CREATE INDEX idx_entries_feed_pub ON entries(feed_id, published_at DESC);
 -- partial indexes: small, cheap to maintain, used only when WHERE matches
 CREATE INDEX idx_entries_starred  ON entries(user_id, published_at DESC) WHERE starred = 1;
-CREATE INDEX idx_entries_readhist ON entries(user_id, read_at DESC)      WHERE read_at IS NOT NULL;
+CREATE INDEX idx_entries_readhist ON entries(user_id, read_at DESC, id DESC) WHERE read_at IS NOT NULL;
 -- matches the TTL delete predicate exactly (read AND not starred), keeps cleanup a cheap scan
 CREATE INDEX idx_entries_ttl ON entries(published_at) WHERE status = 'read' AND starred = 0;
 
@@ -1025,6 +1025,9 @@ These hold across all sessions. Tests must defend them.
   host metrics); image-proxy HMAC key resolved from `BFEED_IMAGE_PROXY_SECRET` else generated
   once and persisted in the new `app_settings` table; added CLI design (§22); clarified the
   search-stemming trade-off.
+- **History (iter 2):** `/history` lists read entries by `read_at` (keyset `(read_at,id)`);
+  `idx_entries_readhist` gains a trailing `id DESC` so the keyset order needs no temp B-tree.
+  Entry rows now render published time as a relative string ("2h ago") across all views.
 
 ## 30. Research basis & sources
 

@@ -67,14 +67,16 @@ type Tombstone struct {
 type Order int
 
 const (
-	OrderPublishedDesc Order = iota // default: newest first
+	OrderPublishedDesc Order = iota // default: newest published first
+	OrderReadAtDesc                 // history: most-recently-read first
 )
 
-// Cursor is the keyset pagination position: the (published_at, id) of the last
-// row returned. The next page selects rows strictly "after" it.
+// Cursor is the keyset pagination position: the active order-column value
+// (unix seconds — published_at or read_at) and id of the last row returned.
+// The next page selects rows strictly "after" it.
 type Cursor struct {
-	PublishedAt time.Time
-	ID          ID
+	Key int64
+	ID  ID
 }
 
 // EntryFilter expresses list criteria; zero value = all entries for the user.

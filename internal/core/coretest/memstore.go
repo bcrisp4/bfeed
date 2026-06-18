@@ -7,6 +7,7 @@ package coretest
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -163,10 +164,48 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		if f.Starred != nil && e.Starred != *f.Starred {
 			continue
 		}
+		if f.Order == core.OrderReadAtDesc && e.ReadAt == nil { // history membership
+			continue
+		}
 		cp := *e
 		out = append(out, &cp)
 	}
-	return out, nil, nil
+	sort.Slice(out, func(i, j int) bool {
+		ki, kj := memSortKey(out[i], f.Order), memSortKey(out[j], f.Order)
+		if ki != kj {
+			return ki > kj
+		}
+		return out[i].ID > out[j].ID
+	})
+	if f.Cursor != nil {
+		var after []*core.Entry
+		for _, e := range out {
+			k := memSortKey(e, f.Order)
+			if k < f.Cursor.Key || (k == f.Cursor.Key && int64(e.ID) < int64(f.Cursor.ID)) {
+				after = append(after, e)
+			}
+		}
+		out = after
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	var next *core.Cursor
+	if len(out) > limit {
+		last := out[limit-1]
+		next = &core.Cursor{Key: memSortKey(last, f.Order), ID: last.ID}
+		out = out[:limit]
+	}
+	return out, next, nil
+}
+
+// memSortKey returns the unix-seconds value of the entry's active order column.
+func memSortKey(e *core.Entry, ord core.Order) int64 {
+	if ord == core.OrderReadAtDesc && e.ReadAt != nil {
+		return e.ReadAt.Unix()
+	}
+	return e.PublishedAt.Unix()
 }
 func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st core.EntryStatus) error {
 	s.mu.Lock()
@@ -174,6 +213,12 @@ func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st cor
 	for _, id := range ids {
 		if e, ok := s.entries[id]; ok && e.UserID == u {
 			e.Status = st
+			if st == core.StatusRead {
+				now := time.Now().UTC()
+				e.ReadAt = &now
+			} else {
+				e.ReadAt = nil
+			}
 		}
 	}
 	return nil

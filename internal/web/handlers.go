@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -38,6 +39,10 @@ func (h *Handler) unread(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) starred(w http.ResponseWriter, r *http.Request) {
 	star := true
 	h.renderList(w, r, "Starred", "/starred", core.EntryFilter{Starred: &star})
+}
+
+func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
+	h.renderList(w, r, "History", "/history", core.EntryFilter{Order: core.OrderReadAtDesc})
 }
 
 func (h *Handler) feedEntries(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +251,6 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		Starred:   e.Starred,
 		FeedID:    e.FeedID,
 		FeedTitle: feedTitle,
-		Published: e.PublishedAt.Format("2006-01-02 15:04"),
+		Published: humanizeSince(e.PublishedAt, time.Now()),
 	}
 }

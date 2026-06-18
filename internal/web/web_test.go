@@ -59,3 +59,31 @@ func TestMarkReadReturnsFragment(t *testing.T) {
 		t.Fatal("entry not marked read")
 	}
 }
+
+func TestHistoryListShowsOnlyReadEntries(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "ReadPost", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "UnreadPost", Status: core.StatusUnread, PublishedAt: time.Unix(200, 0)},
+	})
+	// Mark the first entry read -> it joins history; the second stays unread.
+	if err := store.SetStatus(ctx, core.DefaultUserID, []core.ID{ins[0].ID}, core.StatusRead); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/history", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "ReadPost") {
+		t.Fatalf("history missing read entry:\n%s", body)
+	}
+	if strings.Contains(body, "UnreadPost") {
+		t.Fatalf("history leaked unread entry:\n%s", body)
+	}
+}
