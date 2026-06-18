@@ -13,7 +13,7 @@ This is **iteration 1 (MVP)**, on the `feat/mvp` branch. It implements the core 
 
 Deliberately **not in the MVP yet** (tracked, with the path back, in [`docs/roadmap.md`](docs/roadmap.md)): authentication & multi-user, REST API + tokens, full-text search, categories, full-content scraping, image proxy, adaptive scheduling, OPML import/export, retention cleanup, and Prometheus metrics.
 
-License: TBD (an OSI license will be chosen before any release).
+License: [Apache-2.0](LICENSE).
 
 ## Docs
 

@@ -2,6 +2,8 @@ module github.com/bcrisp4/bfeed
 
 go 1.25.7
 
+toolchain go1.26.4
+
 require (
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/pressly/goose/v3 v3.27.1
