@@ -94,8 +94,10 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 | Starred view | §18 | `/starred` route | **Shipped in MVP** (star action would be a half-feature without it) — see mvp-design §12 | done (MVP) |
 
 ### A8. Retention & maintenance
-MVP keeps **tombstones on delete** but runs **no cleaner and no tombstone pruning** — tombstones
-and read entries accumulate. Fine short-term; revisit before the DB grows large.
+MVP writes a **tombstone on single-entry delete** (to block re-poll resurrection while the feed
+exists); deleting a whole feed cascades its entries *and* tombstones away and writes none. There
+is **no cleaner and no tombstone pruning** — single-delete tombstones and read entries accumulate.
+Fine short-term; revisit before the DB grows large.
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
