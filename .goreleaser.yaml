@@ -38,6 +38,11 @@ checksum:
 sboms:
   - artifacts: archive
 
+# Writes dist/digests.txt (image@sha256 lines) so the release workflow can
+# attest image provenance from a reliable source instead of scraping artifacts.json.
+docker_digest:
+  name_template: "digests.txt"
+
 # dockers_v2 replaces the deprecated dockers+docker_manifests approach.
 # goreleaser v2.16 removed `use: podman` from dockers; dockers_v2 uses
 # docker buildx (available on GitHub-hosted runners and locally with

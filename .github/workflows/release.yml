@@ -32,6 +32,10 @@ jobs:
       # Registers QEMU binfmt handlers so buildx can build the arm64 (COPY-only) image.
       - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
 
+      # dockers_v2 needs a buildx builder with the docker-container driver to
+      # build/push a multi-arch manifest; the runner's default builder can't.
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
       - name: Log in to GHCR
@@ -45,31 +49,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Firm: attest the binary archives (and SBOMs) listed in checksums.txt.
+      # Attest the binary archives (+ SBOMs) listed in checksums.txt.
       - name: Attest binary provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-checksums: dist/checksums.txt
 
-      # Best-effort: attest the published manifest-list digest. Non-fatal if the
-      # artifacts.json shape changes across goreleaser versions (see spec open-risks).
-      - id: digest
-        name: Extract image digest (prefer multi-arch manifest)
-        continue-on-error: true
-        run: |
-          # Prefer the multi-arch manifest-list digest (what users pull); fall
-          # back to a per-arch image digest if no manifest entry is present.
-          v="$(jq -r '.[] | select(.type=="Docker Manifest") | .extra.Digest // empty' dist/artifacts.json | head -n1)"
-          if [ -z "$v" ]; then
-            v="$(jq -r '.[] | select(.type=="Docker Image") | .extra.Digest // empty' dist/artifacts.json | head -n1)"
-          fi
-          echo "value=$v" >> "$GITHUB_OUTPUT"
-
-      - name: Attest image provenance (manifest)
-        if: steps.digest.outputs.value != ''
-        continue-on-error: true
+      # Attest the pushed image(s) from goreleaser's docker_digest output
+      # (dist/digests.txt: "image@sha256:… name" lines) — the reliable source.
+      - name: Attest image provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
-          subject-name: ghcr.io/bcrisp4/bfeed
-          subject-digest: ${{ steps.digest.outputs.value }}
-          push-to-registry: true
+          subject-checksums: dist/digests.txt

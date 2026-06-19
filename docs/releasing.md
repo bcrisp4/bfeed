@@ -27,7 +27,9 @@ tags, and the tag message is a useful release anchor. Lightweight tags
 (`git tag v1.4.2` with no `-a`) are discouraged.
 
 Optionally dry-run the whole pipeline locally first (builds binaries + both-arch
-images, no push). Requires a running Docker engine and the buildx plugin:
+images, no push). Requires a running Docker engine and a buildx builder that can
+do multi-platform — Docker Desktop has one; on a plain Linux docker install run
+`docker buildx create --use` first (CI provisions one via `setup-buildx-action`):
 
 ```bash
 goreleaser release --snapshot --clean
