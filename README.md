@@ -20,6 +20,7 @@ License: [Apache-2.0](LICENSE).
 - [`docs/design.md`](docs/design.md) — the full architecture & design (the long-term north star).
 - [`docs/mvp-design.md`](docs/mvp-design.md) — the scope that is **actually built today**. When the code and `design.md` differ, this explains why.
 - [`docs/roadmap.md`](docs/roadmap.md) — everything deferred past the MVP, and how each lands as an additive change.
+- [`docs/releasing.md`](docs/releasing.md) — how to cut a release (annotated semver tag → goreleaser).
 - [`CLAUDE.md`](CLAUDE.md) — contributor/architecture notes (ports-and-adapters layout, invariants, sqlc workflow, test conventions).
 
 ## Build, test, run
