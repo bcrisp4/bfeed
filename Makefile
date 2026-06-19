@@ -4,8 +4,17 @@ PKG     := github.com/bcrisp4/bfeed
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
+GOBIN   := $(shell go env GOPATH)/bin
+# Use golangci-lint from PATH if present, else the go-installed copy in
+# GOPATH/bin (run `make tools` to install it). Avoids "No such file" when
+# GOPATH/bin is not on PATH.
+GOLANGCI := $(shell command -v golangci-lint 2>/dev/null || echo $(GOBIN)/golangci-lint)
+
+GOLANGCI_VERSION := v2.12.2
+SQLC_VERSION     := v1.31.1
+
 .PHONY: all build build-linux-amd64 build-linux-arm64 test test-race lint fmt \
-        vet tidy sqlc sqlc-check migrate run image clean
+        vet tidy sqlc sqlc-check migrate run image tools clean
 
 all: lint test build
 
@@ -25,10 +34,10 @@ test-race: ## Unit tests with the race detector
 	go test -race ./...
 
 lint: ## golangci-lint (same config CI uses)
-	golangci-lint run
+	$(GOLANGCI) run
 
 fmt: ## Apply gofumpt + goimports via golangci
-	golangci-lint fmt
+	$(GOLANGCI) fmt
 
 vet:
 	go vet ./...
@@ -42,8 +51,8 @@ sqlc: ## Regenerate sqlc code (after editing queries/ or migrations/)
 sqlc-check: ## Fail if committed sqlc code is stale (CI parity)
 	sqlc generate && git diff --exit-code internal/store/sqlite/sqlc
 
-migrate:
-	go run ./cmd/bfeed migrate
+migrate: ## Apply DB migrations (BFEED_BASE_URL is required by the config loader, unused here)
+	BFEED_BASE_URL=http://localhost:8080 go run ./cmd/bfeed migrate
 
 run: ## Run locally (BFEED_BASE_URL is required)
 	BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=text \
@@ -51,6 +60,10 @@ run: ## Run locally (BFEED_BASE_URL is required)
 
 image: ## Build the container image locally with docker (host arch, dev Dockerfile)
 	docker build -t $(BINARY):$(VERSION) .
+
+tools: ## Install pinned dev tools into GOPATH/bin (golangci-lint, sqlc)
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+	go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 
 clean:
 	rm -f $(BINARY)
