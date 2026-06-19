@@ -2,6 +2,20 @@
 
 Status: approved (brainstorm) · Date: 2026-06-19 · Author: Ben (with Claude)
 
+> **Amendment (2026-06-19, during implementation): podman → docker everywhere.**
+> The original design chose podman as the container engine (`use: podman` in
+> goreleaser). During implementation we found that **goreleaser v2.16 (latest)
+> removed `use: podman`** — only `buildx`/`docker` are valid, and the
+> `dockers`/`docker_manifests` pipes are deprecated in favour of **`dockers_v2`**
+> (buildx-only). Given that, the user chose **docker everywhere**. The shipped
+> pipeline therefore uses `dockers_v2` + Docker buildx (multi-arch via QEMU) in
+> CI, `docker login` for GHCR, and `make image` shells out to `docker`. The
+> COPY-only `Dockerfile.release` now uses `ARG TARGETPLATFORM`
+> (`COPY ${TARGETPLATFORM}/bfeed /bfeed`) as `dockers_v2` requires. Validated
+> locally with `goreleaser release --snapshot --clean` (both-arch images build).
+> Wherever the body below says "podman", read "docker/buildx via dockers_v2".
+> See `docs/releasing.md` for the as-built release process.
+
 ## Goal
 
 Give bfeed the same build/test/lint/release rigour as `pi5_exporter`, adapted
@@ -18,8 +32,8 @@ GHCR container image with SBOMs and signed provenance.
 | Pipeline scope | Full release (binaries + image + SBOM + attestation + changelog) |
 | Target platforms | `linux/amd64` + `linux/arm64` (binaries and image) |
 | Lint | golangci-lint **v2**, mirror pi5 (gofumpt + goimports), generated code excluded |
-| Image build | **goreleaser owns images** (`dockers` + `docker_manifests`) from prebuilt binaries |
-| Container engine | **podman** everywhere — `use: podman` in goreleaser (local + CI), `make image` uses podman. GitHub `ubuntu-latest` ships podman; gives local/CI parity. |
+| Image build | **goreleaser owns images** via **`dockers_v2`** (buildx) from prebuilt binaries — *superseded the original `dockers`+`docker_manifests`; see amendment* |
+| Container engine | **docker** everywhere (buildx). `make image` uses docker; CI uses docker+buildx (native on `ubuntu-latest`). *Amended from podman — goreleaser v2.16 dropped `use: podman`.* |
 | Go toolchain | Add `toolchain go1.26.4` to `go.mod` (= current latest); Dockerfile base already `golang:1.26` |
 | gofumpt reformat | One-time, in **its own commit** (separate from feature commits) |
 | License | **Apache-2.0** — `LICENSE` file + README update; archives ship it |
