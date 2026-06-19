@@ -24,13 +24,26 @@ func TestCategoryCRUD(t *testing.T) {
 	if err := s.UpdateCategory(ctx, &core.Category{ID: id, UserID: core.DefaultUserID, Title: "World"}); err != nil {
 		t.Fatalf("UpdateCategory: %v", err)
 	}
-	got, _ = s.GetCategory(ctx, core.DefaultUserID, id)
+	got, err = s.GetCategory(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatalf("GetCategory after update: %v", err)
+	}
 	if got.Title != "World" {
 		t.Fatalf("rename not applied: %q", got.Title)
 	}
 	cats, err := s.ListCategories(ctx, core.DefaultUserID)
 	if err != nil || len(cats) != 1 {
 		t.Fatalf("ListCategories = %d err=%v", len(cats), err)
+	}
+	if err := s.DeleteCategory(ctx, core.DefaultUserID, id); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
+	}
+	cats, err = s.ListCategories(ctx, core.DefaultUserID)
+	if err != nil || len(cats) != 0 {
+		t.Fatalf("after delete, ListCategories = %d err=%v", len(cats), err)
+	}
+	if err := s.DeleteCategory(ctx, core.DefaultUserID, id); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("second delete err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -58,7 +71,10 @@ func TestDeleteCategorySetsFeedsNull(t *testing.T) {
 	if err := s.DeleteCategory(ctx, core.DefaultUserID, catID); err != nil {
 		t.Fatalf("DeleteCategory: %v", err)
 	}
-	f, _ := s.GetFeed(ctx, core.DefaultUserID, fid)
+	f, err := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatalf("GetFeed after delete: %v", err)
+	}
 	if f.CategoryID != nil {
 		t.Fatalf("feed not re-homed to uncategorised: %v", f.CategoryID)
 	}
@@ -76,20 +92,44 @@ func TestSetFeedCategory(t *testing.T) {
 	if err := s.SetFeedCategory(ctx, core.DefaultUserID, fid, &catID); err != nil {
 		t.Fatalf("SetFeedCategory: %v", err)
 	}
-	f, _ := s.GetFeed(ctx, core.DefaultUserID, fid)
+	f, err := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatalf("GetFeed after assign: %v", err)
+	}
 	if f.CategoryID == nil || *f.CategoryID != catID {
 		t.Fatalf("assign failed: %v", f.CategoryID)
 	}
 	if err := s.SetFeedCategory(ctx, core.DefaultUserID, fid, nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	f, _ = s.GetFeed(ctx, core.DefaultUserID, fid)
+	f, err = s.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatalf("GetFeed after clear: %v", err)
+	}
 	if f.CategoryID != nil {
 		t.Fatalf("clear failed: %v", f.CategoryID)
 	}
 	// Wrong user → ErrNotFound.
 	if err := s.SetFeedCategory(ctx, 999, fid, &catID); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("cross-user set err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateCategoryNotFound(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	err := s.UpdateCategory(ctx, &core.Category{ID: 99999, UserID: core.DefaultUserID, Title: "X"})
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("UpdateCategory non-existent err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetCategoryNotFound(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	_, err := s.GetCategory(ctx, core.DefaultUserID, 99999)
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("GetCategory non-existent err = %v, want ErrNotFound", err)
 	}
 }
 
