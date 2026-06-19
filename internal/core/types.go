@@ -16,6 +16,7 @@ type User struct {
 type Feed struct {
 	ID           ID
 	UserID       ID
+	CategoryID   *ID // nil = uncategorised
 	FeedURL      string
 	SiteURL      string
 	Title        string

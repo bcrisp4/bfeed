@@ -8,6 +8,12 @@ import (
 	"database/sql"
 )
 
+type Category struct {
+	ID     int64
+	UserID int64
+	Title  string
+}
+
 type Entry struct {
 	ID          int64
 	UserID      int64
@@ -42,6 +48,7 @@ type Feed struct {
 	LastError    string
 	CreatedAt    int64
 	UpdatedAt    int64
+	CategoryID   sql.NullInt64
 }
 
 type Tombstone struct {

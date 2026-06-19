@@ -12,8 +12,8 @@ import (
 
 const createFeed = `-- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
-  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -32,6 +32,7 @@ type CreateFeedParams struct {
 	LastError    string
 	CreatedAt    int64
 	UpdatedAt    int64
+	CategoryID   sql.NullInt64
 }
 
 func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, error) {
@@ -50,6 +51,7 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, 
 		arg.LastError,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.CategoryID,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -74,7 +76,7 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 }
 
 const getFeed = `-- name: GetFeed :one
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at FROM feeds WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds WHERE id = ? AND user_id = ?
 `
 
 type GetFeedParams struct {
@@ -101,12 +103,13 @@ func (q *Queries) GetFeed(ctx context.Context, arg GetFeedParams) (Feed, error) 
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CategoryID,
 	)
 	return i, err
 }
 
 const listDueFeeds = `-- name: ListDueFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at FROM feeds
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds
 WHERE disabled = 0 AND next_check_at <= ?
 ORDER BY next_check_at ASC LIMIT ?
 `
@@ -141,6 +144,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CategoryID,
 		); err != nil {
 			return nil, err
 		}
@@ -156,7 +160,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 }
 
 const listFeeds = `-- name: ListFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
 `
 
 func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
@@ -184,6 +188,7 @@ func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CategoryID,
 		); err != nil {
 			return nil, err
 		}
