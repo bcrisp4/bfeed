@@ -203,6 +203,24 @@ func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 	return items, nil
 }
 
+const setFeedCategory = `-- name: SetFeedCategory :execrows
+UPDATE feeds SET category_id = ? WHERE id = ? AND user_id = ?
+`
+
+type SetFeedCategoryParams struct {
+	CategoryID sql.NullInt64
+	ID         int64
+	UserID     int64
+}
+
+func (q *Queries) SetFeedCategory(ctx context.Context, arg SetFeedCategoryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setFeedCategory, arg.CategoryID, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateFeed = `-- name: UpdateFeed :exec
 UPDATE feeds SET
   site_url = ?, title = ?, description = ?, etag = ?, last_modified = ?,

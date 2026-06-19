@@ -24,3 +24,6 @@ WHERE id = ? AND user_id = ?;
 
 -- name: DeleteFeed :execrows
 DELETE FROM feeds WHERE id = ? AND user_id = ?;
+
+-- name: SetFeedCategory :execrows
+UPDATE feeds SET category_id = ? WHERE id = ? AND user_id = ?;

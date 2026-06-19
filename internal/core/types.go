@@ -13,6 +13,12 @@ type User struct {
 	CreatedAt time.Time
 }
 
+type Category struct {
+	ID     ID
+	UserID ID
+	Title  string
+}
+
 type Feed struct {
 	ID           ID
 	UserID       ID
