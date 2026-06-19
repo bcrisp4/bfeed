@@ -37,10 +37,11 @@ Releases are tag-driven via goreleaser — see `docs/releasing.md`.
 ### sqlc (critical, non-obvious)
 Store queries are written as SQL in `internal/store/sqlite/queries/*.sql` and compiled to Go by **sqlc**. After editing any file in `queries/` **or** `migrations/`, regenerate:
 ```bash
-sqlc generate                                # or: $(go env GOPATH)/bin/sqlc generate
-# install once: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+make sqlc                                     # = sqlc generate
+make sqlc-check                               # fail if committed sqlc code is stale (CI-enforced)
+# install pinned tools (sqlc v1.31.1 + golangci-lint v2.12.2): make tools
 ```
-Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
+Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. CI runs `make sqlc-check`'s equivalent, so regenerate and commit after touching `queries/` or `migrations/`. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
 
 ### Running / CLI
 ```bash

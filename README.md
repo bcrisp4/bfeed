@@ -25,20 +25,23 @@ License: [Apache-2.0](LICENSE).
 
 ## Build, test, run
 
-Requires Go 1.25+. The build is pure Go (`CGO_ENABLED=0`, no cgo).
+Requires Go 1.25+. The build is pure Go (`CGO_ENABLED=0`, no cgo). Common tasks
+go through the `Makefile`:
 
 ```bash
-# build
-CGO_ENABLED=0 go build -o bfeed ./cmd/bfeed
-
-# test (add -race before declaring anything done)
-go test ./...
-go test ./... -race
-
-# run
-BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=text go run ./cmd/bfeed serve
-# then open http://localhost:8080 and paste a feed URL (e.g. https://hnrss.org/frontpage)
+make build       # build ./cmd/bfeed (CGO_ENABLED=0)
+make test        # unit tests
+make test-race   # with the race detector — run before declaring anything done
+make lint        # golangci-lint v2 (gofumpt/goimports, vet, staticcheck, gosec)
+make fmt         # apply gofumpt/goimports
+make run         # serve on :8080 (sets the required BFEED_BASE_URL for you)
+make tools       # install pinned dev tools (golangci-lint, sqlc)
 ```
+
+`make run` serves on http://localhost:8080 — open it and paste a feed URL
+(e.g. https://hnrss.org/frontpage). Plain `go build` / `go test ./...` /
+`go run ./cmd/bfeed serve` still work if you prefer them. `make help` is not
+defined — run `make` with no target to lint+test+build (the `all` target).
 
 > **Note:** `BFEED_BASE_URL` is the *external* URL (links/cookies/User-Agent) and is required. The *bind* address is `BFEED_LISTEN_ADDR` — they are separate.
 
@@ -56,9 +59,11 @@ bfeed version       print version / build info
 A multi-stage **distroless** `Dockerfile` is included (non-root, static binary, `HEALTHCHECK` via `bfeed healthcheck`):
 
 ```bash
-docker build -t bfeed:dev .
+docker build -t bfeed:dev .      # or: make image  (tags bfeed:<git-describe>)
 docker run --rm -e BFEED_BASE_URL=http://localhost:8080 -p 8080:8080 -v "$PWD/data:/data" bfeed:dev
 ```
+
+Released multi-arch images are published to GHCR — `docker pull ghcr.io/bcrisp4/bfeed:<version>` (see [`docs/releasing.md`](docs/releasing.md)).
 
 ## Configuration
 
