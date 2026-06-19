@@ -50,9 +50,14 @@ ORDER BY e.published_at DESC, e.id DESC
 LIMIT ?;
 ```
 
-The planner walks the existing `idx_entries_user_status_pub (user_id, status, published_at DESC,
-id DESC)` already in published order and probes `feeds` by integer-PK rowid to test
-`category_id` — so **ordering needs no temp B-tree and keyset pagination is preserved**.
+The category stream is **all-statuses** (§7.4), so `status` is not pinned by equality. The existing
+`idx_entries_user_status_pub (user_id, status, published_at DESC, id DESC)` only yields
+published-order when `status` is constrained, so it cannot serve this query sort-free. This
+iteration therefore adds **`idx_entries_user_pub (user_id, published_at DESC, id DESC)`**: the
+planner walks it in published order for the user and probes `feeds` by integer-PK rowid to test
+`category_id` — so **ordering needs no temp B-tree and keyset pagination is preserved**. The new
+index is also a generally useful user-wide chronological index and is not redundant with the
+status-prefixed one.
 
 Rejected alternatives:
 - **`feed_id IN (SELECT id FROM feeds WHERE category_id = ?)`** — merging several `feed_id` groups
@@ -158,7 +163,11 @@ CREATE INDEX idx_categories_user ON categories(user_id);
 ALTER TABLE feeds ADD COLUMN category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL;
 CREATE INDEX idx_feeds_category ON feeds(category_id);
 
+-- supports the all-statuses category/uncategorised stream sort-free (see §2)
+CREATE INDEX idx_entries_user_pub ON entries(user_id, published_at DESC, id DESC);
+
 -- +goose Down
+DROP INDEX idx_entries_user_pub;
 DROP INDEX idx_feeds_category;
 ALTER TABLE feeds DROP COLUMN category_id;
 DROP INDEX idx_categories_user;
@@ -167,6 +176,8 @@ DROP TABLE categories;
 SQLite permits `ALTER TABLE ADD COLUMN` with a `REFERENCES` clause when the column is nullable
 with default NULL; the FK is enforced for new and updated rows. `idx_feeds_category` satisfies the
 "every child FK column is indexed" invariant (`design.md` §27.17) and serves the grouping/JOIN.
+`idx_entries_user_pub` lets the all-statuses stream JOIN walk entries in published order without a
+temp B-tree (§2).
 
 ### 6.2 sqlc queries
 New `queries/categories.sql`:
@@ -200,7 +211,8 @@ Add a conditional JOIN: when `f.CategoryID != nil` or `f.Uncategorised`, alias `
 join `feeds AS f`, and append `f.category_id = ?` or `f.category_id IS NULL` to the WHERE. Column
 references and the `ORDER BY`/cursor predicate are prefixed `e.` so they stay unambiguous under
 the join. The orderable column stays allowlisted from the closed `Order` switch (never user
-input), preserving the existing gosec posture.
+input), preserving the existing gosec posture. With no status filter the published-order scan is
+served by `idx_entries_user_pub` (§2), so the category stream needs no temp B-tree.
 
 ---
 
@@ -287,7 +299,8 @@ No new env vars, no new CLI subcommand, slog-only (unchanged). OPML category map
 - New tables are `STRICT`; `category_id` is `INTEGER`; the FK column is indexed
   (`idx_feeds_category`); `foreign_keys=ON`.
 - Every category/feed/entry query is scoped by `user_id`; no id trusted without its owner.
-- Keyset pagination preserved on the category stream — no `OFFSET`, no temp B-tree (§2).
+- Keyset pagination preserved on the category stream — no `OFFSET`, no temp B-tree, via the new
+  `idx_entries_user_pub` (§2); asserted by an `EXPLAIN QUERY PLAN` test.
 - `internal/core` imports no adapter; ports stay consumer-owned; time-dependent logic in core uses
   the injected `Clock`.
 - The migration is additive; MVP tables and data are untouched.
