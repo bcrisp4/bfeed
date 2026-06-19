@@ -49,8 +49,8 @@ run: ## Run locally (BFEED_BASE_URL is required)
 	BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=text \
 		go run ./cmd/bfeed serve
 
-image: ## Build the container image locally with podman (host arch, dev Dockerfile)
-	podman build -t $(BINARY):$(VERSION) .
+image: ## Build the container image locally with docker (host arch, dev Dockerfile)
+	docker build -t $(BINARY):$(VERSION) .
 
 clean:
 	rm -f $(BINARY)

@@ -54,8 +54,8 @@ dockers_v2:
       - "ghcr.io/bcrisp4/bfeed"
     tags:
       - "{{ .Version }}"
-      - "{{ if not .IsPrerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
-      - "{{ if not .IsPrerelease }}latest{{ end }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
     labels:
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .FullCommit }}"
