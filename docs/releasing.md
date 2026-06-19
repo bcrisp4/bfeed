@@ -9,7 +9,9 @@ GoReleaser.
 Tags are [semver](https://semver.org): `vMAJOR.MINOR.PATCH` (e.g. `v1.4.2`).
 Prereleases append a suffix: `v1.4.2-rc1`, `v1.4.2-beta1`. The workflow only
 fires on tags matching `v[0-9]+.[0-9]+.[0-9]+` (and `-*` prereleases) — stray
-tags like `v1`, `vfoo`, or `v1.2.3.4` are ignored.
+tags like `v1`, `vfoo`, or `v1.2.3.4` are ignored. Semver **build-metadata**
+tags (`v1.2.3+build`) are deliberately *not* matched: OCI/Docker image tags
+can't contain `+`, and build metadata is precedence-irrelevant.
 
 ## Cutting a release
 
