@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/pressly/goose/v3"
+	// modernc.org/sqlite registers the pure-Go "sqlite" database/sql driver.
 	_ "modernc.org/sqlite"
 )
 
@@ -24,11 +25,11 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(1) // single writer; removes SQLITE_BUSY at O(1) users
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return db, nil

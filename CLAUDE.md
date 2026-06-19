@@ -10,27 +10,43 @@ The design is documented and authoritative — read it before non-trivial work:
 - `docs/design.md` — full north-star spec (the long-term target).
 - `docs/mvp-design.md` — the scope that is **actually built** right now (iteration 1). When code and `design.md` disagree, this is why.
 - `docs/roadmap.md` — everything deliberately deferred, with the additive path back.
+- `docs/releasing.md` — how to cut a release (annotated semver tag → goreleaser).
 
 (Implementation plans under `docs/superpowers/plans/` are gitignored, per the user's "don't commit plans" rule. `bfeed.db` and WAL files in the repo root are gitignored local dev state.)
 
 ## Commands
 
 ```bash
-CGO_ENABLED=0 go build ./...                 # build (must stay cgo-free)
-go test ./...                                # all tests
-go test ./... -race                          # race detector (use before declaring done)
+make build           # CGO_ENABLED=0 build of ./cmd/bfeed (must stay cgo-free)
+make test            # all tests           (or: go test ./...)
+make test-race       # race detector — run before declaring done
 go test ./internal/core/ -run TestName -v    # a single test
-go vet ./... && gofmt -l .                   # gofmt -l must print nothing
-go run ./cmd/bfeed serve                     # run (needs BFEED_BASE_URL, see below)
+make lint            # golangci-lint v2 (gofumpt+goimports, vet, staticcheck, gosec, govulncheck-equivalent)
+make fmt             # apply gofumpt/goimports
+make sqlc-check      # fail if committed sqlc code is stale (CI-enforced)
+make run             # serve locally (sets the required BFEED_BASE_URL)
+make image           # build the container image locally with docker
 ```
+golangci-lint v2 (config in `.golangci.yml`) is the lint bar — it runs `go vet`,
+formatting (gofumpt `extra-rules` + goimports), staticcheck/gosec/revive, etc.;
+generated sqlc code and migrations are excluded. Install:
+`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`.
+CI (`.github/workflows/ci.yml`) also runs `govulncheck` and the sqlc-sync check.
+Releases are tag-driven via goreleaser — see `docs/releasing.md`.
+
+CI/tooling gotchas:
+- CI triggers on **PRs and pushes to `main`** — a feature-branch push alone won't run it; open a PR.
+- Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use the `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
+- `goreleaser check` validates schema only, **not templates** — validate `.goreleaser.yaml` with `goreleaser release --snapshot --clean` (it catches bad fields like an invalid `{{ .IsPrerelease }}`; the engine is docker/buildx via `dockers_v2`, podman is unsupported in goreleaser ≥2.16).
 
 ### sqlc (critical, non-obvious)
 Store queries are written as SQL in `internal/store/sqlite/queries/*.sql` and compiled to Go by **sqlc**. After editing any file in `queries/` **or** `migrations/`, regenerate:
 ```bash
-sqlc generate                                # or: $(go env GOPATH)/bin/sqlc generate
-# install once: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+make sqlc                                     # = sqlc generate
+make sqlc-check                               # fail if committed sqlc code is stale (CI-enforced)
+# install pinned tools (sqlc v1.31.1 + golangci-lint v2.12.2): make tools
 ```
-Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
+Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. CI runs `make sqlc-check`'s equivalent, so regenerate and commit after touching `queries/` or `migrations/`. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
 
 ### Running / CLI
 ```bash

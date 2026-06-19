@@ -46,6 +46,7 @@ func (s *MemStore) CreateFeed(_ context.Context, f *core.Feed) (core.ID, error) 
 	s.feeds[id] = &cp
 	return id, nil
 }
+
 func (s *MemStore) GetFeed(_ context.Context, u, id core.ID) (*core.Feed, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,6 +57,7 @@ func (s *MemStore) GetFeed(_ context.Context, u, id core.ID) (*core.Feed, error)
 	cp := *f
 	return &cp, nil
 }
+
 func (s *MemStore) ListFeeds(_ context.Context, u core.ID) ([]*core.Feed, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -68,6 +70,7 @@ func (s *MemStore) ListFeeds(_ context.Context, u core.ID) ([]*core.Feed, error)
 	}
 	return out, nil
 }
+
 func (s *MemStore) ListDueFeeds(_ context.Context, now time.Time, limit int) ([]*core.Feed, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -84,6 +87,7 @@ func (s *MemStore) ListDueFeeds(_ context.Context, now time.Time, limit int) ([]
 	}
 	return out, nil
 }
+
 func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,6 +98,7 @@ func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.feeds[f.ID] = &cp
 	return nil
 }
+
 func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,6 +114,7 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	delete(s.feeds, id)
 	return nil
 }
+
 func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.Entry) ([]*core.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,6 +143,7 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 	}
 	return ins, nil
 }
+
 func (s *MemStore) GetEntry(_ context.Context, u, id core.ID) (*core.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -147,6 +154,7 @@ func (s *MemStore) GetEntry(_ context.Context, u, id core.ID) (*core.Entry, erro
 	cp := *e
 	return &cp, nil
 }
+
 func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter) ([]*core.Entry, *core.Cursor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,6 +215,7 @@ func memSortKey(e *core.Entry, ord core.Order) int64 {
 	}
 	return e.PublishedAt.Unix()
 }
+
 func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st core.EntryStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -223,6 +232,7 @@ func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st cor
 	}
 	return nil
 }
+
 func (s *MemStore) SetStarred(_ context.Context, u core.ID, ids []core.ID, v bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -233,6 +243,7 @@ func (s *MemStore) SetStarred(_ context.Context, u core.ID, ids []core.ID, v boo
 	}
 	return nil
 }
+
 func (s *MemStore) DeleteEntry(_ context.Context, u, id core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

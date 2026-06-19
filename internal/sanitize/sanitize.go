@@ -5,9 +5,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/bcrisp4/bfeed/internal/core"
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/net/html"
+
+	"github.com/bcrisp4/bfeed/internal/core"
 )
 
 type Sanitizer struct{ policy *bluemonday.Policy }

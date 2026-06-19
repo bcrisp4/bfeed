@@ -32,5 +32,7 @@ func (f *Fake) Advance(d time.Duration) {
 	f.now = f.now.Add(d)
 }
 
-var _ core.Clock = Real{}
-var _ core.Clock = (*Fake)(nil)
+var (
+	_ core.Clock = Real{}
+	_ core.Clock = (*Fake)(nil)
+)

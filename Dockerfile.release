@@ -1,0 +1,13 @@
+# Used by goreleaser's `dockers_v2` build. goreleaser places prebuilt `bfeed`
+# binaries in the build context under $TARGETPLATFORM/ — no build stage here.
+# For local dev image builds use the multi-stage ./Dockerfile via `make image`.
+FROM gcr.io/distroless/static:nonroot
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/bfeed /bfeed
+ENV BFEED_DATABASE_PATH=/data/bfeed.db
+VOLUME ["/data"]
+EXPOSE 8080
+USER nonroot:nonroot
+HEALTHCHECK --interval=30s --timeout=3s CMD ["/bfeed", "healthcheck"]
+ENTRYPOINT ["/bfeed"]
+CMD ["serve"]

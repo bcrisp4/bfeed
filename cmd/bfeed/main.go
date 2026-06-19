@@ -44,7 +44,7 @@ func runMigrate() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	db.Close()
+	_ = db.Close()
 	fmt.Println("migrations applied")
 	return 0
 }
@@ -60,7 +60,11 @@ func runHealthcheck() int {
 		port = cfg.ListenAddr
 	}
 	resp, err := http.Get("http://127.0.0.1:" + port + "/healthz") //nolint:gosec
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
 		return 1
 	}
 	return 0

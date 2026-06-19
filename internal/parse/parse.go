@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bcrisp4/bfeed/internal/core"
 	"github.com/mmcdole/gofeed"
 	"golang.org/x/net/html"
+
+	"github.com/bcrisp4/bfeed/internal/core"
 )
 
 type Parser struct{ fp *gofeed.Parser }
