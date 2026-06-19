@@ -1,0 +1,78 @@
+# GoReleaser configuration — https://goreleaser.com
+# Validate:  goreleaser check
+# Dry run:   goreleaser release --snapshot --clean
+version: 2
+
+project_name: bfeed
+
+builds:
+  - id: bfeed
+    main: ./cmd/bfeed
+    binary: bfeed
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: bfeed
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+# dockers_v2 replaces the deprecated dockers+docker_manifests approach.
+# goreleaser v2.16 removed `use: podman` from dockers; dockers_v2 uses
+# docker buildx (available on GitHub-hosted runners and locally with
+# `docker buildx create --use`). The build context contains per-platform
+# binaries under linux/amd64/ and linux/arm64/ — Dockerfile.release
+# selects the right one via ARG TARGETPLATFORM.
+dockers_v2:
+  - id: bfeed
+    dockerfile: Dockerfile.release
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    images:
+      - "ghcr.io/bcrisp4/bfeed"
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .IsPrerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .IsPrerelease }}latest{{ end }}"
+    labels:
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.source: "https://github.com/bcrisp4/bfeed"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  github:
+    owner: bcrisp4
+    name: bfeed
+  prerelease: auto
