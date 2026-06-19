@@ -9,7 +9,7 @@ A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binar
 
 ## Status: 🚧 work in progress (MVP)
 
-This is **iteration 1 (MVP)**, on the `feat/mvp` branch. It implements the core loop — subscribe → poll → read → mark-read/star — as a **single user with no in-app login** (designed to sit behind a private network such as Tailscale).
+This is **iteration 1 (MVP)**. It implements the core loop — subscribe → poll → read → mark-read/star — as a **single user with no in-app login** (designed to sit behind a private network such as Tailscale).
 
 Deliberately **not in the MVP yet** (tracked, with the path back, in [`docs/roadmap.md`](docs/roadmap.md)): authentication & multi-user, REST API + tokens, full-text search, categories, full-content scraping, image proxy, adaptive scheduling, OPML import/export, retention cleanup, and Prometheus metrics.
 

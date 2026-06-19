@@ -34,6 +34,11 @@ generated sqlc code and migrations are excluded. Install:
 CI (`.github/workflows/ci.yml`) also runs `govulncheck` and the sqlc-sync check.
 Releases are tag-driven via goreleaser — see `docs/releasing.md`.
 
+CI/tooling gotchas:
+- CI triggers on **PRs and pushes to `main`** — a feature-branch push alone won't run it; open a PR.
+- Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use the `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
+- `goreleaser check` validates schema only, **not templates** — validate `.goreleaser.yaml` with `goreleaser release --snapshot --clean` (it catches bad fields like an invalid `{{ .IsPrerelease }}`; the engine is docker/buildx via `dockers_v2`, podman is unsupported in goreleaser ≥2.16).
+
 ### sqlc (critical, non-obvious)
 Store queries are written as SQL in `internal/store/sqlite/queries/*.sql` and compiled to Go by **sqlc**. After editing any file in `queries/` **or** `migrations/`, regenerate:
 ```bash
