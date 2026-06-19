@@ -42,12 +42,26 @@ func (s *FeedService) Delete(ctx context.Context, userID, feedID ID) error {
 	return s.store.DeleteFeed(ctx, userID, feedID)
 }
 
+func (s *FeedService) SetCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error {
+	if categoryID != nil {
+		if _, err := s.store.GetCategory(ctx, userID, *categoryID); err != nil {
+			return fmt.Errorf("%w: unknown category", ErrValidation)
+		}
+	}
+	return s.store.SetFeedCategory(ctx, userID, feedID, categoryID)
+}
+
 // Subscribe validates the URL, fetches it (discovering the feed if HTML), parses,
 // creates the feed, runs an initial poll to populate entries, and sets NextCheckAt.
-func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (*Feed, error) {
+func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, categoryID *ID) (*Feed, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
+	}
+	if categoryID != nil {
+		if _, err := s.store.GetCategory(ctx, userID, *categoryID); err != nil {
+			return nil, fmt.Errorf("%w: unknown category", ErrValidation)
+		}
 	}
 	feedURL, pf, resp, err := s.resolveFeed(ctx, rawURL)
 	if err != nil {
@@ -55,7 +69,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (
 	}
 	now := s.clk.Now()
 	f := &Feed{
-		UserID: userID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
+		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
 		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
 	}

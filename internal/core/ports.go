@@ -51,6 +51,7 @@ type FeedStore interface {
 	ListDueFeeds(ctx context.Context, now time.Time, limit int) ([]*Feed, error)
 	UpdateFeed(ctx context.Context, f *Feed) error
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
+	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
 }
 
 type EntryStore interface {
@@ -62,9 +63,19 @@ type EntryStore interface {
 	DeleteEntry(ctx context.Context, userID, entryID ID) error
 }
 
+type CategoryStore interface {
+	CreateCategory(ctx context.Context, c *Category) (ID, error)
+	GetCategory(ctx context.Context, userID, id ID) (*Category, error)
+	ListCategories(ctx context.Context, userID ID) ([]*Category, error)
+	UpdateCategory(ctx context.Context, c *Category) error
+	DeleteCategory(ctx context.Context, userID, id ID) error
+	UnreadCountsByCategory(ctx context.Context, userID ID) (map[ID]int, int, error)
+}
+
 type Store interface {
 	FeedStore
 	EntryStore
+	CategoryStore
 }
 
 // FeedPoller polls a single feed (fetch→parse→sanitise→upsert→reschedule).

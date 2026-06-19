@@ -119,7 +119,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url")); err != nil {
+	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), nil); err != nil {
 		http.Error(w, "subscribe failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
