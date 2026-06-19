@@ -53,6 +53,8 @@ dockers_v2:
     images:
       - "ghcr.io/bcrisp4/bfeed"
     tags:
+      # Floating tags render empty on prereleases ({{.Prerelease}} non-empty) —
+      # goreleaser silently drops empty tags, so v1.2.3-rc1 only gets :1.2.3-rc1.
       - "{{ .Version }}"
       - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
       - "{{ if not .Prerelease }}latest{{ end }}"

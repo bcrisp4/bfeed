@@ -54,10 +54,15 @@ jobs:
       # Best-effort: attest the published manifest-list digest. Non-fatal if the
       # artifacts.json shape changes across goreleaser versions (see spec open-risks).
       - id: digest
-        name: Extract manifest digest
+        name: Extract image digest (prefer multi-arch manifest)
         continue-on-error: true
         run: |
-          v="$(jq -r '.[] | select(.type=="Docker Image" or .type=="Docker Manifest") | .extra.Digest // empty' dist/artifacts.json | head -n1)"
+          # Prefer the multi-arch manifest-list digest (what users pull); fall
+          # back to a per-arch image digest if no manifest entry is present.
+          v="$(jq -r '.[] | select(.type=="Docker Manifest") | .extra.Digest // empty' dist/artifacts.json | head -n1)"
+          if [ -z "$v" ]; then
+            v="$(jq -r '.[] | select(.type=="Docker Image") | .extra.Digest // empty' dist/artifacts.json | head -n1)"
+          fi
           echo "value=$v" >> "$GITHUB_OUTPUT"
 
       - name: Attest image provenance (manifest)
