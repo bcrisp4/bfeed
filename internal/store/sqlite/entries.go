@@ -97,6 +97,19 @@ func entryFromRow(r sqlc.Entry) *core.Entry {
 	}
 }
 
+// scanEntry scans one row of the canonical 15-column entries projection
+// (id, user_id, feed_id, guid, url, title, author, content, summary,
+// published_at, status, starred, read_at, created_at, hash) into a core.Entry.
+// Shared by ListEntries and Search so the column list lives in one place.
+func scanEntry(rows *sql.Rows) (*core.Entry, error) {
+	var r sqlc.Entry
+	if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
+		&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
+		return nil, err
+	}
+	return entryFromRow(r), nil
+}
+
 func (s *Store) GetEntry(ctx context.Context, userID, entryID core.ID) (*core.Entry, error) {
 	r, err := s.q.GetEntry(ctx, sqlc.GetEntryParams{ID: int64(entryID), UserID: int64(userID)})
 	if err != nil {
@@ -166,12 +179,11 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 
 	var out []*core.Entry
 	for rows.Next() {
-		var r sqlc.Entry
-		if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
-			&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
+		e, err := scanEntry(rows)
+		if err != nil {
 			return nil, nil, mapErr(err)
 		}
-		out = append(out, entryFromRow(r))
+		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, mapErr(err)

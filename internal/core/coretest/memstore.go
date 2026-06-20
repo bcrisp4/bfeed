@@ -392,7 +392,14 @@ func (s *MemStore) Search(_ context.Context, u core.ID, query string, _ core.Ent
 			out = append(out, &cp)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].PublishedAt.After(out[j].PublishedAt) })
+	// Published-desc with an id-desc tiebreak, matching ListEntries so equal
+	// timestamps order deterministically (the fake must not lie about ordering).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].PublishedAt.Equal(out[j].PublishedAt) {
+			return out[i].PublishedAt.After(out[j].PublishedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
 	if len(out) > 50 {
 		out = out[:50]
 	}

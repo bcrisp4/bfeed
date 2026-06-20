@@ -6,7 +6,6 @@ import (
 	"unicode"
 
 	"github.com/bcrisp4/bfeed/internal/core"
-	"github.com/bcrisp4/bfeed/internal/store/sqlite/sqlc"
 )
 
 // buildMatch turns raw user text into a safe FTS5 MATCH string. Every whitespace
@@ -51,12 +50,11 @@ func (s *Store) Search(ctx context.Context, userID core.ID, query string, _ core
 	defer rows.Close()
 	var out []*core.Entry
 	for rows.Next() {
-		var r sqlc.Entry
-		if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
-			&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
+		e, err := scanEntry(rows)
+		if err != nil {
 			return nil, nil, mapErr(err)
 		}
-		out = append(out, entryFromRow(r))
+		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, mapErr(err)

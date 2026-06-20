@@ -442,10 +442,15 @@ func (h *Handler) searchHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		vm.Entries = toEntryVMs(entries, h.feedTitleMap(r.Context()))
+		if len(entries) > 0 {
+			vm.Entries = toEntryVMs(entries, h.feedTitleMap(r.Context()))
+		}
+		// The store caps at 50 (relevance-ranked, no pagination this iteration), so
+		// len==50 means "at the cap" — phrase it as the top 50 by relevance rather
+		// than implying the rest were truncated.
 		switch n := len(entries); {
 		case n >= 50:
-			vm.Header = fmt.Sprintf("Search: %s — showing first 50 matches (refine to narrow)", q)
+			vm.Header = fmt.Sprintf("Search: %s — top 50 matches (refine to narrow)", q)
 		case n == 1:
 			vm.Header = fmt.Sprintf("Search: %s — 1 match", q)
 		default:
