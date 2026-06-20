@@ -1,10 +1,10 @@
-{{define "layout"}}<!doctype html><html lang="en"><head>
+{{define "layout"}}<!doctype html><html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}} data-summaries="{{.Summaries}}" data-width="{{.Width}}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bfeed</title><link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script></head>
 <body>
 <header><a href="/"><strong>bfeed</strong></a>
-<nav><a href="/">Unread</a><a href="/feeds">Feeds</a><a href="/categories">Categories</a><a href="/starred">Starred</a><a href="/history">History</a></nav>
+<nav><a href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}>Unread</a><a href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}>Feeds</a><a href="/categories"{{if eq .Active "categories"}} aria-current="page"{{end}}>Categories</a><a href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}>Starred</a><a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>History</a></nav>
 <form class="search" action="/search" method="get" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"></form></header>
 <main>{{template "content" .}}</main>
 </body></html>{{end}}
