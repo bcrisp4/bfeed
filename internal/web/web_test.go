@@ -352,6 +352,9 @@ func TestEntryDetailPrefersContentOverSummary(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "full content") {
 		t.Fatalf("detail view missing content:\n%s", body)
