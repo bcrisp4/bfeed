@@ -27,7 +27,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, arg DeleteEntryParams) (int64
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash FROM entries WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries WHERE id = ? AND user_id = ?
 `
 
 type GetEntryParams struct {
@@ -54,6 +54,9 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 		&i.ReadAt,
 		&i.CreatedAt,
 		&i.Hash,
+		&i.ExtractState,
+		&i.ExtractAttempts,
+		&i.NextExtractAt,
 	)
 	return i, err
 }

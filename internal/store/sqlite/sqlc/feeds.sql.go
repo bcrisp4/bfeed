@@ -12,27 +12,29 @@ import (
 
 const createFeed = `-- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
-  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id,
+  fetch_full_content)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type CreateFeedParams struct {
-	UserID       int64
-	FeedUrl      string
-	SiteUrl      string
-	Title        string
-	Description  string
-	Etag         string
-	LastModified string
-	Disabled     int64
-	CheckedAt    sql.NullInt64
-	NextCheckAt  int64
-	ErrorCount   int64
-	LastError    string
-	CreatedAt    int64
-	UpdatedAt    int64
-	CategoryID   sql.NullInt64
+	UserID           int64
+	FeedUrl          string
+	SiteUrl          string
+	Title            string
+	Description      string
+	Etag             string
+	LastModified     string
+	Disabled         int64
+	CheckedAt        sql.NullInt64
+	NextCheckAt      int64
+	ErrorCount       int64
+	LastError        string
+	CreatedAt        int64
+	UpdatedAt        int64
+	CategoryID       sql.NullInt64
+	FetchFullContent int64
 }
 
 func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, error) {
@@ -52,6 +54,7 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, 
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.CategoryID,
+		arg.FetchFullContent,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -76,7 +79,7 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 }
 
 const getFeed = `-- name: GetFeed :one
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE id = ? AND user_id = ?
 `
 
 type GetFeedParams struct {
@@ -104,12 +107,13 @@ func (q *Queries) GetFeed(ctx context.Context, arg GetFeedParams) (Feed, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CategoryID,
+		&i.FetchFullContent,
 	)
 	return i, err
 }
 
 const listDueFeeds = `-- name: ListDueFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds
 WHERE disabled = 0 AND next_check_at <= ?
 ORDER BY next_check_at ASC LIMIT ?
 `
@@ -145,6 +149,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CategoryID,
+			&i.FetchFullContent,
 		); err != nil {
 			return nil, err
 		}
@@ -160,7 +165,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 }
 
 const listFeeds = `-- name: ListFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
 `
 
 func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
@@ -189,6 +194,7 @@ func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CategoryID,
+			&i.FetchFullContent,
 		); err != nil {
 			return nil, err
 		}
@@ -215,6 +221,24 @@ type SetFeedCategoryParams struct {
 
 func (q *Queries) SetFeedCategory(ctx context.Context, arg SetFeedCategoryParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setFeedCategory, arg.CategoryID, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setFeedFullContent = `-- name: SetFeedFullContent :execrows
+UPDATE feeds SET fetch_full_content = ? WHERE id = ? AND user_id = ?
+`
+
+type SetFeedFullContentParams struct {
+	FetchFullContent int64
+	ID               int64
+	UserID           int64
+}
+
+func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setFeedFullContent, arg.FetchFullContent, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}

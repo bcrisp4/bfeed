@@ -348,6 +348,17 @@ func (s *MemStore) DeleteCategory(_ context.Context, u, id core.ID) error {
 	return nil
 }
 
+func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	f.FetchFullContent = on
+	return nil
+}
+
 func (s *MemStore) SetFeedCategory(_ context.Context, u, feedID core.ID, categoryID *core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

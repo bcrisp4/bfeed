@@ -52,6 +52,7 @@ type FeedStore interface {
 	UpdateFeed(ctx context.Context, f *Feed) error
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
+	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
 }
 
 type EntryStore interface {

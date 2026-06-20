@@ -43,7 +43,7 @@ func TestEndToEndSubscribeAndRead(t *testing.T) {
 	catSvc := core.NewCategoryService(store, log)
 	searchSvc := core.NewSearchService(store, log)
 
-	if _, err := feedSvc.Subscribe(context.Background(), core.DefaultUserID, origin.URL, nil); err != nil {
+	if _, err := feedSvc.Subscribe(context.Background(), core.DefaultUserID, origin.URL, nil, false); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	h := web.New(feedSvc, entrySvc, catSvc, searchSvc, log)

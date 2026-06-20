@@ -1,7 +1,8 @@
 -- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
-  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id,
+  fetch_full_content)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetFeed :one
@@ -27,3 +28,6 @@ DELETE FROM feeds WHERE id = ? AND user_id = ?;
 
 -- name: SetFeedCategory :execrows
 UPDATE feeds SET category_id = ? WHERE id = ? AND user_id = ?;
+
+-- name: SetFeedFullContent :execrows
+UPDATE feeds SET fetch_full_content = ? WHERE id = ? AND user_id = ?;

@@ -51,7 +51,7 @@ func TestSubscribeWithCategorySetsIt(t *testing.T) {
 	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog"}}
 	svc, _ := newFeedSvc(store, fetcher, parser)
 
-	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", &catID)
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", &catID, false)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestSubscribeWithCategorySetsIt(t *testing.T) {
 
 	// Subscribing with an unknown category is rejected.
 	bad := core.ID(999)
-	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://c.test/feed.xml", &bad); !errors.Is(err, core.ErrValidation) {
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://c.test/feed.xml", &bad, false); !errors.Is(err, core.ErrValidation) {
 		t.Fatalf("unknown category err = %v, want ErrValidation", err)
 	}
 }

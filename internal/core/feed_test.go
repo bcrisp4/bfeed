@@ -27,7 +27,7 @@ func TestSubscribeCreatesFeedAndEntries(t *testing.T) {
 	}}}
 	svc, clk := newFeedSvc(store, fetcher, parser)
 
-	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil)
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestSubscribeDuplicateConflict(t *testing.T) {
 	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("x")}}
 	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}}
 	svc, _ := newFeedSvc(store, fetcher, parser)
-	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil); err != nil {
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil); err == nil {
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil, false); err == nil {
 		t.Fatal("expected conflict on duplicate subscribe")
 	}
 }

@@ -29,8 +29,9 @@ type Feed struct {
 	Description  string
 	ETag         string
 	LastModified string
-	Disabled     bool
-	CheckedAt    *time.Time
+	Disabled         bool
+	FetchFullContent bool
+	CheckedAt        *time.Time
 	NextCheckAt  time.Time
 	ErrorCount   int
 	LastError    string

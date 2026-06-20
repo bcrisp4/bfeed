@@ -167,6 +167,30 @@ func TestCreateFeedWithCategory(t *testing.T) {
 	}
 }
 
+func TestFeedFullContentRoundTripAndToggle(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	f := &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x.example/feed", NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: true}
+	id, err := st.CreateFeed(ctx, f)
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	got, err := st.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil || !got.FetchFullContent {
+		t.Fatalf("want FetchFullContent=true, got %+v err=%v", got, err)
+	}
+	if err := st.SetFeedFullContent(ctx, core.DefaultUserID, id, false); err != nil {
+		t.Fatalf("SetFeedFullContent: %v", err)
+	}
+	got, _ = st.GetFeed(ctx, core.DefaultUserID, id)
+	if got.FetchFullContent {
+		t.Fatalf("want FetchFullContent=false after toggle")
+	}
+	if err := st.SetFeedFullContent(ctx, 999, id, true); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("wrong-user toggle: want ErrNotFound, got %v", err)
+	}
+}
+
 func TestListDueFeeds(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

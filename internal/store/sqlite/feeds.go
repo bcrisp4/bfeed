@@ -19,8 +19,9 @@ func feedFromRow(r sqlc.Feed) *core.Feed {
 		Description:  r.Description,
 		ETag:         r.Etag,
 		LastModified: r.LastModified,
-		Disabled:     r.Disabled != 0,
-		CheckedAt:    ptrUnix(r.CheckedAt),
+		Disabled:         r.Disabled != 0,
+		FetchFullContent: r.FetchFullContent != 0,
+		CheckedAt:        ptrUnix(r.CheckedAt),
 		NextCheckAt:  fromUnix(r.NextCheckAt),
 		ErrorCount:   int(r.ErrorCount),
 		LastError:    r.LastError,
@@ -52,7 +53,8 @@ func (s *Store) CreateFeed(ctx context.Context, f *core.Feed) (core.ID, error) {
 		LastError:    f.LastError,
 		CreatedAt:    toUnix(f.CreatedAt),
 		UpdatedAt:    toUnix(f.UpdatedAt),
-		CategoryID:   nullID(f.CategoryID),
+		CategoryID:      nullID(f.CategoryID),
+		FetchFullContent: b2i(f.FetchFullContent),
 	})
 	if err != nil {
 		return 0, mapErr(err)
@@ -123,6 +125,21 @@ func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
 	n, err := s.q.DeleteFeed(ctx, sqlc.DeleteFeedParams{
 		ID:     int64(feedID),
 		UserID: int64(userID),
+	})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool) error {
+	n, err := s.q.SetFeedFullContent(ctx, sqlc.SetFeedFullContentParams{
+		FetchFullContent: b2i(on),
+		ID:               int64(feedID),
+		UserID:           int64(userID),
 	})
 	if err != nil {
 		return mapErr(err)
