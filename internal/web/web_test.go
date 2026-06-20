@@ -229,7 +229,8 @@ func TestFeedsPageEmptyState(t *testing.T) {
 func TestSubscribeFormShowsCategoryOptions(t *testing.T) {
 	h, store := newWeb(t)
 	store.CreateCategory(context.Background(), &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	// The subscribe form lives on the Feeds page.
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), "Tech") {

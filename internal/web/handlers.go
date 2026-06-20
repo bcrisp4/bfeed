@@ -33,7 +33,6 @@ type listVM struct {
 	ListPath   string
 	Entries    []entryVM
 	NextCursor string
-	Categories []feedsCatVM
 }
 
 type entryPageVM struct {
@@ -118,9 +117,6 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		}
 		return
 	}
-	// Category options are only needed by the subscribe form on the full page,
-	// never by the entrylist fragment above — fetch them only here.
-	vm.Categories = h.catVMs(r.Context())
 	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
@@ -141,17 +137,6 @@ func listActive(f core.EntryFilter) string {
 	default:
 		return "unread"
 	}
-}
-
-// catVMs returns the user's categories as select-option view models for the
-// subscribe form; a store error degrades to no options (logged, non-fatal).
-func (h *Handler) catVMs(ctx context.Context) []feedsCatVM {
-	cats, err := h.cats.List(ctx, uid)
-	if err != nil {
-		h.log.Warn("list categories for subscribe form", "error", err)
-		return nil
-	}
-	return toCatVMs(cats)
 }
 
 func toCatVMs(cats []*core.Category) []feedsCatVM {
