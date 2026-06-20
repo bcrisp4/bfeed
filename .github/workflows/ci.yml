@@ -97,3 +97,35 @@ jobs:
         run: |
           sqlc generate
           git diff --exit-code internal/store/sqlite/sqlc
+
+  # Enforce a curated CHANGELOG.md entry per PR (see docs/changelog.md).
+  # Skipped on PRs labelled skip-changelog and on pushes to main (a skipped
+  # required check still counts as passing for branch protection).
+  changelog:
+    name: changelog
+    if: >-
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a CHANGELOG.md entry
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Capture before matching: piping straight into `grep -q` under the
+          # default `pipefail` shell can fail on SIGPIPE when grep exits early,
+          # which would falsely reject a PR that *did* update the changelog.
+          changed="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          if printf '%s\n' "$changed" | grep -qxF CHANGELOG.md; then
+            echo "CHANGELOG.md updated."
+          else
+            echo "::error::No CHANGELOG.md change found. Add an entry under [Unreleased] (see docs/changelog.md), or apply the skip-changelog label."
+            exit 1
+          fi
