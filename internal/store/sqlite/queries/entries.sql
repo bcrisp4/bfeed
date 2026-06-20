@@ -27,10 +27,10 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET deleted_at = excluded.deleted_at;
 -- name: ListPendingExtractions :many
 SELECT * FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
-ORDER BY published_at DESC LIMIT ?;
+ORDER BY published_at DESC, id DESC LIMIT ?;
 
 -- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done' WHERE id = ?;
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL WHERE id = ?;
 
 -- name: UpdateExtractState :exec
 UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ? WHERE id = ?;

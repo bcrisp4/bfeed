@@ -281,7 +281,7 @@ func TestExtractionStateLifecycle(t *testing.T) {
 func TestListPendingExtractionsUsesPartialIndex(t *testing.T) {
 	st, ctx := newTestStore(t), context.Background()
 	rows, err := st.db.QueryContext(ctx,
-		`EXPLAIN QUERY PLAN SELECT * FROM entries WHERE extract_state='pending' AND next_extract_at <= 0 ORDER BY published_at DESC LIMIT 50`)
+		`EXPLAIN QUERY PLAN SELECT * FROM entries WHERE extract_state='pending' AND next_extract_at <= 0 ORDER BY published_at DESC, id DESC LIMIT 50`)
 	if err != nil {
 		t.Fatal(err)
 	}

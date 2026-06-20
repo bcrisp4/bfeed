@@ -119,6 +119,7 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	for eid, e := range s.entries {
 		if e.FeedID == id {
 			delete(s.entries, eid)
+			delete(s.nextExtract, eid) // mirror the cascade; don't leak schedule state
 		}
 	}
 	delete(s.feeds, id)

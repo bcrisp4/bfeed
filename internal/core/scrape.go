@@ -88,6 +88,11 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) error {
 		return s.fail(ctx, e, "extract")
 	}
 	safe := s.san.Sanitize(html, e.URL) // sanitise-before-persist invariant
+	if strings.TrimSpace(safe) == "" {
+		// Extraction yielded only content the sanitiser stripped; treat as a
+		// failure rather than overwriting the feed-provided content with nothing.
+		return s.fail(ctx, e, "sanitised content empty")
+	}
 	return s.store.SetEntryContent(ctx, e.ID, safe)
 }
 

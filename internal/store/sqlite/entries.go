@@ -37,7 +37,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 			}
 			var nextAt sql.NullInt64
 			if state == core.ExtractPending {
-				nextAt = sql.NullInt64{Int64: toUnix(e.CreatedAt), Valid: true}
+				nextAt = nullUnix(&e.CreatedAt)
 			}
 			id, err := q.InsertEntry(ctx, sqlc.InsertEntryParams{
 				UserID:        int64(e.UserID),

@@ -156,7 +156,7 @@ func (q *Queries) InsertTombstone(ctx context.Context, arg InsertTombstoneParams
 const listPendingExtractions = `-- name: ListPendingExtractions :many
 SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
-ORDER BY published_at DESC LIMIT ?
+ORDER BY published_at DESC, id DESC LIMIT ?
 `
 
 type ListPendingExtractionsParams struct {
@@ -222,7 +222,7 @@ func (q *Queries) MarkFeedEntriesPending(ctx context.Context, arg MarkFeedEntrie
 }
 
 const setEntryContent = `-- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done' WHERE id = ?
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL WHERE id = ?
 `
 
 type SetEntryContentParams struct {
