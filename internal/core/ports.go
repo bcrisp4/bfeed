@@ -99,3 +99,9 @@ type Store interface {
 type FeedPoller interface {
 	PollFeed(ctx context.Context, f *Feed) error
 }
+
+// EntryScraper scrapes a single entry (fetch→extract→sanitise→persist).
+// Implemented by ScrapeService; consumed by Scraper.
+type EntryScraper interface {
+	ScrapeEntry(ctx context.Context, e *Entry) error
+}
