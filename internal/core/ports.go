@@ -72,10 +72,15 @@ type CategoryStore interface {
 	UnreadCountsByCategory(ctx context.Context, userID ID) (map[ID]int, int, error)
 }
 
+type SearchIndex interface {
+	Search(ctx context.Context, userID ID, query string, f EntryFilter) ([]*Entry, *Cursor, error)
+}
+
 type Store interface {
 	FeedStore
 	EntryStore
 	CategoryStore
+	SearchIndex
 }
 
 // FeedPoller polls a single feed (fetch→parse→sanitise→upsert→reschedule).
