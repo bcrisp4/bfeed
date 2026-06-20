@@ -41,7 +41,7 @@ func (s *Store) Search(ctx context.Context, userID core.ID, query string, _ core
 	}
 	const q = `SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author, e.content, e.summary,
 	                  e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash
-	           FROM entries_fts f JOIN entries e ON e.id = f.rowid
+	           FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid
 	           WHERE entries_fts MATCH ? AND e.user_id = ?
 	           ORDER BY rank LIMIT 50`
 	rows, err := s.db.QueryContext(ctx, q, match, int64(userID))
