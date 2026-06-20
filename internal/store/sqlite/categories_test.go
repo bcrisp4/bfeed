@@ -115,6 +115,22 @@ func TestSetFeedCategory(t *testing.T) {
 	}
 }
 
+func TestRenameCategoryDuplicateConflict(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.UpdateCategory(ctx, &core.Category{ID: id, UserID: core.DefaultUserID, Title: "News"})
+	if !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("rename to existing title err = %v, want ErrConflict", err)
+	}
+}
+
 func TestUpdateCategoryNotFound(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

@@ -320,6 +320,11 @@ func (s *MemStore) UpdateCategory(_ context.Context, c *core.Category) error {
 	if !ok || ex.UserID != c.UserID {
 		return core.ErrNotFound
 	}
+	for _, other := range s.categories {
+		if other.UserID == c.UserID && other.Title == c.Title && other.ID != c.ID {
+			return core.ErrConflict
+		}
+	}
 	cp := *ex
 	cp.Title = c.Title
 	s.categories[c.ID] = &cp

@@ -27,6 +27,22 @@ func TestCategoryServiceCreateValidatesAndConflicts(t *testing.T) {
 	}
 }
 
+func TestCategoryServiceRenameConflict(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	svc := core.NewCategoryService(store, coretest.DiscardLogger())
+	if _, err := svc.Create(ctx, core.DefaultUserID, "News"); err != nil {
+		t.Fatal(err)
+	}
+	tech, err := svc.Create(ctx, core.DefaultUserID, "Tech")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Rename(ctx, core.DefaultUserID, tech.ID, "News"); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("rename to existing title err = %v, want ErrConflict", err)
+	}
+}
+
 func TestSubscribeWithCategorySetsIt(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()
