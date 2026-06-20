@@ -12,8 +12,11 @@ import (
 // SeedEntry inserts e into store via UpsertEntries and returns its assigned ID.
 func SeedEntry(store *MemStore, e *core.Entry) core.ID {
 	ins, err := store.UpsertEntries(context.Background(), e.FeedID, []*core.Entry{e})
-	if err != nil || len(ins) != 1 {
+	if err != nil {
 		panic("SeedEntry: " + err.Error())
+	}
+	if len(ins) != 1 {
+		panic("SeedEntry: entry not inserted (tombstone collision or duplicate GUID?)")
 	}
 	return ins[0].ID
 }

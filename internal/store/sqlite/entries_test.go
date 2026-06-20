@@ -262,6 +262,14 @@ func TestExtractionStateLifecycle(t *testing.T) {
 	if err := st.UpdateExtractState(ctx, pend[1].ID, core.ExtractPending, 1, &future); err != nil {
 		t.Fatalf("UpdateExtractState: %v", err)
 	}
+	// Verify attempts persisted.
+	rb, err := st.GetEntry(ctx, core.DefaultUserID, pend[1].ID)
+	if err != nil {
+		t.Fatalf("GetEntry after UpdateExtractState: %v", err)
+	}
+	if rb.ExtractAttempts != 1 {
+		t.Fatalf("ExtractAttempts: want 1, got %d", rb.ExtractAttempts)
+	}
 	if p, _ := st.ListPendingExtractions(ctx, now, 10); len(p) != 0 {
 		t.Fatalf("want 0 due (backoff), got %d", len(p))
 	}

@@ -86,14 +86,18 @@ func TestSetFullContentBackfillsAllExistingEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, g := range []string{"a", "b", "c"} { // backfill is ALL of them
+	for _, g := range []string{"a", "b", "c"} { // none entries: all should be backfilled
 		coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: g, URL: "https://x/" + g, PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractNone})
 	}
+	// failed entry: should also be re-queued by backfill
+	coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "d", URL: "https://x/d", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractFailed})
+	// done entry: must NOT become pending after backfill
+	coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "e", URL: "https://x/e", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractDone})
 	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, true); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 3 {
-		t.Fatalf("want 3 pending after enable, got %d", len(p))
+	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 4 {
+		t.Fatalf("want 4 pending after enable (3 none + 1 failed, skipping done), got %d", len(p))
 	}
 	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, false); err != nil {
 		t.Fatalf("disable: %v", err)
