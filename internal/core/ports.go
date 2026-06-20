@@ -44,6 +44,11 @@ type Sanitizer interface {
 	Sanitize(html, baseURL string) string
 }
 
+// Extractor pulls main-article HTML from a fetched page (Readability-style).
+type Extractor interface {
+	Extract(ctx context.Context, pageURL string, page []byte) (html string, err error)
+}
+
 type FeedStore interface {
 	CreateFeed(ctx context.Context, f *Feed) (ID, error)
 	GetFeed(ctx context.Context, userID, feedID ID) (*Feed, error)
