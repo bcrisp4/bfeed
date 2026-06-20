@@ -14,6 +14,7 @@ import (
 	"github.com/bcrisp4/bfeed/internal/clock"
 	"github.com/bcrisp4/bfeed/internal/config"
 	"github.com/bcrisp4/bfeed/internal/core"
+	"github.com/bcrisp4/bfeed/internal/extract"
 	"github.com/bcrisp4/bfeed/internal/fetch"
 	"github.com/bcrisp4/bfeed/internal/observability"
 	"github.com/bcrisp4/bfeed/internal/parse"
@@ -51,7 +52,8 @@ func runServe() int {
 		}
 		return time.Duration(rand.Int63n(int64(d) / 4)) //nolint:gosec // G404: jitter, not security-sensitive
 	}
-	feedSvc := core.NewFeedService(store, fetcher, parse.New(), sanitize.New(), clock.Real{}, log,
+	san := sanitize.New()
+	feedSvc := core.NewFeedService(store, fetcher, parse.New(), san, clock.Real{}, log,
 		core.FeedServiceConfig{
 			Reschedule: core.RescheduleConfig{Interval: cfg.PollInterval, MaxBackoff: cfg.MaxBackoff},
 			Jitter:     jitter,
@@ -62,8 +64,17 @@ func runServe() int {
 	poller := core.NewPoller(store, feedSvc, clock.Real{}, log,
 		core.PollerConfig{Tick: cfg.PollTick, BatchSize: cfg.BatchSize, Workers: cfg.FeedWorkers})
 
+	scrapeSvc := core.NewScrapeService(store, fetcher, extract.New(), san, clock.Real{}, log,
+		core.ScrapeConfig{MaxAttempts: cfg.ScrapeMaxAttempts, BaseBackoff: 10 * time.Minute, MaxBackoff: cfg.MaxBackoff},
+		jitter)
+	scraper := core.NewScraper(store, scrapeSvc, clock.Real{}, log,
+		core.ScraperConfig{Tick: cfg.ScrapeTick, Batch: cfg.ScrapeBatch, Workers: cfg.ScrapeWorkers})
+
 	pollerDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollerDone) }()
+
+	scraperDone := make(chan struct{})
+	go func() { scraper.Run(ctx); close(scraperDone) }()
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -89,6 +100,11 @@ func runServe() int {
 	case <-pollerDone:
 	case <-time.After(15 * time.Second):
 		log.Warn("poller did not drain in time")
+	}
+	select {
+	case <-scraperDone:
+	case <-time.After(15 * time.Second):
+		log.Warn("scraper did not drain in time")
 	}
 	return 0
 }
