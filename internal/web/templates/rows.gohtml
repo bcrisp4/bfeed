@@ -1,0 +1,22 @@
+{{define "entrylist"}}
+<div id="entries">
+{{range .Entries}}{{template "entryrow" .}}{{end}}
+{{if .NextCursor}}<button hx-get="{{$.ListPath}}?cursor={{.NextCursor}}" hx-target="#entries" hx-swap="beforeend"
+  hx-select="#entries > *">Load more</button>{{end}}
+</div>
+{{end}}
+
+{{define "entryrow"}}
+<div class="entry {{if eq .Status "read"}}read{{end}}" id="entry-{{.ID}}">
+  <h2><a href="/entries/{{.ID}}">{{.Title}}</a></h2>
+  <div class="meta">{{.FeedTitle}} · {{.Published}}</div>
+  <div class="actions">
+    <button hx-post="/entries/{{.ID}}/read" hx-target="#entry-{{.ID}}" hx-swap="outerHTML">
+      {{if eq .Status "read"}}Mark unread{{else}}Mark read{{end}}</button>
+    <button hx-post="/entries/{{.ID}}/star" hx-target="#entry-{{.ID}}" hx-swap="outerHTML">
+      {{if .Starred}}★{{else}}☆{{end}}</button>
+    <button hx-post="/entries/{{.ID}}/delete" hx-target="#entry-{{.ID}}" hx-swap="delete"
+      hx-confirm="Delete this entry?">Delete</button>
+  </div>
+</div>
+{{end}}
