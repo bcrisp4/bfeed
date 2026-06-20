@@ -64,8 +64,10 @@ func runServe() int {
 	poller := core.NewPoller(store, feedSvc, clock.Real{}, log,
 		core.PollerConfig{Tick: cfg.PollTick, BatchSize: cfg.BatchSize, Workers: cfg.FeedWorkers})
 
+	// Scrape backoff base/cap are internal constants (NewScrapeService defaults),
+	// kept independent of the polling knobs (BFEED_MAX_BACKOFF) per the spec.
 	scrapeSvc := core.NewScrapeService(store, fetcher, extract.New(), san, clock.Real{}, log,
-		core.ScrapeConfig{MaxAttempts: cfg.ScrapeMaxAttempts, BaseBackoff: 10 * time.Minute, MaxBackoff: cfg.MaxBackoff},
+		core.ScrapeConfig{MaxAttempts: cfg.ScrapeMaxAttempts},
 		jitter)
 	scraper := core.NewScraper(store, scrapeSvc, clock.Real{}, log,
 		core.ScraperConfig{Tick: cfg.ScrapeTick, Batch: cfg.ScrapeBatch, Workers: cfg.ScrapeWorkers})

@@ -84,8 +84,11 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) error {
 		return s.fail(ctx, e, "non-html or non-200 status")
 	}
 	html, err := s.ext.Extract(ctx, e.URL, resp.Body)
-	if err != nil || strings.TrimSpace(html) == "" {
-		return s.fail(ctx, e, "extract")
+	if err != nil {
+		return s.fail(ctx, e, "extract: "+err.Error())
+	}
+	if strings.TrimSpace(html) == "" {
+		return s.fail(ctx, e, "extract: empty content")
 	}
 	safe := s.san.Sanitize(html, e.URL) // sanitise-before-persist invariant
 	if strings.TrimSpace(safe) == "" {

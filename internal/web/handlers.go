@@ -226,6 +226,10 @@ func (h *Handler) setFeedFullContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+	// The toggle's hx-vals is baked from the old state at render time, so reload
+	// the feeds page to re-render the button — otherwise it keeps posting the
+	// same value and the toggle is one-way.
+	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
 }
 
