@@ -1,8 +1,12 @@
 package sqlite
 
 import (
+	"context"
 	"strings"
 	"unicode"
+
+	"github.com/bcrisp4/bfeed/internal/core"
+	"github.com/bcrisp4/bfeed/internal/store/sqlite/sqlc"
 )
 
 // buildMatch turns raw user text into a safe FTS5 MATCH string. Every whitespace
@@ -24,6 +28,40 @@ func buildMatch(raw string) string {
 	}
 	quoted[len(quoted)-1] += "*"
 	return strings.Join(quoted, " ")
+}
+
+// Search runs a bm25-ranked full-text query, scoped to userID, capped at 50.
+// EntryFilter is reserved for future in-search filters; unused this iteration.
+// Always returns a nil next-cursor — relevance order has no stable keyset, so
+// this iteration does not paginate (see spec 2.1).
+func (s *Store) Search(ctx context.Context, userID core.ID, query string, _ core.EntryFilter) ([]*core.Entry, *core.Cursor, error) {
+	match := buildMatch(query)
+	if match == "" {
+		return nil, nil, nil
+	}
+	const q = `SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author, e.content, e.summary,
+	                  e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash
+	           FROM entries_fts f JOIN entries e ON e.id = f.rowid
+	           WHERE entries_fts MATCH ? AND e.user_id = ?
+	           ORDER BY rank LIMIT 50`
+	rows, err := s.db.QueryContext(ctx, q, match, int64(userID))
+	if err != nil {
+		return nil, nil, mapErr(err)
+	}
+	defer rows.Close()
+	var out []*core.Entry
+	for rows.Next() {
+		var r sqlc.Entry
+		if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
+			&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
+			return nil, nil, mapErr(err)
+		}
+		out = append(out, entryFromRow(r))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, mapErr(err)
+	}
+	return out, nil, nil
 }
 
 func hasIndexable(s string) bool {
