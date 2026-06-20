@@ -40,8 +40,15 @@ func (h *Handler) chromeFor(r *http.Request, active string) chrome {
 }
 
 func setPrefCookie(w http.ResponseWriter, name, value string) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: pref cookies hold no sensitive data; HttpOnly would block JS theme switching; app is tailnet-only so Secure is not required
-		Name: name, Value: value, Path: "/",
-		MaxAge: 31536000, SameSite: http.SameSiteLaxMode,
+	// Secure is intentionally omitted: bfeed may be served over plain HTTP on a
+	// tailnet, where forcing Secure would silently drop these preference cookies.
+	// These are non-sensitive UI prefs and HttpOnly is set.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure deliberately unset for plain-HTTP tailnet deploys
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   31536000,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
