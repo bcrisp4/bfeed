@@ -20,6 +20,8 @@ func TestBuildMatch(t *testing.T) {
 		{"a", `"a"*`},
 		{"Rust  async  \"io\"", `"Rust" "async" """io"""*`},
 		{"日本語", `"日本語"*`},
+		{"🦀", ""},             // emoji-only: no indexable rune → dropped, no FTS5 syntax error
+		{"🦀 rust", `"rust"*`}, // mixed: emoji token dropped, word survives
 	}
 	for _, c := range cases {
 		if got := buildMatch(c.in); got != c.want {
