@@ -1,10 +1,25 @@
 package web
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
+
+func TestTruncatePreview(t *testing.T) {
+	if got := truncatePreview("a few short words"); got != "a few short words" {
+		t.Fatalf("short text should pass through, got %q", got)
+	}
+	long := strings.Repeat("word ", 100) // ~500 chars
+	got := truncatePreview(long)
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("long text not ellipsized: %q", got)
+	}
+	if n := len([]rune(got)); n > maxPreviewChars+1 {
+		t.Fatalf("truncated length %d exceeds cap %d", n, maxPreviewChars)
+	}
+}
 
 // A realistic hnrss-style summary: labels + two long URLs, little prose.
 const hnDump = `<p>Article URL: <a href="https://example.com/the-article">https://example.com/the-article</a> ` +

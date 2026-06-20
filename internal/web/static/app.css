@@ -101,6 +101,7 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 /* settings */
 .settings fieldset{border:1px solid var(--rule);border-radius:var(--radius);margin:0 0 var(--sp-4);padding:var(--sp-3)}
 .settings legend{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.settings label{display:flex;align-items:center;gap:.5rem;min-height:var(--tap);font-size:.95rem;cursor:pointer}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.primary:hover{background:var(--surface);color:var(--accent);border-color:var(--accent)}
 

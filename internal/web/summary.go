@@ -24,6 +24,9 @@ const (
 	// URL: …") score 0.6–0.8 density; genuine prose scores 0.0–0.05.
 	maxLinkDensity  = 0.4
 	minPreviewWords = 5
+	// maxPreviewChars bounds the blurb sent to the client. The CSS clamps the row
+	// to ~2 lines, so shipping a whole scraped article (× 50 rows) is wasted bytes.
+	maxPreviewChars = 280
 )
 
 // htmlToText converts already-sanitised HTML to plain text: strip tags, decode
@@ -68,8 +71,22 @@ func summaryText(e *core.Entry) string {
 			scan = scan[:maxSummaryScan]
 		}
 		if text := htmlToText(scan); goodPreview(text) {
-			return text
+			return truncatePreview(text)
 		}
 	}
 	return ""
+}
+
+// truncatePreview trims a blurb to maxPreviewChars at a word boundary, adding an
+// ellipsis when it cuts, so list responses stay small regardless of source length.
+func truncatePreview(s string) string {
+	r := []rune(s)
+	if len(r) <= maxPreviewChars {
+		return s
+	}
+	cut := string(r[:maxPreviewChars])
+	if i := strings.LastIndexByte(cut, ' '); i > 0 {
+		cut = cut[:i]
+	}
+	return cut + "…"
 }
