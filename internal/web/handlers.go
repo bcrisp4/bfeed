@@ -223,6 +223,87 @@ func (h *Handler) singleFeedTitle(ctx context.Context, feedID core.ID) string {
 	return f.Title
 }
 
+type categoryVM struct {
+	ID     core.ID
+	Title  string
+	Unread int
+}
+
+type categoriesPageVM struct {
+	Categories    []categoryVM
+	Uncategorised int
+}
+
+func (h *Handler) categoriesIndex(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	cats, err := h.cats.List(ctx, uid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	counts, uncat, err := h.cats.UnreadCounts(ctx, uid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	vm := categoriesPageVM{Uncategorised: uncat}
+	for _, c := range cats {
+		vm.Categories = append(vm.Categories, categoryVM{ID: c.ID, Title: c.Title, Unread: counts[c.ID]})
+	}
+	if err := h.tmpl["categories"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "categories/layout", "error", err)
+	}
+}
+
+func (h *Handler) categoryEntries(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	c, err := h.cats.Get(r.Context(), uid, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.renderList(w, r, c.Title, "/categories/"+strconv.FormatInt(int64(id), 10), core.EntryFilter{CategoryID: &id})
+}
+
+func (h *Handler) uncategorisedEntries(w http.ResponseWriter, r *http.Request) {
+	h.renderList(w, r, "Uncategorised", "/categories/none", core.EntryFilter{Uncategorised: true})
+}
+
+func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.cats.Create(r.Context(), uid, r.FormValue("title")); err != nil {
+		http.Error(w, "create category failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	http.Redirect(w, r, "/categories", http.StatusSeeOther)
+}
+
+func (h *Handler) renameCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.cats.Rename(r.Context(), uid, id, r.FormValue("title")); err != nil {
+		http.Error(w, "rename failed: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	http.Redirect(w, r, "/categories", http.StatusSeeOther)
+}
+
+func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.cats.Delete(r.Context(), uid, id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func parseID(w http.ResponseWriter, r *http.Request) (core.ID, bool) {
 	n, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
