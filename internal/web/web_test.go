@@ -202,11 +202,25 @@ func TestFeedsPageGroupsByCategory(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, "News") || !strings.Contains(body, "Uncategorised") {
+	if rec.Code != 200 || !strings.Contains(body, `<h2 class="cat-heading">News</h2>`) || !strings.Contains(body, `<h2 class="cat-heading">Uncategorised</h2>`) {
 		t.Fatalf("feeds page missing category headings: code=%d\n%s", rec.Code, body)
 	}
 	if !strings.Contains(body, "InCat") || !strings.Contains(body, "NoCat") {
 		t.Fatalf("feeds page missing feeds:\n%s", body)
+	}
+}
+
+func TestFeedsPageEmptyState(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "No feeds yet") {
+		t.Fatalf("empty state missing 'No feeds yet':\n%s", body)
 	}
 }
 

@@ -1,5 +1,6 @@
 {{define "content"}}
 <h1>Feeds</h1>
+{{if .HasFeeds}}
 {{range .Groups}}
 <h2 class="cat-heading">{{.Title}}</h2>
 {{range .Feeds}}
@@ -19,5 +20,5 @@
 </div>
 {{else}}<p class="meta">No feeds.</p>{{end}}
 {{end}}
-{{if not .Groups}}<p>No feeds yet. Subscribe from the <a href="/">home page</a>.</p>{{end}}
+{{else}}<p>No feeds yet. Subscribe from the <a href="/">home page</a>.</p>{{end}}
 {{end}}

@@ -54,6 +54,7 @@ type feedGroupVM struct {
 type feedsPageVM struct {
 	Categories []feedsCatVM
 	Groups     []feedGroupVM
+	HasFeeds   bool
 }
 
 func (h *Handler) unread(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +101,8 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		for _, c := range cats {
 			catVMs = append(catVMs, feedsCatVM{ID: int64(c.ID), Title: c.Title})
 		}
+	} else {
+		h.log.Warn("list categories for subscribe form", "error", err)
 	}
 
 	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles), Categories: catVMs}
@@ -168,7 +171,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 			byCat[*f.CategoryID] = append(byCat[*f.CategoryID], row(f))
 		}
 	}
-	vm := feedsPageVM{}
+	vm := feedsPageVM{HasFeeds: len(feeds) > 0}
 	for _, c := range cats {
 		vm.Categories = append(vm.Categories, feedsCatVM{ID: int64(c.ID), Title: c.Title})
 		vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: byCat[c.ID]})
