@@ -77,6 +77,32 @@ func TestPollFeed304ResetsErrorAndReschedules(t *testing.T) {
 	}
 }
 
+func TestSetFullContentBackfillsAllExistingEntries(t *testing.T) {
+	store := coretest.NewMemStore()
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewFeedService(store, nil, nil, nil, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	ctx := context.Background()
+	fid, err := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x/f", NextCheckAt: clk.T, CreatedAt: clk.T, UpdatedAt: clk.T})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range []string{"a", "b", "c"} { // backfill is ALL of them
+		coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: g, URL: "https://x/" + g, PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractNone})
+	}
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 3 {
+		t.Fatalf("want 3 pending after enable, got %d", len(p))
+	}
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 0 {
+		t.Fatalf("want 0 pending after disable, got %d", len(p))
+	}
+}
+
 func TestPollFeedErrorBacksOff(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()

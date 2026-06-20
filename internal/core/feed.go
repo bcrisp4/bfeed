@@ -44,8 +44,15 @@ func (s *FeedService) Delete(ctx context.Context, userID, feedID ID) error {
 }
 
 // SetFullContent toggles per-feed full-content extraction for an owned feed.
+// Enabling backfills ALL existing entries to pending; disabling cancels queued ones.
 func (s *FeedService) SetFullContent(ctx context.Context, userID, feedID ID, on bool) error {
-	return s.store.SetFeedFullContent(ctx, userID, feedID, on)
+	if err := s.store.SetFeedFullContent(ctx, userID, feedID, on); err != nil {
+		return err // ErrNotFound if not owned — checked before touching entries
+	}
+	if on {
+		return s.store.MarkFeedEntriesPending(ctx, feedID, s.clk.Now())
+	}
+	return s.store.CancelFeedExtractions(ctx, feedID)
 }
 
 func (s *FeedService) SetCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error {
@@ -175,6 +182,10 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 	if pf == nil {
 		return nil
 	}
+	state := ExtractNone
+	if f.FetchFullContent {
+		state = ExtractPending
+	}
 	entries := make([]*Entry, 0, len(pf.Entries))
 	for _, pe := range pf.Entries {
 		entries = append(entries, &Entry{
@@ -182,7 +193,7 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 			Author: pe.Author, Content: s.san.Sanitize(pe.Content, f.FeedURL),
 			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: pe.PublishedAt,
 			Status: StatusUnread, CreatedAt: s.clk.Now(),
-			Hash: pe.Hash,
+			Hash: pe.Hash, ExtractState: state,
 		})
 	}
 	_, err := s.store.UpsertEntries(ctx, f.ID, entries)

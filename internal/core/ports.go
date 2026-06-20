@@ -62,6 +62,11 @@ type EntryStore interface {
 	SetStatus(ctx context.Context, userID ID, ids []ID, s EntryStatus) error
 	SetStarred(ctx context.Context, userID ID, ids []ID, starred bool) error
 	DeleteEntry(ctx context.Context, userID, entryID ID) error
+	ListPendingExtractions(ctx context.Context, now time.Time, limit int) ([]*Entry, error)
+	SetEntryContent(ctx context.Context, entryID ID, content string) error
+	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
+	MarkFeedEntriesPending(ctx context.Context, feedID ID, at time.Time) error
+	CancelFeedExtractions(ctx context.Context, feedID ID) error
 }
 
 type CategoryStore interface {

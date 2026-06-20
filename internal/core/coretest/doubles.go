@@ -9,6 +9,15 @@ import (
 	"github.com/bcrisp4/bfeed/internal/core"
 )
 
+// SeedEntry inserts e into store via UpsertEntries and returns its assigned ID.
+func SeedEntry(store *MemStore, e *core.Entry) core.ID {
+	ins, err := store.UpsertEntries(context.Background(), e.FeedID, []*core.Entry{e})
+	if err != nil || len(ins) != 1 {
+		panic("SeedEntry: " + err.Error())
+	}
+	return ins[0].ID
+}
+
 type StubFetcher struct {
 	Resp *core.FetchResponse
 	Err  error

@@ -48,6 +48,15 @@ const (
 
 func (s EntryStatus) Valid() bool { return s == StatusUnread || s == StatusRead }
 
+type ExtractState string
+
+const (
+	ExtractNone    ExtractState = "none"
+	ExtractPending ExtractState = "pending"
+	ExtractDone    ExtractState = "done"
+	ExtractFailed  ExtractState = "failed"
+)
+
 type Entry struct {
 	ID          ID
 	UserID      ID
@@ -62,8 +71,10 @@ type Entry struct {
 	Status      EntryStatus
 	Starred     bool
 	ReadAt      *time.Time
-	CreatedAt   time.Time
-	Hash        string
+	CreatedAt       time.Time
+	Hash            string
+	ExtractState    ExtractState
+	ExtractAttempts int
 }
 
 type Tombstone struct {
