@@ -28,6 +28,9 @@ func ftsIDs(t *testing.T, s *Store, match string) []int64 {
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return ids
 }
 
