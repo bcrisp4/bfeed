@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Preferences</h1>
+<form class="settings" method="post" action="/settings">
+  <fieldset>
+    <legend>Theme</legend>
+    {{range .ThemeOpts}}<label><input type="radio" name="theme" value="{{.Value}}"{{if eq .Value $.ThemeChoice}} checked{{end}}> {{.Label}}</label>{{end}}
+  </fieldset>
+  <fieldset>
+    <legend>List summaries</legend>
+    {{range .SummaryOpts}}<label><input type="radio" name="summary" value="{{.Value}}"{{if eq .Value $.Summaries}} checked{{end}}> {{.Label}}</label>{{end}}
+  </fieldset>
+  <fieldset>
+    <legend>Reading width</legend>
+    {{range .WidthOpts}}<label><input type="radio" name="width" value="{{.Value}}"{{if eq .Value $.Width}} checked{{end}}> {{.Label}}</label>{{end}}
+  </fieldset>
+  <button class="primary" type="submit">Save preferences</button>
+</form>
+{{end}}

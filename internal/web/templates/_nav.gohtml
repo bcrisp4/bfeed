@@ -1,0 +1,28 @@
+{{define "topnav"}}
+<nav class="topnav" aria-label="Primary">
+  <a href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}>Unread</a>
+  <a href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}>Feeds</a>
+  <a href="/categories"{{if eq .Active "categories"}} aria-current="page"{{end}}>Categories</a>
+  <a href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}>Starred</a>
+  <a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>History</a>
+  <a href="/search"{{if eq .Active "search"}} aria-current="page"{{end}}>Search</a>
+  <a href="/settings"{{if eq .Active "settings"}} aria-current="page"{{end}}>Settings</a>
+</nav>
+{{end}}
+
+{{define "bottombar"}}
+<nav class="bottombar" aria-label="Primary">
+  <a class="tab" href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">▪</span><span class="tab-l">Unread</span></a>
+  <a class="tab" href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">≡</span><span class="tab-l">Feeds</span></a>
+  <a class="tab" href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">★</span><span class="tab-l">Starred</span></a>
+  <details class="more">
+    <summary class="tab"{{if or (eq .Active "search") (eq .Active "categories") (eq .Active "history") (eq .Active "settings")}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">⋯</span><span class="tab-l">More</span></summary>
+    <div class="more-sheet">
+      <a href="/search">Search</a>
+      <a href="/categories">Categories</a>
+      <a href="/history">History</a>
+      <a href="/settings">Settings</a>
+    </div>
+  </details>
+</nav>
+{{end}}

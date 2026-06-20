@@ -1,7 +1,7 @@
 {{define "content"}}
-<p class="meta"><a href="/feeds/{{.FeedID}}">{{.FeedTitle}}</a> · {{.Published}}</p>
-<h1>{{.Title}}</h1>
-{{if .Author}}<p class="meta">by {{.Author}}</p>{{end}}
-<p><a href="{{.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a></p>
-<article>{{.Content}}</article>
+<p class="meta"><a href="/feeds/{{.Entry.FeedID}}">{{.Entry.FeedTitle}}</a> · {{.Entry.Published}}{{if .ReadingTime}} · {{.ReadingTime}}{{end}}</p>
+<h1>{{.Entry.Title}}</h1>
+{{if .Entry.Author}}<p class="meta">by {{.Entry.Author}}</p>{{end}}
+<p><a href="{{.Entry.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a></p>
+<article class="article">{{.Entry.Content}}</article>
 {{end}}

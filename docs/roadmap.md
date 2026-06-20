@@ -131,8 +131,10 @@ Fine short-term; revisit before the DB grows large.
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
 | Add-to-home-screen (PWA, no service worker) | §2, §18 | `manifest.webmanifest`, app icons, `apple-touch-icon` + meta | Stated core want | deferred |
-| Light/dark/system theme toggle | §2, §18 | CSS vars + `prefers-color-scheme` + cookie toggle | Stated core want | deferred |
-| Settings page (per-user TTL, theme) | §18 | `/settings` | Needs auth + retention | deferred |
+| Light/dark/system theme toggle | §2, §18 | CSS vars + `prefers-color-scheme` + cookie | Light/Sepia/Dark, default follows OS — specced in `specs/2026-06-20-web-ui-redesign-design.md` | deferred |
+| Settings page (theme, summary, width) | §18 | `/settings` (cookie-backed, single-user) | Cookie-backed prefs specced in the UI-redesign spec; per-user TTL still needs auth+retention | deferred |
+| Persist user prefs in DB (multi-user) | §16, §18 | move the cookie-backed prefs (`bfeed_theme`/`bfeed_summary`/`bfeed_width`) onto a per-user `user_settings` table (or `users` columns) | When multi-user/auth (A1) lands — cookies are the deliberate single-user MVP form, so this is the additive upgrade path | deferred |
+| Content-hashed (fingerprinted) static asset URLs | §18 | hash each embedded asset (`app.css`, `htmx.min.js`, fonts) at startup, reference it by `…?v=<hash>` (or `name.<hash>.ext`) in templates, and serve **all** static assets `immutable` | Today `app.css`/`htmx.min.js` are served `max-age=3600` **not** `immutable`, because their names aren't fingerprinted — so after a deploy a client can show stale CSS/JS for up to an hour (or until a hard refresh). Fingerprinting makes them immutable **and** auto-bust on change. Can hash the embedded bytes at startup, so it stays build-step-free | deferred |
 
 ### A12. Observability — Prometheus
 MVP is **slog only**.

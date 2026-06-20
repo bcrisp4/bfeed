@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -34,7 +35,7 @@ type Handler struct {
 func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger) http.Handler {
 	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates()}
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
+	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
@@ -57,17 +58,20 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("POST /entries/{id}/star", h.toggleStar)
 	mux.HandleFunc("POST /entries/{id}/delete", h.deleteEntry)
 	mux.HandleFunc("GET /search", h.searchHandler)
+	mux.HandleFunc("GET /settings", h.settings)
+	mux.HandleFunc("POST /settings", h.saveSettings)
 	return logging(log, mux)
 }
 
 func parseTemplates() map[string]*template.Template {
 	// Each page = layout + its content template (layout calls "content").
 	pages := map[string][]string{
-		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml"},
-		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml"},
-		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml"},
-		"categories": {"templates/layout.gohtml", "templates/categories.gohtml"},
-		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml"},
+		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
+		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml", "templates/_nav.gohtml"},
+		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml", "templates/_nav.gohtml"},
+		"categories": {"templates/layout.gohtml", "templates/categories.gohtml", "templates/_nav.gohtml"},
+		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
+		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml", "templates/_nav.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
@@ -76,6 +80,22 @@ func parseTemplates() map[string]*template.Template {
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
 	return out
+}
+
+// cacheStatic sets cache headers on embedded static assets. Fonts are
+// content-stable (a given file name always holds the same face), so they are
+// cached immutably for a year. CSS/JS can change between releases and carry no
+// content hash in their names, so they get a short cache and are re-fetched
+// soon after a deploy rather than served stale.
+func cacheStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".woff2") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logging(log *slog.Logger, next http.Handler) http.Handler {

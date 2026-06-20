@@ -1,10 +1,12 @@
-{{define "layout"}}<!doctype html><html lang="en"><head>
+{{define "layout"}}<!doctype html><html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}} data-summaries="{{.Summaries}}" data-width="{{.Width}}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bfeed</title><link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script></head>
 <body>
-<header><a href="/"><strong>bfeed</strong></a>
-<nav><a href="/">Unread</a><a href="/feeds">Feeds</a><a href="/categories">Categories</a><a href="/starred">Starred</a><a href="/history">History</a></nav>
-<form class="search" action="/search" method="get" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"></form></header>
+<header class="appbar">
+  <a class="brand" href="/">bfeed</a>
+  {{template "topnav" .}}
+</header>
 <main>{{template "content" .}}</main>
+{{template "bottombar" .}}
 </body></html>{{end}}

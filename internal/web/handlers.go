@@ -24,14 +24,21 @@ type entryVM struct {
 	FeedID    core.ID
 	FeedTitle string
 	Published string
+	Summary   string
 }
 
 type listVM struct {
+	chrome
 	Title      string
 	ListPath   string
 	Entries    []entryVM
 	NextCursor string
-	Categories []feedsCatVM
+}
+
+type entryPageVM struct {
+	chrome
+	Entry       entryVM
+	ReadingTime string
 }
 
 type feedsCatVM struct {
@@ -54,6 +61,7 @@ type feedGroupVM struct {
 }
 
 type feedsPageVM struct {
+	chrome
 	Categories []feedsCatVM
 	Groups     []feedGroupVM
 	HasFeeds   bool
@@ -109,23 +117,26 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		}
 		return
 	}
-	// Category options are only needed by the subscribe form on the full page,
-	// never by the entrylist fragment above — fetch them only here.
-	vm.Categories = h.catVMs(r.Context())
+	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
 	}
 }
 
-// catVMs returns the user's categories as select-option view models for the
-// subscribe form; a store error degrades to no options (logged, non-fatal).
-func (h *Handler) catVMs(ctx context.Context) []feedsCatVM {
-	cats, err := h.cats.List(ctx, uid)
-	if err != nil {
-		h.log.Warn("list categories for subscribe form", "error", err)
-		return nil
+// listActive maps a list filter to its nav highlight key.
+func listActive(f core.EntryFilter) string {
+	switch {
+	case f.Starred != nil && *f.Starred:
+		return "starred"
+	case f.Order == core.OrderReadAtDesc:
+		return "history"
+	case f.CategoryID != nil || f.Uncategorised:
+		return "categories"
+	case f.FeedID != nil:
+		return "feeds"
+	default:
+		return "unread"
 	}
-	return toCatVMs(cats)
 }
 
 func toCatVMs(cats []*core.Category) []feedsCatVM {
@@ -152,7 +163,9 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	}
 	// Single-entry: direct feed lookup (only one feed involved).
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
-	vm := toEntryVM(e, feedTitle)
+	ev := toEntryVM(e, feedTitle)
+	vm := entryPageVM{Entry: ev, ReadingTime: readingTime(string(ev.Content))}
+	vm.chrome = h.chromeFor(r, "")
 	if err := h.tmpl["entry"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entry/layout", "error", err)
 	}
@@ -197,6 +210,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	if len(uncat) > 0 {
 		vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
 	}
+	vm.chrome = h.chromeFor(r, "feeds")
 	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "feeds/layout", "error", err)
 	}
@@ -371,6 +385,7 @@ type categoryVM struct {
 }
 
 type categoriesPageVM struct {
+	chrome
 	Categories    []categoryVM
 	Uncategorised int
 }
@@ -391,6 +406,7 @@ func (h *Handler) categoriesIndex(w http.ResponseWriter, r *http.Request) {
 	for _, c := range cats {
 		vm.Categories = append(vm.Categories, categoryVM{ID: c.ID, Title: c.Title, Unread: counts[c.ID]})
 	}
+	vm.chrome = h.chromeFor(r, "categories")
 	if err := h.tmpl["categories"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "categories/layout", "error", err)
 	}
@@ -446,6 +462,7 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 type searchVM struct {
+	chrome
 	Query      string
 	Header     string
 	Entries    []entryVM
@@ -476,9 +493,47 @@ func (h *Handler) searchHandler(w http.ResponseWriter, r *http.Request) {
 			vm.Header = fmt.Sprintf("Search: %s — %d matches", q, n)
 		}
 	}
+	vm.chrome = h.chromeFor(r, "search")
 	if err := h.tmpl["search"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "search/layout", "error", err)
 	}
+}
+
+type settingsOption struct{ Value, Label string }
+
+// Option-slice fields are named *Opts so they never collide with the promoted
+// chrome.Summaries / chrome.Width string fields (which carry the current value).
+type settingsPageVM struct {
+	chrome
+	ThemeChoice string // "system" (not "") so the radio matches
+	ThemeOpts   []settingsOption
+	SummaryOpts []settingsOption
+	WidthOpts   []settingsOption
+}
+
+func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
+	c := h.chromeFor(r, "settings")
+	themeChoice := c.Theme
+	if themeChoice == "" {
+		themeChoice = "system"
+	}
+	vm := settingsPageVM{
+		chrome:      c,
+		ThemeChoice: themeChoice,
+		ThemeOpts:   []settingsOption{{"system", "System"}, {"light", "Light"}, {"sepia", "Sepia"}, {"dark", "Dark"}},
+		SummaryOpts: []settingsOption{{"show", "Show"}, {"hide", "Hide"}},
+		WidthOpts:   []settingsOption{{"comfortable", "Comfortable"}, {"wide", "Wide"}},
+	}
+	if err := h.tmpl["settings"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "settings/layout", "error", err)
+	}
+}
+
+func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
+	setPrefCookie(w, "bfeed_theme", allowedOr(r.FormValue("theme"), "system", prefThemes))
+	setPrefCookie(w, "bfeed_summary", allowedOr(r.FormValue("summary"), "show", prefSummaries))
+	setPrefCookie(w, "bfeed_width", allowedOr(r.FormValue("width"), "comfortable", prefWidths))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 func parseID(w http.ResponseWriter, r *http.Request) (core.ID, bool) {
@@ -517,5 +572,6 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		FeedID:    e.FeedID,
 		FeedTitle: feedTitle,
 		Published: humanizeSince(e.PublishedAt, time.Now()),
+		Summary:   summaryText(e),
 	}
 }
