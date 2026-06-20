@@ -545,18 +545,9 @@ func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
-	pick := func(field, def string, allowed ...string) string {
-		v := r.FormValue(field)
-		for _, a := range allowed {
-			if v == a {
-				return v
-			}
-		}
-		return def
-	}
-	setPrefCookie(w, "bfeed_theme", pick("theme", "system", "system", "light", "sepia", "dark"))
-	setPrefCookie(w, "bfeed_summary", pick("summary", "show", "show", "hide"))
-	setPrefCookie(w, "bfeed_width", pick("width", "comfortable", "comfortable", "wide"))
+	setPrefCookie(w, "bfeed_theme", allowedOr(r.FormValue("theme"), "system", prefThemes))
+	setPrefCookie(w, "bfeed_summary", allowedOr(r.FormValue("summary"), "show", prefSummaries))
+	setPrefCookie(w, "bfeed_width", allowedOr(r.FormValue("width"), "comfortable", prefWidths))
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 

@@ -15,7 +15,7 @@
   <a class="tab" href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">≡</span><span class="tab-l">Feeds</span></a>
   <a class="tab" href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">★</span><span class="tab-l">Starred</span></a>
   <details class="more">
-    <summary class="tab"><span class="tab-ic" aria-hidden="true">⋯</span><span class="tab-l">More</span></summary>
+    <summary class="tab"{{if or (eq .Active "search") (eq .Active "categories") (eq .Active "history") (eq .Active "settings")}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">⋯</span><span class="tab-l">More</span></summary>
     <div class="more-sheet">
       <form class="search" action="/search" method="get" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"></form>
       <a href="/search">Search</a>
