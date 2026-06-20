@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -29,6 +30,30 @@ type listVM struct {
 	ListPath   string
 	Entries    []entryVM
 	NextCursor string
+	Categories []feedsCatVM
+}
+
+type feedsCatVM struct {
+	ID    int64
+	Title string
+}
+
+type feedRowVM struct {
+	ID         core.ID
+	Title      string
+	FeedURL    string
+	LastError  string
+	CategoryID int64 // 0 = uncategorised
+}
+
+type feedGroupVM struct {
+	Title string
+	Feeds []feedRowVM
+}
+
+type feedsPageVM struct {
+	Categories []feedsCatVM
+	Groups     []feedGroupVM
 }
 
 func (h *Handler) unread(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +94,15 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles)}
+
+	var catVMs []feedsCatVM
+	if cats, err := h.cats.List(r.Context(), uid); err == nil {
+		for _, c := range cats {
+			catVMs = append(catVMs, feedsCatVM{ID: int64(c.ID), Title: c.Title})
+		}
+	}
+
+	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles), Categories: catVMs}
 	if next != nil {
 		vm.NextCursor = core.EncodeCursor(*next)
 	}
@@ -108,22 +141,76 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
-	feeds, err := h.feeds.List(r.Context(), uid)
+	ctx := r.Context()
+	feeds, err := h.feeds.List(ctx, uid)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", map[string]any{"Feeds": feeds}); err != nil {
+	cats, err := h.cats.List(ctx, uid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	row := func(f *core.Feed) feedRowVM {
+		var cid int64
+		if f.CategoryID != nil {
+			cid = int64(*f.CategoryID)
+		}
+		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid}
+	}
+	byCat := map[core.ID][]feedRowVM{}
+	var uncat []feedRowVM
+	for _, f := range feeds {
+		if f.CategoryID == nil {
+			uncat = append(uncat, row(f))
+		} else {
+			byCat[*f.CategoryID] = append(byCat[*f.CategoryID], row(f))
+		}
+	}
+	vm := feedsPageVM{}
+	for _, c := range cats {
+		vm.Categories = append(vm.Categories, feedsCatVM{ID: int64(c.ID), Title: c.Title})
+		vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: byCat[c.ID]})
+	}
+	vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
+	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "feeds/layout", "error", err)
 	}
 }
 
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), nil); err != nil {
+	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), parseCategoryID(r)); err != nil {
 		http.Error(w, "subscribe failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.feeds.SetCategory(r.Context(), uid, id, parseCategoryID(r)); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseCategoryID reads the optional category_id form field; "" → nil (uncategorised).
+func parseCategoryID(r *http.Request) *core.ID {
+	v := strings.TrimSpace(r.FormValue("category_id"))
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return nil
+	}
+	id := core.ID(n)
+	return &id
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {

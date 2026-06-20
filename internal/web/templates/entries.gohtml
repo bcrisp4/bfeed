@@ -1,6 +1,10 @@
 {{define "content"}}
 <form class="subscribe" hx-post="/feeds" hx-target="body" hx-swap="outerHTML">
   <input type="url" name="url" placeholder="https://example.com/feed.xml" required>
+  <select name="category_id">
+    <option value="">Uncategorised</option>
+    {{range .Categories}}<option value="{{.ID}}">{{.Title}}</option>{{end}}
+  </select>
   <button class="primary" type="submit">Subscribe</button>
 </form>
 <h1>{{.Title}}</h1>

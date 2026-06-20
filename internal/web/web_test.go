@@ -159,3 +159,64 @@ func TestDeleteCategoryUncategorisesFeeds(t *testing.T) {
 		t.Fatalf("feed not uncategorised after category delete")
 	}
 }
+
+func TestSetFeedCategoryAssignsAndClears(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+
+	assign := func(val string) int {
+		form := strings.NewReader("category_id=" + val)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := assign(strconv.FormatInt(int64(catID), 10)); code != http.StatusNoContent {
+		t.Fatalf("assign status %d", code)
+	}
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if f.CategoryID == nil || *f.CategoryID != catID {
+		t.Fatalf("feed not assigned: %v", f.CategoryID)
+	}
+	if code := assign(""); code != http.StatusNoContent {
+		t.Fatalf("clear status %d", code)
+	}
+	f, _ = store.GetFeed(ctx, core.DefaultUserID, fid)
+	if f.CategoryID != nil {
+		t.Fatalf("feed not cleared: %v", f.CategoryID)
+	}
+}
+
+func TestFeedsPageGroupsByCategory(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", Title: "InCat", CategoryID: &catID, NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b/f", Title: "NoCat", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, "News") || !strings.Contains(body, "Uncategorised") {
+		t.Fatalf("feeds page missing category headings: code=%d\n%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "InCat") || !strings.Contains(body, "NoCat") {
+		t.Fatalf("feeds page missing feeds:\n%s", body)
+	}
+}
+
+func TestSubscribeFormShowsCategoryOptions(t *testing.T) {
+	h, store := newWeb(t)
+	store.CreateCategory(context.Background(), &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "Tech") {
+		t.Fatalf("subscribe form missing category option:\n%s", rec.Body.String())
+	}
+}
