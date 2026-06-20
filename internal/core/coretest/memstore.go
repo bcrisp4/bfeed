@@ -364,6 +364,48 @@ func (s *MemStore) SetFeedCategory(_ context.Context, u, feedID core.ID, categor
 	return nil
 }
 
+// Search is a behavioral fake of core.SearchIndex: case-insensitive AND
+// substring match over title+content+summary, newest-first, capped at 50.
+// It is not bm25 — tests must not assert relevance order against it.
+func (s *MemStore) Search(_ context.Context, u core.ID, query string, _ core.EntryFilter) ([]*core.Entry, *core.Cursor, error) {
+	terms := strings.Fields(strings.ToLower(query))
+	if len(terms) == 0 {
+		return nil, nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*core.Entry
+	for _, e := range s.entries {
+		if e.UserID != u {
+			continue
+		}
+		hay := strings.ToLower(e.Title + " " + e.Content + " " + e.Summary)
+		match := true
+		for _, t := range terms {
+			if !strings.Contains(hay, t) {
+				match = false
+				break
+			}
+		}
+		if match {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	// Published-desc with an id-desc tiebreak, matching ListEntries so equal
+	// timestamps order deterministically (the fake must not lie about ordering).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].PublishedAt.Equal(out[j].PublishedAt) {
+			return out[i].PublishedAt.After(out[j].PublishedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	return out, nil, nil
+}
+
 func (s *MemStore) UnreadCountsByCategory(_ context.Context, u core.ID) (map[core.ID]int, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

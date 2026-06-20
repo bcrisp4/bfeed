@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -423,6 +424,42 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+type searchVM struct {
+	Query      string
+	Header     string
+	Entries    []entryVM
+	NextCursor string // always "" — search has no pagination; satisfies the entrylist template
+}
+
+func (h *Handler) searchHandler(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	vm := searchVM{Query: q}
+	if q != "" {
+		entries, _, err := h.search.Search(r.Context(), uid, q, core.EntryFilter{})
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if len(entries) > 0 {
+			vm.Entries = toEntryVMs(entries, h.feedTitleMap(r.Context()))
+		}
+		// The store caps at 50 (relevance-ranked, no pagination this iteration), so
+		// len==50 means "at the cap" — phrase it as the top 50 by relevance rather
+		// than implying the rest were truncated.
+		switch n := len(entries); {
+		case n >= 50:
+			vm.Header = fmt.Sprintf("Search: %s — top 50 matches (refine to narrow)", q)
+		case n == 1:
+			vm.Header = fmt.Sprintf("Search: %s — 1 match", q)
+		default:
+			vm.Header = fmt.Sprintf("Search: %s — %d matches", q, n)
+		}
+	}
+	if err := h.tmpl["search"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "search/layout", "error", err)
+	}
 }
 
 func parseID(w http.ResponseWriter, r *http.Request) (core.ID, bool) {

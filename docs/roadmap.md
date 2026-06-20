@@ -73,8 +73,8 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| FTS5 search over entries | §15 | `entries_fts` virtual table (external-content) + 3 sync triggers; `SearchIndex` port; `SearchService` | | deferred |
-| Search UI + route | §18 | `/search?q=` view | Needs FTS | deferred |
+| FTS5 search over entries | §15 | `entries_fts` virtual table (external-content) + 3 sync triggers; `SearchIndex` port; `SearchService` | | done (iter 3) |
+| Search UI + route | §18 | `/search?q=` view | Needs FTS | done (iter 3) |
 | Porter stemming option | §28 | `tokenize='porter'` config flag | Default stays `unicode61` | deferred |
 
 ### A6. Organisation — categories
@@ -191,7 +191,7 @@ Order chosen to unblock the most daily-driver value first; each iteration is add
 |---|---|---|
 | 1 (MVP) | Core loop | see `mvp-design.md` |
 | 2 | Reading polish | History view, bulk mark-all-read, feed enable/disable UI, theme toggle, PWA add-to-home |
-| 3 | Find things | FTS5 search + UI (categories ✓ done; search pending) |
+| 3 | Find things | Categories ✓ done (iter 3); FTS5 search + UI ✓ done (iter 3) |
 | 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) |
 | 5 | Privacy | Image proxy (+ sanitiser img rewrite) |
 | 6 | Smarter polling | Adaptive interval + weekly count; token-bucket limiter; error-limit; robots Crawl-Delay |
@@ -210,3 +210,4 @@ _(Move shipped items here with their iteration number.)_
 - Starred view (`/starred`) — MVP.
 - History view (`/history`, read entries by `read_at`) — iter 2.
 - Categories (feeds → categories, aggregated category stream, CRUD) — iter 3.
+- Full-text search (FTS5 over title/content/summary, bm25-ranked, /search) — iter 3.

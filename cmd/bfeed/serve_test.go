@@ -41,11 +41,12 @@ func TestEndToEndSubscribeAndRead(t *testing.T) {
 		core.FeedServiceConfig{Reschedule: core.RescheduleConfig{Interval: time.Minute, MaxBackoff: time.Hour}, Jitter: func(time.Duration) time.Duration { return 0 }})
 	entrySvc := core.NewEntryService(store, log)
 	catSvc := core.NewCategoryService(store, log)
+	searchSvc := core.NewSearchService(store, log)
 
 	if _, err := feedSvc.Subscribe(context.Background(), core.DefaultUserID, origin.URL, nil); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	h := web.New(feedSvc, entrySvc, catSvc, log)
+	h := web.New(feedSvc, entrySvc, catSvc, searchSvc, log)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if !strings.Contains(rec.Body.String(), "E2E Post") {

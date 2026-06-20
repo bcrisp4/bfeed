@@ -1,0 +1,16 @@
+{{define "content"}}
+<form class="search" action="/search" method="get" role="search">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Search" autofocus>
+  <button class="primary" type="submit">Search</button>
+</form>
+{{if .Query}}
+  <h1>{{.Header}}</h1>
+  {{if .Entries}}
+    {{template "entrylist" .}}
+  {{else}}
+    <p class="empty">No entries match your search.</p>
+  {{end}}
+{{else}}
+  <p class="empty">Type a query to search your entries.</p>
+{{end}}
+{{end}}

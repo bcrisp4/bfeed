@@ -25,13 +25,14 @@ type Handler struct {
 	feeds   *core.FeedService
 	entries *core.EntryService
 	cats    *core.CategoryService
+	search  *core.SearchService
 	log     *slog.Logger
 	tmpl    map[string]*template.Template
 }
 
 // New constructs a fully-routed http.Handler for the bfeed web UI.
-func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, log *slog.Logger) http.Handler {
-	h := &Handler{feeds: feeds, entries: entries, cats: cats, log: log, tmpl: parseTemplates()}
+func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger) http.Handler {
+	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -54,23 +55,25 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("POST /entries/{id}/read", h.toggleRead)
 	mux.HandleFunc("POST /entries/{id}/star", h.toggleStar)
 	mux.HandleFunc("POST /entries/{id}/delete", h.deleteEntry)
+	mux.HandleFunc("GET /search", h.searchHandler)
 	return logging(log, mux)
 }
 
 func parseTemplates() map[string]*template.Template {
 	// Each page = layout + its content template (layout calls "content").
 	pages := map[string][]string{
-		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml"},
+		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml"},
 		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml"},
 		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml"},
 		"categories": {"templates/layout.gohtml", "templates/categories.gohtml"},
+		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
 		out[name] = template.Must(template.ParseFS(templatesFS, files...))
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
-	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/entries.gohtml"))
+	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
 	return out
 }
 

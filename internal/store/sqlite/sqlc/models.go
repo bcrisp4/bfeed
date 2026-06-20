@@ -14,6 +14,12 @@ type Category struct {
 	Title  string
 }
 
+type EntriesFt struct {
+	Title   string
+	Content string
+	Summary string
+}
+
 type Entry struct {
 	ID          int64
 	UserID      int64

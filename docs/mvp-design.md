@@ -27,7 +27,7 @@ Everything not on that loop is deferred. Leanest possible first ship; iterate fr
 | Users / auth | **No login.** Tailnet is the security boundary. Implicit `user_id = 1`. | Sessions, CSRF, argon2id, multi-user, admin (`design.md` §16) |
 | Polling | **Fixed interval** + politeness (conditional GET, per-host concurrency cap, exp backoff), one bounded worker pool | Adaptive scheduler, weekly-count, token-bucket rate limiter, scrape pool (§12–13) |
 | Content | Show feed-provided content, **sanitised** | Full-content scrape / Readability (§13), image proxy (§10.6) |
-| Search | — | FTS5 full-text search (§15) |
+| Search | FTS5 full-text search — shipped iter 3 (see `docs/superpowers/specs/2026-06-20-fts5-search-design.md`) | Porter stemming (§28) |
 | Organisation | Flat feed list | Categories (§9.1) — shipped iter 3 (see `docs/superpowers/specs/2026-06-20-feed-categories-design.md`) |
 | Retention | **Tombstones on delete** (correctness). No TTL cleaner. | TTL cleaner, prune, WAL maintenance job (§14) |
 | API | — | REST API + bearer tokens (§17) |

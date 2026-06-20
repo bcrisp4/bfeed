@@ -23,7 +23,8 @@ func newWeb(t *testing.T) (http.Handler, *coretest.MemStore) {
 		core.FeedServiceConfig{Reschedule: core.RescheduleConfig{Interval: time.Minute, MaxBackoff: time.Hour}, Jitter: func(time.Duration) time.Duration { return 0 }})
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
-	return web.New(fs, es, cs, log), store
+	ss := core.NewSearchService(store, log)
+	return web.New(fs, es, cs, ss, log), store
 }
 
 func TestUnreadListRenders(t *testing.T) {
@@ -255,5 +256,86 @@ func TestSetFeedCategoryRejectsMalformedID(t *testing.T) {
 		if f.CategoryID == nil || *f.CategoryID != catID {
 			t.Fatalf("category_id=%q changed assignment to %v", bad, f.CategoryID)
 		}
+	}
+}
+
+func TestSearchRendersOnlyMatches(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "Kubernetes networking", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "Go modules", Status: core.StatusUnread, PublishedAt: time.Unix(200, 0)},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/search?q=kubernetes", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Kubernetes networking") {
+		t.Fatalf("missing match:\n%s", body)
+	}
+	if strings.Contains(body, "Go modules") {
+		t.Fatalf("non-match leaked:\n%s", body)
+	}
+	if !strings.Contains(body, "1 match") {
+		t.Fatalf("missing count header:\n%s", body)
+	}
+}
+
+func TestSearchBlankQueryShowsPrompt(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Type a query") {
+		t.Fatalf("blank-query prompt missing, code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSearchNoMatchesShowsEmptyState(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "Kubernetes networking", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/search?q=zzznomatch", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "0 matches") || !strings.Contains(body, "No entries match") {
+		t.Fatalf("missing zero-result feedback:\n%s", body)
+	}
+	if strings.Contains(body, "Kubernetes networking") {
+		t.Fatalf("non-match leaked into zero-result page:\n%s", body)
+	}
+}
+
+func TestSearchCapsHeaderAtFifty(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	entries := make([]*core.Entry, 0, 55)
+	for i := 0; i < 55; i++ {
+		entries = append(entries, &core.Entry{
+			UserID: core.DefaultUserID, FeedID: fid, GUID: "g" + strconv.Itoa(i),
+			Title: "post number " + strconv.Itoa(i), Status: core.StatusUnread, PublishedAt: time.Unix(int64(100+i), 0),
+		})
+	}
+	store.UpsertEntries(ctx, fid, entries)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=post", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "top 50 matches") {
+		t.Fatalf("capped header missing:\n%s", rec.Body.String())
 	}
 }
