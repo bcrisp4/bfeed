@@ -43,7 +43,7 @@ runs on pull requests. It fails unless `CHANGELOG.md` appears in the PR's diff
 against the base branch:
 
 ```bash
-git diff --name-only origin/${BASE}...HEAD | grep -qxF CHANGELOG.md
+git diff --name-only "origin/${BASE_REF}...HEAD" | grep -qxF CHANGELOG.md
 ```
 
 The job is skipped when the PR carries the `skip-changelog` label. It does not
@@ -70,9 +70,10 @@ tagging you rename `[Unreleased]` to the new version and open a fresh empty
 - ...
 ```
 
-On the tag push, `release.yml` extracts the `## [0.2.0]` section into a notes
-file and passes it to GoReleaser via `--release-notes`, so the GitHub Release
-body is exactly that section. `changelog.disable: true` in
+On the tag push, `release.yml` extracts that section's body into a notes file
+and passes it to GoReleaser via `--release-notes`, so the GitHub Release body is
+the section's entries (the `## [0.2.0]` heading itself is dropped — the release
+is already titled with the version). `changelog.disable: true` in
 [`.goreleaser.yaml`](../.goreleaser.yaml) turns off GoReleaser's own
 commit-based changelog. If the section for the tag is missing, the release job
 fails fast rather than publishing empty notes.

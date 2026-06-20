@@ -47,9 +47,10 @@ git push origin v1.4.2
 
 On the tag push, `release.yml` extracts the `## [1.4.2]` section from
 `CHANGELOG.md` into a notes file and hands it to GoReleaser via
-`--release-notes`; that section becomes the GitHub Release body verbatim. If no
-matching section exists, the release job fails fast rather than publishing empty
-notes. Prereleases (`v1.4.2-rc1`) need a matching `## [1.4.2-rc1]` section, or
+`--release-notes`; that section's entries become the GitHub Release body (the
+`## [1.4.2]` heading itself is dropped — the release is already titled with the
+version). If no matching section exists, the release job fails fast rather than
+publishing empty notes. Prereleases (`v1.4.2-rc1`) need a matching `## [1.4.2-rc1]` section, or
 edit the release notes by hand afterwards.
 
 Use an **annotated** tag (`-a`): GoReleaser and `git describe` rely on annotated
