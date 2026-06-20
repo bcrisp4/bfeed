@@ -9,15 +9,22 @@ import (
 )
 
 var (
-	tagRE    = regexp.MustCompile(`<[^>]*>`)
-	anchorRE = regexp.MustCompile(`(?is)<a\b[^>]*>.*?</a>`)
-	urlRE    = regexp.MustCompile(`^(https?://|www\.)`)
+	tagRE = regexp.MustCompile(`<[^>]*>`)
+	urlRE = regexp.MustCompile(`(?:https?://|www\.)\S+`)
 )
 
-// maxSummaryScan bounds how much HTML summaryText inspects. A list blurb is
-// CSS-clamped to ~2 lines, so scanning only a prefix avoids a full regex pass
-// over a large full-content article on every row of every list render.
-const maxSummaryScan = 2048
+const (
+	// maxSummaryScan bounds how much HTML is inspected per source. A list blurb
+	// is CSS-clamped to ~2 lines, so a prefix is plenty and avoids a full regex
+	// pass over a large scraped article on every row of every list render.
+	maxSummaryScan = 2048
+	// A preview is rejected when URLs make up more than maxLinkDensity of its
+	// text, or it carries fewer than minPreviewWords of prose. Calibrated against
+	// real feeds: link/metadata-dump summaries (e.g. hnrss "Article URL: … Comments
+	// URL: …") score 0.6–0.8 density; genuine prose scores 0.0–0.05.
+	maxLinkDensity  = 0.4
+	minPreviewWords = 5
+)
 
 // htmlToText converts already-sanitised HTML to plain text: strip tags, decode
 // entities, collapse whitespace. Decoding matters because the template
@@ -29,16 +36,28 @@ func htmlToText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// linkOnly reports whether HTML carries no text beyond its links — e.g. a
-// Hacker News item whose whole summary is a bare "<a>Comments</a>". Such a
-// blurb is noise as a list preview, so summaryText skips it.
-func linkOnly(htmlSrc string) bool {
-	return strings.TrimSpace(htmlToText(anchorRE.ReplaceAllString(htmlSrc, " "))) == ""
+// goodPreview reports whether plain text reads as real prose worth showing as a
+// list blurb — not a link/URL dump and not a bare "read more" stub. It judges
+// the text itself, not the source feed, so it generalises across sites.
+func goodPreview(text string) bool {
+	if text == "" {
+		return false
+	}
+	urlChars := 0
+	for _, u := range urlRE.FindAllString(text, -1) {
+		urlChars += len(u)
+	}
+	if float64(urlChars)/float64(len(text)) > maxLinkDensity {
+		return false
+	}
+	return len(strings.Fields(urlRE.ReplaceAllString(text, " "))) >= minPreviewWords
 }
 
-// summaryText derives a short, tag-free blurb for list rows. It prefers the feed
-// Summary, falls back to full Content, and skips sources with no real preview
-// text: empty, nothing but links (HN-style), or a single bare URL.
+// summaryText derives a short list-row blurb, preferring the feed's hand-written
+// Summary and falling back to the (often scraped, full-text) Content. Sources
+// that are only links/metadata are skipped, so a feed whose summary is a bare
+// link (e.g. Hacker News) shows the article's opening instead — and nothing only
+// when neither source carries real prose.
 func summaryText(e *core.Entry) string {
 	for _, src := range [2]string{e.Summary, e.Content} {
 		if strings.TrimSpace(src) == "" {
@@ -48,14 +67,9 @@ func summaryText(e *core.Entry) string {
 		if len(scan) > maxSummaryScan {
 			scan = scan[:maxSummaryScan]
 		}
-		if linkOnly(scan) {
-			continue
+		if text := htmlToText(scan); goodPreview(text) {
+			return text
 		}
-		text := htmlToText(scan)
-		if text == "" || (urlRE.MatchString(text) && !strings.ContainsAny(text, " ")) {
-			continue
-		}
-		return text
 	}
 	return ""
 }

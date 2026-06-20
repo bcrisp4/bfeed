@@ -26,7 +26,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 - Article rendering now contains over-wide images, code blocks, and tables so they no longer break the page layout.
 - The add-feed form now lives on the Feeds page; form inputs and dropdowns follow the active theme instead of staying bright; buttons and fields share a consistent height; and buttons, links, and controls give hover feedback.
 - Search moved out of the top bar to its own nav item and page (it no longer overhangs the header divider).
-- List previews now skip link-only summaries (e.g. a Hacker News item whose summary is just a "Comments" link) instead of showing the bare link.
+- List previews now prefer real article text: a feed's summary when it reads as prose, otherwise the article's own opening (including scraped full content), and nothing when neither carries real text. Link/metadata-only summaries (e.g. a Hacker News item whose description is just "Article URL: … Comments URL: …") now show the article body instead of the raw links.
 
 ## [0.2.0] - 2026-06-20
 
