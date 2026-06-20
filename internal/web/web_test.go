@@ -234,3 +234,26 @@ func TestSubscribeFormShowsCategoryOptions(t *testing.T) {
 		t.Fatalf("subscribe form missing category option:\n%s", rec.Body.String())
 	}
 }
+
+func TestSetFeedCategoryRejectsMalformedID(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", CategoryID: &catID, NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+
+	for _, bad := range []string{"abc", "0", "-5"} {
+		form := strings.NewReader("category_id=" + bad)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("category_id=%q status = %d, want 400", bad, rec.Code)
+		}
+		// A malformed value must not silently clear the existing category.
+		f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+		if f.CategoryID == nil || *f.CategoryID != catID {
+			t.Fatalf("category_id=%q changed assignment to %v", bad, f.CategoryID)
+		}
+	}
+}

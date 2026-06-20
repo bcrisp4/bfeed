@@ -201,7 +201,12 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), parseCategoryID(r)); err != nil {
+	catID, ok := parseCategoryID(r)
+	if !ok {
+		http.Error(w, "bad category id", http.StatusBadRequest)
+		return
+	}
+	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID); err != nil {
 		http.Error(w, "subscribe failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
@@ -213,25 +218,33 @@ func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.feeds.SetCategory(r.Context(), uid, id, parseCategoryID(r)); err != nil {
+	catID, ok := parseCategoryID(r)
+	if !ok {
+		http.Error(w, "bad category id", http.StatusBadRequest)
+		return
+	}
+	if err := h.feeds.SetCategory(r.Context(), uid, id, catID); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// parseCategoryID reads the optional category_id form field; "" → nil (uncategorised).
-func parseCategoryID(r *http.Request) *core.ID {
+// parseCategoryID reads the optional category_id form field. Empty → (nil, true)
+// meaning uncategorised. A valid positive id → (&id, true). A malformed or
+// non-positive value → (nil, false) so the caller rejects the request rather
+// than silently clearing the category.
+func parseCategoryID(r *http.Request) (*core.ID, bool) {
 	v := strings.TrimSpace(r.FormValue("category_id"))
 	if v == "" {
-		return nil
+		return nil, true
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return nil
+	if err != nil || n <= 0 {
+		return nil, false
 	}
 	id := core.ID(n)
-	return &id
+	return &id, true
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
