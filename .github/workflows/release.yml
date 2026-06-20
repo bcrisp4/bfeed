@@ -38,6 +38,25 @@ jobs:
 
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
+      # Extract this tag's section from CHANGELOG.md as the release notes, so the
+      # curated changelog is the single source of truth (goreleaser's own
+      # commit-based changelog is disabled). Fail fast if the section is missing
+      # rather than publishing empty notes — see docs/changelog.md.
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version="${REF_NAME#v}"
+          awk -v hdr="## [${version}]" '
+            index($0, hdr) == 1 { grab = 1; next }
+            grab && /^## \[/    { grab = 0 }
+            grab                { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::No CHANGELOG.md section found for ${version}. Add '## [${version}] - <date>' before tagging (see docs/changelog.md)."
+            exit 1
+          fi
+
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -45,7 +64,7 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

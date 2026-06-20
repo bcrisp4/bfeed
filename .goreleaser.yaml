@@ -68,15 +68,11 @@ dockers_v2:
       org.opencontainers.image.revision: "{{ .FullCommit }}"
       org.opencontainers.image.source: "https://github.com/bcrisp4/bfeed"
 
+# Release notes come from CHANGELOG.md (passed via --release-notes in
+# release.yml), so GoReleaser's own commit-based changelog is disabled.
+# See docs/changelog.md.
 changelog:
-  use: github
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^ci:"
+  disable: true
 
 release:
   github:

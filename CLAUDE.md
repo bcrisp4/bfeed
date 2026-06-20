@@ -11,8 +11,20 @@ The design is documented and authoritative — read it before non-trivial work:
 - `docs/mvp-design.md` — the scope that is **actually built** right now (iteration 1). When code and `design.md` disagree, this is why.
 - `docs/roadmap.md` — everything deliberately deferred, with the additive path back.
 - `docs/releasing.md` — how to cut a release (annotated semver tag → goreleaser).
+- `docs/changelog.md` — the changelog policy (what to write, when, how CI enforces it).
 
 (Implementation plans under `docs/superpowers/plans/` are gitignored, per the user's "don't commit plans" rule. `bfeed.db` and WAL files in the repo root are gitignored local dev state.)
+
+## Changelog (mandatory)
+
+`CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)) is the
+single source of truth for release notes. **Every PR that changes behaviour must
+add an entry under `[Unreleased]`** — CI's `changelog` job fails the PR otherwise.
+Write entries from the user's perspective under the right category (`Added`,
+`Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`). PRs with no user-facing
+change (CI/tooling, pure refactors, test-only, deps, docs) carry the
+`skip-changelog` label instead. Full policy and the release-time
+`[Unreleased]` → version roll: `docs/changelog.md`.
 
 ## Commands
 
