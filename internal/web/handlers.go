@@ -514,6 +514,52 @@ func (h *Handler) searchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type settingsOption struct{ Value, Label string }
+
+// Option-slice fields are named *Opts so they never collide with the promoted
+// chrome.Summaries / chrome.Width string fields (which carry the current value).
+type settingsPageVM struct {
+	chrome
+	ThemeChoice string // "system" (not "") so the radio matches
+	ThemeOpts   []settingsOption
+	SummaryOpts []settingsOption
+	WidthOpts   []settingsOption
+}
+
+func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
+	c := h.chromeFor(r, "settings")
+	themeChoice := c.Theme
+	if themeChoice == "" {
+		themeChoice = "system"
+	}
+	vm := settingsPageVM{
+		chrome:      c,
+		ThemeChoice: themeChoice,
+		ThemeOpts:   []settingsOption{{"system", "System"}, {"light", "Light"}, {"sepia", "Sepia"}, {"dark", "Dark"}},
+		SummaryOpts: []settingsOption{{"show", "Show"}, {"hide", "Hide"}},
+		WidthOpts:   []settingsOption{{"comfortable", "Comfortable"}, {"wide", "Wide"}},
+	}
+	if err := h.tmpl["settings"].ExecuteTemplate(w, "layout", vm); err != nil {
+		h.log.Error("template execute", "template", "settings/layout", "error", err)
+	}
+}
+
+func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
+	pick := func(field, def string, allowed ...string) string {
+		v := r.FormValue(field)
+		for _, a := range allowed {
+			if v == a {
+				return v
+			}
+		}
+		return def
+	}
+	setPrefCookie(w, "bfeed_theme", pick("theme", "system", "system", "light", "sepia", "dark"))
+	setPrefCookie(w, "bfeed_summary", pick("summary", "show", "show", "hide"))
+	setPrefCookie(w, "bfeed_width", pick("width", "comfortable", "comfortable", "wide"))
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
 func parseID(w http.ResponseWriter, r *http.Request) (core.ID, bool) {
 	n, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

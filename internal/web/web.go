@@ -57,6 +57,8 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("POST /entries/{id}/star", h.toggleStar)
 	mux.HandleFunc("POST /entries/{id}/delete", h.deleteEntry)
 	mux.HandleFunc("GET /search", h.searchHandler)
+	mux.HandleFunc("GET /settings", h.settings)
+	mux.HandleFunc("POST /settings", h.saveSettings)
 	return logging(log, mux)
 }
 
@@ -68,6 +70,7 @@ func parseTemplates() map[string]*template.Template {
 		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml"},
 		"categories": {"templates/layout.gohtml", "templates/categories.gohtml"},
 		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml"},
+		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
