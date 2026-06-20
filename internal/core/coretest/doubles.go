@@ -46,18 +46,6 @@ func (c StubClock) Now() time.Time { return c.T }
 
 func DiscardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// FuncFetcher is a programmable Fetcher whose Fetch method returns a fixed
-// response and error. Use it when you need per-call control that StubFetcher
-// (which also holds a fixed pair) cannot express through composition alone.
-type FuncFetcher struct {
-	Resp *core.FetchResponse
-	Err  error
-}
-
-func (f FuncFetcher) Fetch(context.Context, core.FetchRequest) (*core.FetchResponse, error) {
-	return f.Resp, f.Err
-}
-
 // StubExtractor returns HTML or Err from Extract, ignoring inputs.
 type StubExtractor struct {
 	HTML string
@@ -70,7 +58,6 @@ func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte) (string, e
 
 var (
 	_ core.Fetcher    = StubFetcher{}
-	_ core.Fetcher    = FuncFetcher{}
 	_ core.FeedParser = StubParser{}
 	_ core.Sanitizer  = PassSanitizer{}
 	_ core.Clock      = StubClock{}

@@ -114,6 +114,8 @@ func entryFromRow(r sqlc.Entry) *core.Entry {
 // (id, user_id, feed_id, guid, url, title, author, content, summary,
 // published_at, status, starred, read_at, created_at, hash) into a core.Entry.
 // Shared by ListEntries and Search so the column list lives in one place.
+// This is a deliberate 15-column subset — extract_state/extract_attempts/next_extract_at
+// are omitted because list/search views don't need them.
 func scanEntry(rows *sql.Rows) (*core.Entry, error) {
 	var r sqlc.Entry
 	if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,

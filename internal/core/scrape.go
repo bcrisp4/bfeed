@@ -16,6 +16,7 @@ type ScrapeConfig struct {
 
 // scrapeStore is the narrow persistence surface ScrapeService needs.
 type scrapeStore interface {
+	// SetEntryContent stores the sanitised HTML and transitions extract_state to 'done'.
 	SetEntryContent(ctx context.Context, entryID ID, content string) error
 	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
 }

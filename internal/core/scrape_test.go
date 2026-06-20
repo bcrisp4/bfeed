@@ -19,7 +19,7 @@ func newScrapeFixture(t *testing.T, fetch core.Fetcher, ext core.Extractor) (*co
 }
 
 func TestScrapeEntrySuccessWritesContentAndMarksDone(t *testing.T) {
-	fetch := coretest.FuncFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html; charset=utf-8", Body: []byte("<html>..</html>")}}
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html; charset=utf-8", Body: []byte("<html>..</html>")}}
 	ext := coretest.StubExtractor{HTML: "<p>extracted</p>"}
 	svc, store, _ := newScrapeFixture(t, fetch, ext)
 	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
@@ -33,8 +33,8 @@ func TestScrapeEntrySuccessWritesContentAndMarksDone(t *testing.T) {
 }
 
 func TestScrapeEntryRetriesThenFails(t *testing.T) {
-	fetch := coretest.FuncFetcher{Resp: &core.FetchResponse{Status: 500}}
-	svc, store, clk := newScrapeFixture(t, fetch, coretest.StubExtractor{})
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 500}}
+	svc, store, _ := newScrapeFixture(t, fetch, coretest.StubExtractor{})
 	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
 	e := &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending, ExtractAttempts: 0}
 	// attempt 1 → still pending, attempt count 1
@@ -50,7 +50,6 @@ func TestScrapeEntryRetriesThenFails(t *testing.T) {
 	if got.ExtractState != core.ExtractFailed {
 		t.Fatalf("want failed at cap, got %q attempts=%d", got.ExtractState, got.ExtractAttempts)
 	}
-	_ = clk
 }
 
 func TestExtractBackoffGrowsAndCaps(t *testing.T) {
