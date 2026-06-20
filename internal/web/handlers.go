@@ -96,16 +96,7 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		return
 	}
 
-	var catVMs []feedsCatVM
-	if cats, err := h.cats.List(r.Context(), uid); err == nil {
-		for _, c := range cats {
-			catVMs = append(catVMs, feedsCatVM{ID: int64(c.ID), Title: c.Title})
-		}
-	} else {
-		h.log.Warn("list categories for subscribe form", "error", err)
-	}
-
-	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles), Categories: catVMs}
+	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles)}
 	if next != nil {
 		vm.NextCursor = core.EncodeCursor(*next)
 	}
@@ -116,9 +107,31 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		}
 		return
 	}
+	// Category options are only needed by the subscribe form on the full page,
+	// never by the entrylist fragment above — fetch them only here.
+	vm.Categories = h.catVMs(r.Context())
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
 	}
+}
+
+// catVMs returns the user's categories as select-option view models for the
+// subscribe form; a store error degrades to no options (logged, non-fatal).
+func (h *Handler) catVMs(ctx context.Context) []feedsCatVM {
+	cats, err := h.cats.List(ctx, uid)
+	if err != nil {
+		h.log.Warn("list categories for subscribe form", "error", err)
+		return nil
+	}
+	return toCatVMs(cats)
+}
+
+func toCatVMs(cats []*core.Category) []feedsCatVM {
+	out := make([]feedsCatVM, 0, len(cats))
+	for _, c := range cats {
+		out = append(out, feedsCatVM{ID: int64(c.ID), Title: c.Title})
+	}
+	return out
 }
 
 func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
@@ -171,12 +184,17 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 			byCat[*f.CategoryID] = append(byCat[*f.CategoryID], row(f))
 		}
 	}
-	vm := feedsPageVM{HasFeeds: len(feeds) > 0}
+	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats)}
+	// Only render groups that actually contain feeds — an empty heading with a
+	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
 	for _, c := range cats {
-		vm.Categories = append(vm.Categories, feedsCatVM{ID: int64(c.ID), Title: c.Title})
-		vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: byCat[c.ID]})
+		if rows := byCat[c.ID]; len(rows) > 0 {
+			vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: rows})
+		}
 	}
-	vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
+	if len(uncat) > 0 {
+		vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
+	}
 	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "feeds/layout", "error", err)
 	}
