@@ -7,7 +7,18 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 )
+
+const cancelFeedExtractions = `-- name: CancelFeedExtractions :exec
+UPDATE entries SET extract_state = 'none', next_extract_at = NULL
+WHERE feed_id = ? AND extract_state = 'pending'
+`
+
+func (q *Queries) CancelFeedExtractions(ctx context.Context, feedID int64) error {
+	_, err := q.db.ExecContext(ctx, cancelFeedExtractions, feedID)
+	return err
+}
 
 const deleteEntry = `-- name: DeleteEntry :execrows
 DELETE FROM entries WHERE id = ? AND user_id = ?
@@ -27,7 +38,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, arg DeleteEntryParams) (int64
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash FROM entries WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries WHERE id = ? AND user_id = ?
 `
 
 type GetEntryParams struct {
@@ -54,6 +65,9 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 		&i.ReadAt,
 		&i.CreatedAt,
 		&i.Hash,
+		&i.ExtractState,
+		&i.ExtractAttempts,
+		&i.NextExtractAt,
 	)
 	return i, err
 }
@@ -81,23 +95,25 @@ func (q *Queries) GetEntryByGUID(ctx context.Context, arg GetEntryByGUIDParams) 
 
 const insertEntry = `-- name: InsertEntry :one
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
-  published_at, status, starred, read_at, created_at, hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?)
+  published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
 RETURNING id
 `
 
 type InsertEntryParams struct {
-	UserID      int64
-	FeedID      int64
-	Guid        string
-	Url         string
-	Title       string
-	Author      string
-	Content     string
-	Summary     string
-	PublishedAt int64
-	CreatedAt   int64
-	Hash        string
+	UserID        int64
+	FeedID        int64
+	Guid          string
+	Url           string
+	Title         string
+	Author        string
+	Content       string
+	Summary       string
+	PublishedAt   int64
+	CreatedAt     int64
+	Hash          string
+	ExtractState  string
+	NextExtractAt sql.NullInt64
 }
 
 func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (int64, error) {
@@ -113,6 +129,8 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (int64
 		arg.PublishedAt,
 		arg.CreatedAt,
 		arg.Hash,
+		arg.ExtractState,
+		arg.NextExtractAt,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -132,6 +150,88 @@ type InsertTombstoneParams struct {
 
 func (q *Queries) InsertTombstone(ctx context.Context, arg InsertTombstoneParams) error {
 	_, err := q.db.ExecContext(ctx, insertTombstone, arg.FeedID, arg.Guid, arg.DeletedAt)
+	return err
+}
+
+const listPendingExtractions = `-- name: ListPendingExtractions :many
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries
+WHERE extract_state = 'pending' AND next_extract_at <= ?
+ORDER BY published_at DESC, id DESC LIMIT ?
+`
+
+type ListPendingExtractionsParams struct {
+	NextExtractAt sql.NullInt64
+	Limit         int64
+}
+
+func (q *Queries) ListPendingExtractions(ctx context.Context, arg ListPendingExtractionsParams) ([]Entry, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingExtractions, arg.NextExtractAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entry
+	for rows.Next() {
+		var i Entry
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.FeedID,
+			&i.Guid,
+			&i.Url,
+			&i.Title,
+			&i.Author,
+			&i.Content,
+			&i.Summary,
+			&i.PublishedAt,
+			&i.Status,
+			&i.Starred,
+			&i.ReadAt,
+			&i.CreatedAt,
+			&i.Hash,
+			&i.ExtractState,
+			&i.ExtractAttempts,
+			&i.NextExtractAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markFeedEntriesPending = `-- name: MarkFeedEntriesPending :exec
+UPDATE entries SET extract_state = 'pending', next_extract_at = ?
+WHERE feed_id = ? AND extract_state IN ('none','failed')
+`
+
+type MarkFeedEntriesPendingParams struct {
+	NextExtractAt sql.NullInt64
+	FeedID        int64
+}
+
+func (q *Queries) MarkFeedEntriesPending(ctx context.Context, arg MarkFeedEntriesPendingParams) error {
+	_, err := q.db.ExecContext(ctx, markFeedEntriesPending, arg.NextExtractAt, arg.FeedID)
+	return err
+}
+
+const setEntryContent = `-- name: SetEntryContent :exec
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL WHERE id = ?
+`
+
+type SetEntryContentParams struct {
+	Content string
+	ID      int64
+}
+
+func (q *Queries) SetEntryContent(ctx context.Context, arg SetEntryContentParams) error {
+	_, err := q.db.ExecContext(ctx, setEntryContent, arg.Content, arg.ID)
 	return err
 }
 
@@ -179,6 +279,27 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 		arg.Hash,
 		arg.ID,
 		arg.UserID,
+	)
+	return err
+}
+
+const updateExtractState = `-- name: UpdateExtractState :exec
+UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ? WHERE id = ?
+`
+
+type UpdateExtractStateParams struct {
+	ExtractState    string
+	ExtractAttempts int64
+	NextExtractAt   sql.NullInt64
+	ID              int64
+}
+
+func (q *Queries) UpdateExtractState(ctx context.Context, arg UpdateExtractStateParams) error {
+	_, err := q.db.ExecContext(ctx, updateExtractState,
+		arg.ExtractState,
+		arg.ExtractAttempts,
+		arg.NextExtractAt,
+		arg.ID,
 	)
 	return err
 }

@@ -702,6 +702,16 @@ backfill can never starve normal feed updates.
   `EntryStore.SetEntryContent`. Failures are logged and non-fatal; the entry keeps whatever
   the feed provided.
 
+> **As built (iter 4):** the decoupling is realised with **DB-backed extraction state**, not an
+> in-memory queue + second pool. Entries carry an `extract_state` (`none`/`pending`/`done`/
+> `failed`) + `extract_attempts` + `next_extract_at`; a background `Scraper` sweep drains
+> `pending` entries (own tick + bounded pool), freshest-first, capped per cycle (`BFEED_SCRAPE_
+> BATCH`), sharing the one per-host `Fetcher` budget. Durable across restarts. Failure path:
+> exponential backoff + jitter, terminal `failed` after `BFEED_SCRAPE_MAX_ATTEMPTS`. The
+> `BFEED_BACKFILL_PER_HOST_PER_CYCLE` cap is **deferred** — the global per-cycle batch cap +
+> shared per-host semaphore + freshest-first ordering cover the starvation concern. Full spec:
+> `docs/superpowers/specs/2026-06-20-full-content-extraction-design.md`.
+
 ## 14. Retention, cleanup & tombstones
 
 - **Cleaner** runs on an interval (`BFEED_CLEANUP_INTERVAL`, default daily).
@@ -861,7 +871,10 @@ BFEED_HOST_RATE_PER_SEC        1           # per-host token-bucket rate
 BFEED_HOST_BURST               3
 # article scraping (full content)
 BFEED_SCRAPE_WORKERS           20
-BFEED_BACKFILL_PER_HOST_PER_CYCLE  30
+BFEED_SCRAPE_TICK              1m
+BFEED_SCRAPE_BATCH             50
+BFEED_SCRAPE_MAX_ATTEMPTS      3
+BFEED_BACKFILL_PER_HOST_PER_CYCLE  30          # deferred
 # retention
 BFEED_DEFAULT_ENTRY_TTL_DAYS   365         # per-user override stored in DB
 BFEED_CLEANUP_INTERVAL         24h
@@ -1040,6 +1053,16 @@ These hold across all sessions. Tests must defend them.
   MATCH builder (prefix-* on the last token) keeps arbitrary input from raising FTS5 syntax errors;
   operator syntax is intentionally not exposed. FTS5 MATCH construction lives in the sqlite adapter,
   keeping core FTS5-agnostic.
+- **Full-content extraction (iter 4):** opt-in per feed (`feeds.fetch_full_content`); extraction
+  realised via **DB-backed state** on `entries` (`extract_state`/`extract_attempts`/`next_extract_at`
+  + partial `idx_entries_pending`), **not** the §13 in-memory queue+pool — durable, restart-safe,
+  same starvation guarantees. New `Extractor` port (`extract/`, `readeck/go-readability/v2`) and
+  `EntryScraper`/`ScrapeService`/`Scraper` (mirrors `FeedPoller`/`FeedService`/`Poller`); scrapes
+  reuse the one `Fetcher` per-host budget. Replaces feed `content` on success; keeps feed content
+  on failure (bounded exponential backoff → terminal `failed`). Enabling a feed backfills **all**
+  its existing entries. Config `BFEED_SCRAPE_{WORKERS,TICK,BATCH,MAX_ATTEMPTS}`;
+  `BFEED_BACKFILL_PER_HOST_PER_CYCLE` deferred. Full spec:
+  `docs/superpowers/specs/2026-06-20-full-content-extraction-design.md`.
 
 ## 30. Research basis & sources
 

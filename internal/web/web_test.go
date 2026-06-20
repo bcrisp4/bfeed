@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -384,5 +385,50 @@ func TestSearchCapsHeaderAtFifty(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "top 50 matches") {
 		t.Fatalf("capped header missing:\n%s", rec.Body.String())
+	}
+}
+
+func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
+	// Build the handler with stubs that make Subscribe succeed.
+	store := coretest.NewMemStore()
+	log := coretest.DiscardLogger()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>"), ETag: `"e"`}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog", SiteURL: "https://x.example/"}}
+	fs := core.NewFeedService(store, fetcher, parser, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}, log,
+		core.FeedServiceConfig{Reschedule: core.RescheduleConfig{Interval: time.Minute, MaxBackoff: time.Hour}, Jitter: func(time.Duration) time.Duration { return 0 }})
+	es := core.NewEntryService(store, log)
+	cs := core.NewCategoryService(store, log)
+	ss := core.NewSearchService(store, log)
+	srv := web.New(fs, es, cs, ss, log)
+
+	// Subscribe with full_content checkbox checked.
+	form := url.Values{"url": {"https://x.example/feed"}, "full_content": {"on"}}
+	req := httptest.NewRequest(http.MethodPost, "/feeds", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("subscribe status %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	feeds, _ := store.ListFeeds(context.Background(), core.DefaultUserID)
+	if len(feeds) != 1 || !feeds[0].FetchFullContent {
+		t.Fatalf("subscribe did not set FetchFullContent: %+v", feeds)
+	}
+
+	// Toggle off.
+	id := feeds[0].ID
+	off := url.Values{"full_content": {"off"}}
+	req = httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(id), 10)+"/full-content", strings.NewReader(off.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("toggle status %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	feeds, _ = store.ListFeeds(context.Background(), core.DefaultUserID)
+	if feeds[0].FetchFullContent {
+		t.Fatalf("toggle did not clear FetchFullContent")
 	}
 }

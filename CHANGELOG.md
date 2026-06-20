@@ -11,6 +11,14 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in per-feed full-content extraction — bfeed can fetch and extract the full
+  article text (Readability) for feeds you flag, replacing the feed-provided
+  snippet; falls back to feed content when extraction is disabled or fails.
+  Configurable via `BFEED_SCRAPE_WORKERS`, `BFEED_SCRAPE_TICK`,
+  `BFEED_SCRAPE_BATCH`, `BFEED_SCRAPE_MAX_ATTEMPTS`.
+
 ## [0.2.0] - 2026-06-20
 
 ### Added

@@ -17,16 +17,24 @@ import (
 
 // MemStore is an in-memory core.Store.
 type MemStore struct {
-	mu         sync.Mutex
-	feeds      map[core.ID]*core.Feed
-	entries    map[core.ID]*core.Entry
-	tombstones map[string]bool // feedID|guid
-	categories map[core.ID]*core.Category
-	nextID     core.ID
+	mu          sync.Mutex
+	feeds       map[core.ID]*core.Feed
+	entries     map[core.ID]*core.Entry
+	tombstones  map[string]bool // feedID|guid
+	categories  map[core.ID]*core.Category
+	nextExtract map[core.ID]time.Time // per-entry next extraction time
+	nextID      core.ID
 }
 
 func NewMemStore() *MemStore {
-	return &MemStore{feeds: map[core.ID]*core.Feed{}, entries: map[core.ID]*core.Entry{}, tombstones: map[string]bool{}, categories: map[core.ID]*core.Category{}, nextID: 1}
+	return &MemStore{
+		feeds:       map[core.ID]*core.Feed{},
+		entries:     map[core.ID]*core.Entry{},
+		tombstones:  map[string]bool{},
+		categories:  map[core.ID]*core.Category{},
+		nextExtract: map[core.ID]time.Time{},
+		nextID:      1,
+	}
 }
 
 var _ core.Store = (*MemStore)(nil)
@@ -111,6 +119,7 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	for eid, e := range s.entries {
 		if e.FeedID == id {
 			delete(s.entries, eid)
+			delete(s.nextExtract, eid) // mirror the cascade; don't leak schedule state
 		}
 	}
 	delete(s.feeds, id)
@@ -140,6 +149,12 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 		cp := *e
 		cp.ID = id
 		cp.FeedID = feedID
+		if cp.ExtractState == "" {
+			cp.ExtractState = core.ExtractNone
+		}
+		if cp.ExtractState == core.ExtractPending {
+			s.nextExtract[id] = cp.CreatedAt
+		}
 		s.entries[id] = &cp
 		ins = append(ins, &cp)
 	}
@@ -348,6 +363,17 @@ func (s *MemStore) DeleteCategory(_ context.Context, u, id core.ID) error {
 	return nil
 }
 
+func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	f.FetchFullContent = on
+	return nil
+}
+
 func (s *MemStore) SetFeedCategory(_ context.Context, u, feedID core.ID, categoryID *core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -404,6 +430,86 @@ func (s *MemStore) Search(_ context.Context, u core.ID, query string, _ core.Ent
 		out = out[:50]
 	}
 	return out, nil, nil
+}
+
+func (s *MemStore) ListPendingExtractions(_ context.Context, now time.Time, limit int) ([]*core.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*core.Entry
+	for _, e := range s.entries {
+		if e.ExtractState != core.ExtractPending {
+			continue
+		}
+		if t, ok := s.nextExtract[e.ID]; ok && t.After(now) {
+			continue
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].PublishedAt.Equal(out[j].PublishedAt) {
+			return out[i].PublishedAt.After(out[j].PublishedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *MemStore) SetEntryContent(_ context.Context, entryID core.ID, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[entryID]
+	if !ok {
+		return core.ErrNotFound
+	}
+	e.Content = content
+	e.ExtractState = core.ExtractDone
+	delete(s.nextExtract, entryID)
+	return nil
+}
+
+func (s *MemStore) UpdateExtractState(_ context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.entries[entryID]
+	if !ok {
+		return core.ErrNotFound
+	}
+	e.ExtractState = state
+	e.ExtractAttempts = attempts
+	if nextAt != nil {
+		s.nextExtract[entryID] = *nextAt
+	} else {
+		delete(s.nextExtract, entryID)
+	}
+	return nil
+}
+
+func (s *MemStore) MarkFeedEntriesPending(_ context.Context, feedID core.ID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.FeedID == feedID && (e.ExtractState == core.ExtractNone || e.ExtractState == core.ExtractFailed) {
+			e.ExtractState = core.ExtractPending
+			s.nextExtract[e.ID] = at
+		}
+	}
+	return nil
+}
+
+func (s *MemStore) CancelFeedExtractions(_ context.Context, feedID core.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.FeedID == feedID && e.ExtractState == core.ExtractPending {
+			e.ExtractState = core.ExtractNone
+			delete(s.nextExtract, e.ID)
+		}
+	}
+	return nil
 }
 
 func (s *MemStore) UnreadCountsByCategory(_ context.Context, u core.ID) (map[core.ID]int, int, error) {

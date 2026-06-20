@@ -31,24 +31,35 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 		existing, err := q.GetEntryByGUID(ctx, sqlc.GetEntryByGUIDParams{FeedID: int64(feedID), Guid: e.GUID})
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
+			state := e.ExtractState
+			if state == "" {
+				state = core.ExtractNone
+			}
+			var nextAt sql.NullInt64
+			if state == core.ExtractPending {
+				nextAt = nullUnix(&e.CreatedAt)
+			}
 			id, err := q.InsertEntry(ctx, sqlc.InsertEntryParams{
-				UserID:      int64(e.UserID),
-				FeedID:      int64(feedID),
-				Guid:        e.GUID,
-				Url:         e.URL,
-				Title:       e.Title,
-				Author:      e.Author,
-				Content:     e.Content,
-				Summary:     e.Summary,
-				PublishedAt: toUnix(e.PublishedAt),
-				CreatedAt:   toUnix(e.CreatedAt),
-				Hash:        e.Hash,
+				UserID:        int64(e.UserID),
+				FeedID:        int64(feedID),
+				Guid:          e.GUID,
+				Url:           e.URL,
+				Title:         e.Title,
+				Author:        e.Author,
+				Content:       e.Content,
+				Summary:       e.Summary,
+				PublishedAt:   toUnix(e.PublishedAt),
+				CreatedAt:     toUnix(e.CreatedAt),
+				Hash:          e.Hash,
+				ExtractState:  string(state),
+				NextExtractAt: nextAt,
 			})
 			if err != nil {
 				return nil, mapErr(err)
 			}
 			e.ID = core.ID(id)
 			e.Status = core.StatusUnread
+			e.ExtractState = state
 			inserted = append(inserted, e)
 		case err != nil:
 			return nil, mapErr(err)
@@ -79,21 +90,23 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 
 func entryFromRow(r sqlc.Entry) *core.Entry {
 	return &core.Entry{
-		ID:          core.ID(r.ID),
-		UserID:      core.ID(r.UserID),
-		FeedID:      core.ID(r.FeedID),
-		GUID:        r.Guid,
-		URL:         r.Url,
-		Title:       r.Title,
-		Author:      r.Author,
-		Content:     r.Content,
-		Summary:     r.Summary,
-		PublishedAt: fromUnix(r.PublishedAt),
-		Status:      core.EntryStatus(r.Status),
-		Starred:     r.Starred != 0,
-		ReadAt:      ptrUnix(r.ReadAt),
-		CreatedAt:   fromUnix(r.CreatedAt),
-		Hash:        r.Hash,
+		ID:              core.ID(r.ID),
+		UserID:          core.ID(r.UserID),
+		FeedID:          core.ID(r.FeedID),
+		GUID:            r.Guid,
+		URL:             r.Url,
+		Title:           r.Title,
+		Author:          r.Author,
+		Content:         r.Content,
+		Summary:         r.Summary,
+		PublishedAt:     fromUnix(r.PublishedAt),
+		Status:          core.EntryStatus(r.Status),
+		Starred:         r.Starred != 0,
+		ReadAt:          ptrUnix(r.ReadAt),
+		CreatedAt:       fromUnix(r.CreatedAt),
+		Hash:            r.Hash,
+		ExtractState:    core.ExtractState(r.ExtractState),
+		ExtractAttempts: int(r.ExtractAttempts),
 	}
 }
 
@@ -101,6 +114,8 @@ func entryFromRow(r sqlc.Entry) *core.Entry {
 // (id, user_id, feed_id, guid, url, title, author, content, summary,
 // published_at, status, starred, read_at, created_at, hash) into a core.Entry.
 // Shared by ListEntries and Search so the column list lives in one place.
+// This is a deliberate 15-column subset — extract_state/extract_attempts/next_extract_at
+// are omitted because list/search views don't need them.
 func scanEntry(rows *sql.Rows) (*core.Entry, error) {
 	var r sqlc.Entry
 	if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
@@ -251,6 +266,45 @@ func (s *Store) DeleteEntry(ctx context.Context, userID, entryID core.ID) error 
 		return core.ErrNotFound
 	}
 	return mapErr(tx.Commit())
+}
+
+func (s *Store) ListPendingExtractions(ctx context.Context, now time.Time, limit int) ([]*core.Entry, error) {
+	rows, err := s.q.ListPendingExtractions(ctx, sqlc.ListPendingExtractionsParams{
+		NextExtractAt: sql.NullInt64{Int64: toUnix(now), Valid: true},
+		Limit:         int64(limit),
+	})
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]*core.Entry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, entryFromRow(r))
+	}
+	return out, nil
+}
+
+func (s *Store) SetEntryContent(ctx context.Context, entryID core.ID, content string) error {
+	return mapErr(s.q.SetEntryContent(ctx, sqlc.SetEntryContentParams{Content: content, ID: int64(entryID)}))
+}
+
+func (s *Store) UpdateExtractState(ctx context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time) error {
+	return mapErr(s.q.UpdateExtractState(ctx, sqlc.UpdateExtractStateParams{
+		ExtractState:    string(state),
+		ExtractAttempts: int64(attempts),
+		NextExtractAt:   nullUnix(nextAt),
+		ID:              int64(entryID),
+	}))
+}
+
+func (s *Store) MarkFeedEntriesPending(ctx context.Context, feedID core.ID, at time.Time) error {
+	return mapErr(s.q.MarkFeedEntriesPending(ctx, sqlc.MarkFeedEntriesPendingParams{
+		NextExtractAt: sql.NullInt64{Int64: toUnix(at), Valid: true},
+		FeedID:        int64(feedID),
+	}))
+}
+
+func (s *Store) CancelFeedExtractions(ctx context.Context, feedID core.ID) error {
+	return mapErr(s.q.CancelFeedExtractions(ctx, int64(feedID)))
 }
 
 func placeholders(ids []core.ID) (string, []any) {

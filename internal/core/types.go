@@ -20,22 +20,23 @@ type Category struct {
 }
 
 type Feed struct {
-	ID           ID
-	UserID       ID
-	CategoryID   *ID // nil = uncategorised
-	FeedURL      string
-	SiteURL      string
-	Title        string
-	Description  string
-	ETag         string
-	LastModified string
-	Disabled     bool
-	CheckedAt    *time.Time
-	NextCheckAt  time.Time
-	ErrorCount   int
-	LastError    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID               ID
+	UserID           ID
+	CategoryID       *ID // nil = uncategorised
+	FeedURL          string
+	SiteURL          string
+	Title            string
+	Description      string
+	ETag             string
+	LastModified     string
+	Disabled         bool
+	FetchFullContent bool
+	CheckedAt        *time.Time
+	NextCheckAt      time.Time
+	ErrorCount       int
+	LastError        string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type EntryStatus string
@@ -47,22 +48,33 @@ const (
 
 func (s EntryStatus) Valid() bool { return s == StatusUnread || s == StatusRead }
 
+type ExtractState string
+
+const (
+	ExtractNone    ExtractState = "none"
+	ExtractPending ExtractState = "pending"
+	ExtractDone    ExtractState = "done"
+	ExtractFailed  ExtractState = "failed"
+)
+
 type Entry struct {
-	ID          ID
-	UserID      ID
-	FeedID      ID
-	GUID        string
-	URL         string
-	Title       string
-	Author      string
-	Content     string // sanitised HTML
-	Summary     string // sanitised HTML
-	PublishedAt time.Time
-	Status      EntryStatus
-	Starred     bool
-	ReadAt      *time.Time
-	CreatedAt   time.Time
-	Hash        string
+	ID              ID
+	UserID          ID
+	FeedID          ID
+	GUID            string
+	URL             string
+	Title           string
+	Author          string
+	Content         string // sanitised HTML
+	Summary         string // sanitised HTML
+	PublishedAt     time.Time
+	Status          EntryStatus
+	Starred         bool
+	ReadAt          *time.Time
+	CreatedAt       time.Time
+	Hash            string
+	ExtractState    ExtractState
+	ExtractAttempts int
 }
 
 type Tombstone struct {

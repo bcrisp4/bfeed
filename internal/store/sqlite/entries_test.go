@@ -219,6 +219,90 @@ func TestHistoryOrderAndKeyset(t *testing.T) {
 	}
 }
 
+func mustFeed(t *testing.T, s *Store, f *core.Feed) core.ID {
+	t.Helper()
+	id, err := s.CreateFeed(context.Background(), f)
+	if err != nil {
+		t.Fatalf("mustFeed: %v", err)
+	}
+	return id
+}
+
+func TestExtractionStateLifecycle(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	feedID := mustFeed(t, st, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x.example/feed", NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: true})
+
+	// Two entries inserted pending (newest first by published_at).
+	older := &core.Entry{UserID: core.DefaultUserID, FeedID: feedID, GUID: "a", URL: "https://x.example/a", PublishedAt: now.Add(-2 * time.Hour), CreatedAt: now, Hash: "h1", ExtractState: core.ExtractPending}
+	newer := &core.Entry{UserID: core.DefaultUserID, FeedID: feedID, GUID: "b", URL: "https://x.example/b", PublishedAt: now.Add(-1 * time.Hour), CreatedAt: now, Hash: "h2", ExtractState: core.ExtractPending}
+	if _, err := st.UpsertEntries(ctx, feedID, []*core.Entry{older, newer}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	pend, err := st.ListPendingExtractions(ctx, now, 10)
+	if err != nil || len(pend) != 2 {
+		t.Fatalf("want 2 pending, got %d err=%v", len(pend), err)
+	}
+	if pend[0].URL != "https://x.example/b" { // freshest first
+		t.Fatalf("want newest first, got %s", pend[0].URL)
+	}
+
+	// SetEntryContent → done, leaves pending list at 1.
+	if err := st.SetEntryContent(ctx, pend[0].ID, "<p>full</p>"); err != nil {
+		t.Fatalf("SetEntryContent: %v", err)
+	}
+	got, _ := st.GetEntry(ctx, core.DefaultUserID, pend[0].ID)
+	if got.Content != "<p>full</p>" || got.ExtractState != core.ExtractDone {
+		t.Fatalf("want done+content, got %q %q", got.Content, got.ExtractState)
+	}
+
+	// UpdateExtractState retry: future next_extract_at hides it from the due list.
+	future := now.Add(time.Hour)
+	if err := st.UpdateExtractState(ctx, pend[1].ID, core.ExtractPending, 1, &future); err != nil {
+		t.Fatalf("UpdateExtractState: %v", err)
+	}
+	// Verify attempts persisted.
+	rb, err := st.GetEntry(ctx, core.DefaultUserID, pend[1].ID)
+	if err != nil {
+		t.Fatalf("GetEntry after UpdateExtractState: %v", err)
+	}
+	if rb.ExtractAttempts != 1 {
+		t.Fatalf("ExtractAttempts: want 1, got %d", rb.ExtractAttempts)
+	}
+	if p, _ := st.ListPendingExtractions(ctx, now, 10); len(p) != 0 {
+		t.Fatalf("want 0 due (backoff), got %d", len(p))
+	}
+	if p, _ := st.ListPendingExtractions(ctx, future, 10); len(p) != 1 {
+		t.Fatalf("want 1 due after backoff, got %d", len(p))
+	}
+}
+
+func TestListPendingExtractionsUsesPartialIndex(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	rows, err := st.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN SELECT * FROM entries WHERE extract_state='pending' AND next_extract_at <= 0 ORDER BY published_at DESC, id DESC LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if !strings.Contains(plan, "idx_entries_pending") {
+		t.Fatalf("expected idx_entries_pending, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "TEMP B-TREE") {
+		t.Fatalf("unexpected temp b-tree, plan:\n%s", plan)
+	}
+}
+
 func idOf(es []*core.Entry, i int) core.ID {
 	if i < len(es) {
 		return es[i].ID

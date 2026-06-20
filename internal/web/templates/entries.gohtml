@@ -5,6 +5,7 @@
     <option value="">Uncategorised</option>
     {{range .Categories}}<option value="{{.ID}}">{{.Title}}</option>{{end}}
   </select>
+  <label><input type="checkbox" name="full_content"> Fetch full content</label>
   <button class="primary" type="submit">Subscribe</button>
 </form>
 <h1>{{.Title}}</h1>

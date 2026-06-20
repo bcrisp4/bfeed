@@ -9,6 +9,18 @@ import (
 	"github.com/bcrisp4/bfeed/internal/core"
 )
 
+// SeedEntry inserts e into store via UpsertEntries and returns its assigned ID.
+func SeedEntry(store *MemStore, e *core.Entry) core.ID {
+	ins, err := store.UpsertEntries(context.Background(), e.FeedID, []*core.Entry{e})
+	if err != nil {
+		panic("SeedEntry: " + err.Error())
+	}
+	if len(ins) != 1 {
+		panic("SeedEntry: entry not inserted (tombstone collision or duplicate GUID?)")
+	}
+	return ins[0].ID
+}
+
 type StubFetcher struct {
 	Resp *core.FetchResponse
 	Err  error
@@ -34,9 +46,20 @@ func (c StubClock) Now() time.Time { return c.T }
 
 func DiscardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// StubExtractor returns HTML or Err from Extract, ignoring inputs.
+type StubExtractor struct {
+	HTML string
+	Err  error
+}
+
+func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte) (string, error) {
+	return e.HTML, e.Err
+}
+
 var (
 	_ core.Fetcher    = StubFetcher{}
 	_ core.FeedParser = StubParser{}
 	_ core.Sanitizer  = PassSanitizer{}
 	_ core.Clock      = StubClock{}
+	_ core.Extractor  = StubExtractor{}
 )

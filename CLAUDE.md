@@ -74,16 +74,18 @@ Dependencies point **inward**. `internal/core` holds domain types, the services 
 
 - **Driven adapters** implement core ports: `store/sqlite`, `fetch`, `parse`, `sanitize`, `clock`.
 - **Driving adapters** call core services: `web` (htmx handlers) and the `Poller` (background scheduler).
-- **Services** (`internal/core`): `FeedService` (subscribe/list/delete/refresh + `PollFeed`, which **is** the poll pipeline and satisfies `FeedPoller`), `EntryService`, `Poller` (tick → `ListDueFeeds` → bounded worker pool calling `FeedPoller.PollFeed`).
+- **Services** (`internal/core`): `FeedService` (subscribe/list/delete/refresh + `PollFeed`, which **is** the poll pipeline and satisfies `FeedPoller`), `EntryService`, `Poller` (tick → `ListDueFeeds` → bounded worker pool calling `FeedPoller.PollFeed`), `ScrapeService` (`ScrapeEntry` = the full-content pipeline fetch→extract→sanitise→`SetEntryContent`, satisfies `EntryScraper`), `Scraper` (tick → `ListPendingExtractions` → bounded pool calling `EntryScraper.ScrapeEntry`).
 
 The poll pipeline lives in `FeedService.PollFeed` so the `Poller` only schedules; both share it. `Subscribe` does one immediate poll to populate the feed.
+
+Full-content extraction mirrors polling: `Scraper`/`ScrapeService` are the `Poller`/`FeedService` analogue, driven by DB-backed `entries.extract_state` (`none`/`pending`/`done`/`failed`) + `next_extract_at`; the `Scraper` shares the one `Fetcher` (per-host budget) with the `Poller`.
 
 ## Invariants the tests defend (don't break these)
 
 - **Sanitise before persistence.** Feed/extracted HTML is run through `internal/sanitize` (bluemonday allowlist runs last) before it ever reaches the DB. Entry `Content`/`Summary` in the store are always already-safe HTML; the web layer renders only that as `template.HTML`.
 - **Injected `Clock` in core.** Core/services use `clk.Now()`, never `time.Now()`. The ban is on **core**, not adapters: `store/sqlite` (persistence — `read_at`/tombstone `deleted_at`) and the `web` presentation layer (`humanizeSince` relative timestamps) deliberately read wall-clock.
 - **SQLite shape:** all tables `STRICT`; timestamps `INTEGER` Unix seconds UTC; booleans `0/1` with `CHECK`; `foreign_keys=ON`; **single-writer pool** (`SetMaxOpenConns(1)`); pagination is **keyset**, never `OFFSET`, via `core.Cursor{Key int64, ID}` — `ListEntries` selects the sort column from `EntryFilter.Order` (`OrderPublishedDesc`→`published_at`; `OrderReadAtDesc`→`read_at IS NOT NULL`, the history view). A keyset partial index must carry the trailing `id DESC` tiebreak (e.g. `idx_entries_readhist`) or `EXPLAIN` shows a temp B-tree.
-- **User scoping:** every store query is scoped by `user_id`, always `core.DefaultUserID` (1) in the MVP. Never trust an id without its owning user.
+- **User scoping:** every *user-facing* store query is scoped by `user_id` (always `core.DefaultUserID` (1) in the MVP) — never trust an id without its owning user. **Background system sweeps are the deliberate exception** and take no `user_id`: `Poller.ListDueFeeds`, the cleaner, and the `Scraper`'s `ListPendingExtractions`/`SetEntryContent`/`UpdateExtractState` run as the system across all users — don't flag these as scoping violations.
 - **Tombstones** `(feed_id, guid)` block re-poll resurrection of individually deleted / TTL-expired entries **while the feed exists**. Deleting a whole feed cascades its entries *and* tombstones away and writes none (a re-subscribe gets a fresh `feed_id`). `(feed_id, guid)` is unique; re-fetched entries upsert by content hash.
 - **Politeness:** fetches use conditional GET (ETag/If-Modified-Since → 304 short-circuit), a per-host concurrency cap, and exponential backoff honoring `Retry-After`.
 

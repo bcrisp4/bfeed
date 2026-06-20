@@ -52,11 +52,14 @@ MVP shows feed-provided content only.
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| Readability article scrape | §10.4, §13 | `extract/` package (`readeck/go-readability` v2); `Extractor` port | Sanitise output before store (invariant) | deferred |
-| Decoupled scrape worker pool + queue | §13 | second bounded pool; `BFEED_SCRAPE_WORKERS` | Must not starve feed polling | deferred |
-| Per-feed `FetchFullContent` opt-in | §7, §11 | `feeds.fetch_full_content` column; edit UI | | deferred |
-| `SetEntryContent` post-extraction write | §8 | `EntryStore.SetEntryContent` | | deferred |
-| Backfill cap per host per cycle | §13 | `BFEED_BACKFILL_PER_HOST_PER_CYCLE`; live-over-backfill priority | Fixes "big new feed blocks for ages" | deferred |
+| Readability article scrape | §10.4, §13 | `extract/` package (`readeck/go-readability` v2); `Extractor` port | Sanitise output before store (invariant) | done (iter 4) |
+| Decoupled scrape worker pool + queue | §13 | DB-backed `extract_state` + background `Scraper` sweep; `BFEED_SCRAPE_WORKERS` | Must not starve feed polling | done (iter 4) |
+| Per-feed `FetchFullContent` opt-in | §7, §11 | `feeds.fetch_full_content` column; edit UI | | done (iter 4) |
+| `SetEntryContent` post-extraction write | §8 | `EntryStore.SetEntryContent` | | done (iter 4) |
+| Backfill cap per host per cycle | §13 | `BFEED_BACKFILL_PER_HOST_PER_CYCLE`; live-over-backfill priority | Fixes "big new feed blocks for ages" — deferred; global per-cycle batch cap (`BFEED_SCRAPE_BATCH`) + shared per-host semaphore cover it for now | deferred |
+| Dispatch-time `next_extract_at` lease | §13 | `Scraper.dispatch` bumps `next_extract_at` (e.g. `now+Tick`) before queueing an entry; likely a new `LeasePendingExtraction` store method | Prevents the `Scraper` re-dispatching still-in-flight entries when a batch's scrapes outlast a tick (duplicate fetch; a stale worker can revert a `done` entry). Same accepted characteristic the `Poller` has today | deferred |
+| Re-scrape on in-place content change | §13 | reset `extract_state` → `pending` in `UpsertEntries`' hash-changed update branch when the feed has `fetch_full_content` | Today a hash-changed re-poll overwrites scraped full content with the feed snippet and leaves `done`, so edited articles are never re-scraped (documented "kept simple" limitation) | deferred |
+| Shared backoff/scheduler abstraction | §12, §13 | factor the duplicated exponential-backoff math (`ExtractBackoff` vs `PollReschedule`) and worker-pool driver (`Scraper` vs `Poller`) onto a common helper | Reduce duplication — a fix to the backoff or drain logic must currently be applied in two places and will drift | deferred |
 
 ### A4. Image proxy / privacy hardening
 MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Acceptable on the tailnet.
@@ -192,7 +195,7 @@ Order chosen to unblock the most daily-driver value first; each iteration is add
 | 1 (MVP) | Core loop | see `mvp-design.md` |
 | 2 | Reading polish | History view, bulk mark-all-read, feed enable/disable UI, theme toggle, PWA add-to-home |
 | 3 | Find things | Categories ✓ done (iter 3); FTS5 search + UI ✓ done (iter 3) |
-| 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) |
+| 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) ✓ done (iter 4) |
 | 5 | Privacy | Image proxy (+ sanitiser img rewrite) |
 | 6 | Smarter polling | Adaptive interval + weekly count; token-bucket limiter; error-limit; robots Crawl-Delay |
 | 7 | Housekeeping | TTL cleaner + per-user TTL + tombstone pruning + WAL maintenance |
@@ -211,3 +214,4 @@ _(Move shipped items here with their iteration number.)_
 - History view (`/history`, read entries by `read_at`) — iter 2.
 - Categories (feeds → categories, aggregated category stream, CRUD) — iter 3.
 - Full-text search (FTS5 over title/content/summary, bm25-ranked, /search) — iter 3.
+- Full-content extraction (opt-in per feed, DB-backed scrape sweep) — iter 4.

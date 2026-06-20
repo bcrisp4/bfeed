@@ -21,40 +21,44 @@ type EntriesFt struct {
 }
 
 type Entry struct {
-	ID          int64
-	UserID      int64
-	FeedID      int64
-	Guid        string
-	Url         string
-	Title       string
-	Author      string
-	Content     string
-	Summary     string
-	PublishedAt int64
-	Status      string
-	Starred     int64
-	ReadAt      sql.NullInt64
-	CreatedAt   int64
-	Hash        string
+	ID              int64
+	UserID          int64
+	FeedID          int64
+	Guid            string
+	Url             string
+	Title           string
+	Author          string
+	Content         string
+	Summary         string
+	PublishedAt     int64
+	Status          string
+	Starred         int64
+	ReadAt          sql.NullInt64
+	CreatedAt       int64
+	Hash            string
+	ExtractState    string
+	ExtractAttempts int64
+	NextExtractAt   sql.NullInt64
 }
 
 type Feed struct {
-	ID           int64
-	UserID       int64
-	FeedUrl      string
-	SiteUrl      string
-	Title        string
-	Description  string
-	Etag         string
-	LastModified string
-	Disabled     int64
-	CheckedAt    sql.NullInt64
-	NextCheckAt  int64
-	ErrorCount   int64
-	LastError    string
-	CreatedAt    int64
-	UpdatedAt    int64
-	CategoryID   sql.NullInt64
+	ID               int64
+	UserID           int64
+	FeedUrl          string
+	SiteUrl          string
+	Title            string
+	Description      string
+	Etag             string
+	LastModified     string
+	Disabled         int64
+	CheckedAt        sql.NullInt64
+	NextCheckAt      int64
+	ErrorCount       int64
+	LastError        string
+	CreatedAt        int64
+	UpdatedAt        int64
+	CategoryID       sql.NullInt64
+	FetchFullContent int64
 }
 
 type Tombstone struct {

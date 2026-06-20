@@ -17,6 +17,9 @@ func TestLoadDefaults(t *testing.T) {
 	if c.PollInterval != 15*time.Minute || c.FeedWorkers != 20 || c.HostConcurrency != 3 {
 		t.Fatalf("poll defaults wrong: %+v", c)
 	}
+	if c.ScrapeWorkers != 20 || c.ScrapeTick != time.Minute || c.ScrapeBatch != 50 || c.ScrapeMaxAttempts != 3 {
+		t.Fatalf("scrape defaults wrong: %+v", c)
+	}
 }
 
 func TestLoadRequiresBaseURL(t *testing.T) {

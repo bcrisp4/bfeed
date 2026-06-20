@@ -10,22 +10,23 @@ import (
 
 func feedFromRow(r sqlc.Feed) *core.Feed {
 	return &core.Feed{
-		ID:           core.ID(r.ID),
-		UserID:       core.ID(r.UserID),
-		CategoryID:   ptrID(r.CategoryID),
-		FeedURL:      r.FeedUrl,
-		SiteURL:      r.SiteUrl,
-		Title:        r.Title,
-		Description:  r.Description,
-		ETag:         r.Etag,
-		LastModified: r.LastModified,
-		Disabled:     r.Disabled != 0,
-		CheckedAt:    ptrUnix(r.CheckedAt),
-		NextCheckAt:  fromUnix(r.NextCheckAt),
-		ErrorCount:   int(r.ErrorCount),
-		LastError:    r.LastError,
-		CreatedAt:    fromUnix(r.CreatedAt),
-		UpdatedAt:    fromUnix(r.UpdatedAt),
+		ID:               core.ID(r.ID),
+		UserID:           core.ID(r.UserID),
+		CategoryID:       ptrID(r.CategoryID),
+		FeedURL:          r.FeedUrl,
+		SiteURL:          r.SiteUrl,
+		Title:            r.Title,
+		Description:      r.Description,
+		ETag:             r.Etag,
+		LastModified:     r.LastModified,
+		Disabled:         r.Disabled != 0,
+		FetchFullContent: r.FetchFullContent != 0,
+		CheckedAt:        ptrUnix(r.CheckedAt),
+		NextCheckAt:      fromUnix(r.NextCheckAt),
+		ErrorCount:       int(r.ErrorCount),
+		LastError:        r.LastError,
+		CreatedAt:        fromUnix(r.CreatedAt),
+		UpdatedAt:        fromUnix(r.UpdatedAt),
 	}
 }
 
@@ -38,21 +39,22 @@ func b2i(b bool) int64 {
 
 func (s *Store) CreateFeed(ctx context.Context, f *core.Feed) (core.ID, error) {
 	id, err := s.q.CreateFeed(ctx, sqlc.CreateFeedParams{
-		UserID:       int64(f.UserID),
-		FeedUrl:      f.FeedURL,
-		SiteUrl:      f.SiteURL,
-		Title:        f.Title,
-		Description:  f.Description,
-		Etag:         f.ETag,
-		LastModified: f.LastModified,
-		Disabled:     b2i(f.Disabled),
-		CheckedAt:    nullUnix(f.CheckedAt),
-		NextCheckAt:  toUnix(f.NextCheckAt),
-		ErrorCount:   int64(f.ErrorCount),
-		LastError:    f.LastError,
-		CreatedAt:    toUnix(f.CreatedAt),
-		UpdatedAt:    toUnix(f.UpdatedAt),
-		CategoryID:   nullID(f.CategoryID),
+		UserID:           int64(f.UserID),
+		FeedUrl:          f.FeedURL,
+		SiteUrl:          f.SiteURL,
+		Title:            f.Title,
+		Description:      f.Description,
+		Etag:             f.ETag,
+		LastModified:     f.LastModified,
+		Disabled:         b2i(f.Disabled),
+		CheckedAt:        nullUnix(f.CheckedAt),
+		NextCheckAt:      toUnix(f.NextCheckAt),
+		ErrorCount:       int64(f.ErrorCount),
+		LastError:        f.LastError,
+		CreatedAt:        toUnix(f.CreatedAt),
+		UpdatedAt:        toUnix(f.UpdatedAt),
+		CategoryID:       nullID(f.CategoryID),
+		FetchFullContent: b2i(f.FetchFullContent),
 	})
 	if err != nil {
 		return 0, mapErr(err)
@@ -123,6 +125,21 @@ func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
 	n, err := s.q.DeleteFeed(ctx, sqlc.DeleteFeedParams{
 		ID:     int64(feedID),
 		UserID: int64(userID),
+	})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool) error {
+	n, err := s.q.SetFeedFullContent(ctx, sqlc.SetFeedFullContentParams{
+		FetchFullContent: b2i(on),
+		ID:               int64(feedID),
+		UserID:           int64(userID),
 	})
 	if err != nil {
 		return mapErr(err)

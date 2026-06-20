@@ -44,6 +44,11 @@ type Sanitizer interface {
 	Sanitize(html, baseURL string) string
 }
 
+// Extractor pulls main-article HTML from a fetched page (Readability-style).
+type Extractor interface {
+	Extract(ctx context.Context, pageURL string, page []byte) (html string, err error)
+}
+
 type FeedStore interface {
 	CreateFeed(ctx context.Context, f *Feed) (ID, error)
 	GetFeed(ctx context.Context, userID, feedID ID) (*Feed, error)
@@ -52,6 +57,7 @@ type FeedStore interface {
 	UpdateFeed(ctx context.Context, f *Feed) error
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
+	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
 }
 
 type EntryStore interface {
@@ -61,6 +67,11 @@ type EntryStore interface {
 	SetStatus(ctx context.Context, userID ID, ids []ID, s EntryStatus) error
 	SetStarred(ctx context.Context, userID ID, ids []ID, starred bool) error
 	DeleteEntry(ctx context.Context, userID, entryID ID) error
+	ListPendingExtractions(ctx context.Context, now time.Time, limit int) ([]*Entry, error)
+	SetEntryContent(ctx context.Context, entryID ID, content string) error
+	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
+	MarkFeedEntriesPending(ctx context.Context, feedID ID, at time.Time) error
+	CancelFeedExtractions(ctx context.Context, feedID ID) error
 }
 
 type CategoryStore interface {
@@ -87,4 +98,10 @@ type Store interface {
 // Implemented by FeedService; consumed by Poller so polling logic lives in one place.
 type FeedPoller interface {
 	PollFeed(ctx context.Context, f *Feed) error
+}
+
+// EntryScraper scrapes a single entry (fetch→extract→sanitise→persist).
+// Implemented by ScrapeService; consumed by Scraper.
+type EntryScraper interface {
+	ScrapeEntry(ctx context.Context, e *Entry) error
 }

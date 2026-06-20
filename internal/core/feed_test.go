@@ -27,7 +27,7 @@ func TestSubscribeCreatesFeedAndEntries(t *testing.T) {
 	}}}
 	svc, clk := newFeedSvc(store, fetcher, parser)
 
-	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil)
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -49,10 +49,10 @@ func TestSubscribeDuplicateConflict(t *testing.T) {
 	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("x")}}
 	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}}
 	svc, _ := newFeedSvc(store, fetcher, parser)
-	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil); err != nil {
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil); err == nil {
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/f", nil, false); err == nil {
 		t.Fatal("expected conflict on duplicate subscribe")
 	}
 }
@@ -74,6 +74,36 @@ func TestPollFeed304ResetsErrorAndReschedules(t *testing.T) {
 	}
 	if !got.NextCheckAt.Equal(clk.Now().Add(15 * time.Minute)) {
 		t.Fatalf("304 reschedule wrong: %v", got.NextCheckAt)
+	}
+}
+
+func TestSetFullContentBackfillsAllExistingEntries(t *testing.T) {
+	store := coretest.NewMemStore()
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewFeedService(store, nil, nil, nil, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	ctx := context.Background()
+	fid, err := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x/f", NextCheckAt: clk.T, CreatedAt: clk.T, UpdatedAt: clk.T})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range []string{"a", "b", "c"} { // none entries: all should be backfilled
+		coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: g, URL: "https://x/" + g, PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractNone})
+	}
+	// failed entry: should also be re-queued by backfill
+	coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "d", URL: "https://x/d", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractFailed})
+	// done entry: must NOT become pending after backfill
+	coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "e", URL: "https://x/e", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractDone})
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 4 {
+		t.Fatalf("want 4 pending after enable (3 none + 1 failed, skipping done), got %d", len(p))
+	}
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if p, _ := store.ListPendingExtractions(ctx, clk.T, 100); len(p) != 0 {
+		t.Fatalf("want 0 pending after disable, got %d", len(p))
 	}
 }
 

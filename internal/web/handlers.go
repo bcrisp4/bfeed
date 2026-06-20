@@ -40,11 +40,12 @@ type feedsCatVM struct {
 }
 
 type feedRowVM struct {
-	ID         core.ID
-	Title      string
-	FeedURL    string
-	LastError  string
-	CategoryID int64 // 0 = uncategorised
+	ID          core.ID
+	Title       string
+	FeedURL     string
+	LastError   string
+	CategoryID  int64 // 0 = uncategorised
+	FullContent bool
 }
 
 type feedGroupVM struct {
@@ -174,7 +175,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		if f.CategoryID != nil {
 			cid = int64(*f.CategoryID)
 		}
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid}
+		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent}
 	}
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM
@@ -207,11 +208,29 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad category id", http.StatusBadRequest)
 		return
 	}
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID); err != nil {
+	full := r.FormValue("full_content") == "on"
+	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID, full); err != nil {
 		http.Error(w, "subscribe failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (h *Handler) setFeedFullContent(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	on := r.FormValue("full_content") == "on"
+	if err := h.feeds.SetFullContent(r.Context(), uid, id, on); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	// The toggle's hx-vals is baked from the old state at render time, so reload
+	// the feeds page to re-render the button — otherwise it keeps posting the
+	// same value and the toggle is one-way.
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
