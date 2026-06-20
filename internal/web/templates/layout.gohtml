@@ -3,8 +3,11 @@
 <title>bfeed</title><link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script></head>
 <body>
-<header><a href="/"><strong>bfeed</strong></a>
-<nav><a href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}>Unread</a><a href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}>Feeds</a><a href="/categories"{{if eq .Active "categories"}} aria-current="page"{{end}}>Categories</a><a href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}>Starred</a><a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>History</a></nav>
-<form class="search" action="/search" method="get" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"></form></header>
+<header class="appbar">
+  <a class="brand" href="/">bfeed</a>
+  {{template "topnav" .}}
+  <form class="search desktop-search" action="/search" method="get" role="search"><input type="search" name="q" placeholder="Search" aria-label="Search"></form>
+</header>
 <main>{{template "content" .}}</main>
+{{template "bottombar" .}}
 </body></html>{{end}}
