@@ -34,7 +34,7 @@ type Handler struct {
 func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger) http.Handler {
 	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates()}
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
+	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
@@ -79,6 +79,15 @@ func parseTemplates() map[string]*template.Template {
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
 	return out
+}
+
+// cacheStatic adds a long, immutable cache to embedded static assets. They are
+// content-stable for a given binary; fonts especially must not be re-fetched.
+func cacheStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logging(log *slog.Logger, next http.Handler) http.Handler {
