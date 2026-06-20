@@ -27,14 +27,14 @@ type Config struct {
 
 func Load() (Config, error) {
 	c := Config{
-		ListenAddr:      env("BFEED_LISTEN_ADDR", ":8080"),
-		BaseURL:         env("BFEED_BASE_URL", ""),
-		DatabasePath:    env("BFEED_DATABASE_PATH", "./bfeed.db"),
-		LogLevel:        env("BFEED_LOG_LEVEL", "info"),
-		LogFormat:       env("BFEED_LOG_FORMAT", "json"),
-		PollTick:        envDur("BFEED_POLL_TICK", time.Minute),
-		PollInterval:    envDur("BFEED_POLL_INTERVAL", 15*time.Minute),
-		MaxBackoff:      envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
+		ListenAddr:        env("BFEED_LISTEN_ADDR", ":8080"),
+		BaseURL:           env("BFEED_BASE_URL", ""),
+		DatabasePath:      env("BFEED_DATABASE_PATH", "./bfeed.db"),
+		LogLevel:          env("BFEED_LOG_LEVEL", "info"),
+		LogFormat:         env("BFEED_LOG_FORMAT", "json"),
+		PollTick:          envDur("BFEED_POLL_TICK", time.Minute),
+		PollInterval:      envDur("BFEED_POLL_INTERVAL", 15*time.Minute),
+		MaxBackoff:        envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
 		FeedWorkers:       envInt("BFEED_FEED_WORKERS", 20),
 		BatchSize:         envInt("BFEED_BATCH_SIZE", 100),
 		HostConcurrency:   envInt("BFEED_HOST_CONCURRENCY", 3),

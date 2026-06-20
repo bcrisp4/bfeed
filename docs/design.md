@@ -871,6 +871,9 @@ BFEED_HOST_RATE_PER_SEC        1           # per-host token-bucket rate
 BFEED_HOST_BURST               3
 # article scraping (full content)
 BFEED_SCRAPE_WORKERS           20
+BFEED_SCRAPE_TICK              1m
+BFEED_SCRAPE_BATCH             50
+BFEED_SCRAPE_MAX_ATTEMPTS      3
 BFEED_BACKFILL_PER_HOST_PER_CYCLE  30
 # retention
 BFEED_DEFAULT_ENTRY_TTL_DAYS   365         # per-user override stored in DB
