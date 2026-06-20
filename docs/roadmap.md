@@ -57,6 +57,9 @@ MVP shows feed-provided content only.
 | Per-feed `FetchFullContent` opt-in | §7, §11 | `feeds.fetch_full_content` column; edit UI | | done (iter 4) |
 | `SetEntryContent` post-extraction write | §8 | `EntryStore.SetEntryContent` | | done (iter 4) |
 | Backfill cap per host per cycle | §13 | `BFEED_BACKFILL_PER_HOST_PER_CYCLE`; live-over-backfill priority | Fixes "big new feed blocks for ages" — deferred; global per-cycle batch cap (`BFEED_SCRAPE_BATCH`) + shared per-host semaphore cover it for now | deferred |
+| Dispatch-time `next_extract_at` lease | §13 | `Scraper.dispatch` bumps `next_extract_at` (e.g. `now+Tick`) before queueing an entry; likely a new `LeasePendingExtraction` store method | Prevents the `Scraper` re-dispatching still-in-flight entries when a batch's scrapes outlast a tick (duplicate fetch; a stale worker can revert a `done` entry). Same accepted characteristic the `Poller` has today | deferred |
+| Re-scrape on in-place content change | §13 | reset `extract_state` → `pending` in `UpsertEntries`' hash-changed update branch when the feed has `fetch_full_content` | Today a hash-changed re-poll overwrites scraped full content with the feed snippet and leaves `done`, so edited articles are never re-scraped (documented "kept simple" limitation) | deferred |
+| Shared backoff/scheduler abstraction | §12, §13 | factor the duplicated exponential-backoff math (`ExtractBackoff` vs `PollReschedule`) and worker-pool driver (`Scraper` vs `Poller`) onto a common helper | Reduce duplication — a fix to the backoff or drain logic must currently be applied in two places and will drift | deferred |
 
 ### A4. Image proxy / privacy hardening
 MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Acceptable on the tailnet.
