@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -81,11 +82,18 @@ func parseTemplates() map[string]*template.Template {
 	return out
 }
 
-// cacheStatic adds a long, immutable cache to embedded static assets. They are
-// content-stable for a given binary; fonts especially must not be re-fetched.
+// cacheStatic sets cache headers on embedded static assets. Fonts are
+// content-stable (a given file name always holds the same face), so they are
+// cached immutably for a year. CSS/JS can change between releases and carry no
+// content hash in their names, so they get a short cache and are re-fetched
+// soon after a deploy rather than served stale.
 func cacheStatic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		if strings.HasSuffix(r.URL.Path, ".woff2") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
