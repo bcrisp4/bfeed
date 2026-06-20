@@ -20,7 +20,8 @@ func NewSearchService(idx SearchIndex, log *slog.Logger) *SearchService {
 }
 
 func (s *SearchService) Search(ctx context.Context, userID ID, query string, f EntryFilter) ([]*Entry, *Cursor, error) {
-	if strings.TrimSpace(query) == "" {
+	query = strings.TrimSpace(query)
+	if query == "" {
 		return nil, nil, nil
 	}
 	return s.idx.Search(ctx, userID, query, f)
