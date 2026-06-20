@@ -13,11 +13,17 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Added
 
+- Redesigned web UI: Light/Sepia/Dark themes (defaults to your OS preference) with a Preferences page, self-hosted Literata + IBM Plex Mono typography, per-post summaries in lists, and reading-time on the reading view.
+- Mobile-first navigation: a thumb-reachable bottom tab bar with a "More" sheet on phones.
 - Opt-in per-feed full-content extraction — bfeed can fetch and extract the full
   article text (Readability) for feeds you flag, replacing the feed-provided
   snippet; falls back to feed content when extraction is disabled or fails.
   Configurable via `BFEED_SCRAPE_WORKERS`, `BFEED_SCRAPE_TICK`,
   `BFEED_SCRAPE_BATCH`, `BFEED_SCRAPE_MAX_ATTEMPTS`.
+
+### Changed
+
+- Article rendering now contains over-wide images, code blocks, and tables so they no longer break the page layout.
 
 ## [0.2.0] - 2026-06-20
 
