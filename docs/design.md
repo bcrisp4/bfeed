@@ -1032,7 +1032,14 @@ These hold across all sessions. Tests must defend them.
   aggregated per-category entry stream filters via a `feeds` JOIN in `ListEntries`, kept sort-free
   by a new `idx_entries_user_pub (user_id, published_at DESC, id DESC)`; `/categories` index shows
   unread counts incl. an uncategorised bucket; assignment at subscribe time and via `SetFeedCategory`.
-  FTS5 search (the other half of iter 3) remains deferred.
+- **Search (iter 3):** FTS5 external-content `entries_fts` over **title, content, summary**
+  (design §11 listed title+content; summary added so description-only RSS feeds are body-searchable),
+  synced by triggers using **`AFTER UPDATE OF title, content, summary`** so read/star toggles don't
+  churn the index. Results are bm25-ranked (`ORDER BY rank`) and **capped at 50 with no pagination**
+  this iteration (relevance has no stable keyset; rank-keyset deferred). A per-token quote-and-AND
+  MATCH builder (prefix-* on the last token) keeps arbitrary input from raising FTS5 syntax errors;
+  operator syntax is intentionally not exposed. FTS5 MATCH construction lives in the sqlite adapter,
+  keeping core FTS5-agnostic.
 
 ## 30. Research basis & sources
 
