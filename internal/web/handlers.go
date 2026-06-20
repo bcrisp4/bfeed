@@ -480,12 +480,19 @@ func toEntryVMs(es []*core.Entry, feedTitles map[core.ID]string) []entryVM {
 }
 
 func toEntryVM(e *core.Entry, feedTitle string) entryVM {
+	// Prefer full content; fall back to summary when a feed only ships
+	// <summary>/<description> (atom summary-only feeds, most RSS). Both are
+	// already sanitised in the store, so either is safe to render as HTML.
+	body := e.Content
+	if body == "" {
+		body = e.Summary
+	}
 	return entryVM{
 		ID:        e.ID,
 		Title:     e.Title,
 		URL:       e.URL,
 		Author:    e.Author,
-		Content:   templateHTML(e.Content),
+		Content:   templateHTML(body),
 		Status:    string(e.Status),
 		Starred:   e.Starred,
 		FeedID:    e.FeedID,

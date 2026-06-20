@@ -317,6 +317,50 @@ func TestSearchNoMatchesShowsEmptyState(t *testing.T) {
 	}
 }
 
+func TestEntryDetailFallsBackToSummaryWhenContentEmpty(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	// Atom <summary>-only feeds (e.g. Simon Willison) put the body in Summary, not Content.
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "P",
+		Content: "", Summary: "<p>full body from summary</p>",
+		Status: core.StatusUnread, PublishedAt: time.Unix(100, 0),
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "full body from summary") {
+		t.Fatalf("detail view did not fall back to summary:\n%s", rec.Body.String())
+	}
+}
+
+func TestEntryDetailPrefersContentOverSummary(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "P",
+		Content: "<p>full content</p>", Summary: "<p>short summary</p>",
+		Status: core.StatusUnread, PublishedAt: time.Unix(100, 0),
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "full content") {
+		t.Fatalf("detail view missing content:\n%s", body)
+	}
+	if strings.Contains(body, "short summary") {
+		t.Fatalf("detail view should not render summary when content present:\n%s", body)
+	}
+}
+
 func TestSearchCapsHeaderAtFifty(t *testing.T) {
 	h, store := newWeb(t)
 	ctx := context.Background()
