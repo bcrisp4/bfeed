@@ -69,10 +69,11 @@ dockers_v2:
       org.opencontainers.image.source: "https://github.com/bcrisp4/bfeed"
 
 # Release notes come from CHANGELOG.md (passed via --release-notes in
-# release.yml), so GoReleaser's own commit-based changelog is disabled.
-# See docs/changelog.md.
-changelog:
-  disable: true
+# release.yml). GoReleaser loads that file inside the *changelog* pipe, so the
+# pipe must stay enabled — `changelog.disable: true` would skip it and leave the
+# release body empty even with --release-notes set. The flag takes precedence
+# over commit-based generation, so no auto changelog is produced. See
+# docs/changelog.md.
 
 release:
   github:

@@ -71,12 +71,16 @@ tagging you rename `[Unreleased]` to the new version and open a fresh empty
 ```
 
 On the tag push, `release.yml` extracts that section's body into a notes file
-and passes it to GoReleaser via `--release-notes`, so the GitHub Release body is
-the section's entries (the `## [0.2.0]` heading itself is dropped — the release
-is already titled with the version). `changelog.disable: true` in
-[`.goreleaser.yaml`](../.goreleaser.yaml) turns off GoReleaser's own
-commit-based changelog. If the section for the tag is missing, the release job
-fails fast rather than publishing empty notes.
+(written under `$RUNNER_TEMP`, outside the worktree, so GoReleaser doesn't abort
+on a dirty tree) and passes it to GoReleaser via `--release-notes`, so the GitHub
+Release body is the section's entries (the `## [0.2.0]` heading itself is dropped
+— the release is already titled with the version). The flag takes precedence over
+GoReleaser's own commit-based changelog, so no auto changelog is generated.
+GoReleaser loads the `--release-notes` file inside its *changelog* pipe, so
+[`.goreleaser.yaml`](../.goreleaser.yaml) must **not** set `changelog.disable:
+true` — that would skip the pipe and leave the release body empty. If the section
+for the tag is missing, the release job fails fast rather than publishing empty
+notes.
 
 Also update the two compare/release links at the bottom of `CHANGELOG.md` when
 you cut a version.
