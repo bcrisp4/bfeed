@@ -8,8 +8,9 @@
 
 {{define "entryrow"}}
 <div class="entry {{if eq .Status "read"}}read{{end}}" id="entry-{{.ID}}">
-  <h2><a href="/entries/{{.ID}}">{{.Title}}</a></h2>
+  <h2>{{if ne .Status "read"}}<span class="unread-dot" aria-hidden="true">▪</span>{{end}}<a href="/entries/{{.ID}}">{{.Title}}</a></h2>
   <div class="meta">{{.FeedTitle}} · {{.Published}}</div>
+  {{if .Summary}}<p class="entry-summary">{{.Summary}}</p>{{end}}
   <div class="actions">
     <button hx-post="/entries/{{.ID}}/read" hx-target="#entry-{{.ID}}" hx-swap="outerHTML">
       {{if eq .Status "read"}}Mark unread{{else}}Mark read{{end}}</button>
