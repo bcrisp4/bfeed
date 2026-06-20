@@ -81,8 +81,8 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| Categorise feeds; filter by category | §9.1, §18 | `categories` table + `idx_categories_user`; `feeds.category_id`; `CategoryStore`; sidebar grouping; filter | | deferred |
-| Category CRUD | §9.1 | category routes; delete → feeds become uncategorised | | deferred |
+| Categorise feeds; filter by category | §9.1, §18 | `categories` table + `idx_categories_user`; `feeds.category_id`; `CategoryStore`; sidebar grouping; filter | | done (iter 3) |
+| Category CRUD | §9.1 | category routes; delete → feeds become uncategorised | | done (iter 3) |
 
 ### A7. Reading features
 
@@ -191,7 +191,7 @@ Order chosen to unblock the most daily-driver value first; each iteration is add
 |---|---|---|
 | 1 (MVP) | Core loop | see `mvp-design.md` |
 | 2 | Reading polish | History view, bulk mark-all-read, feed enable/disable UI, theme toggle, PWA add-to-home |
-| 3 | Find things | FTS5 search + UI; categories |
+| 3 | Find things | FTS5 search + UI (categories ✓ done; search pending) |
 | 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) |
 | 5 | Privacy | Image proxy (+ sanitiser img rewrite) |
 | 6 | Smarter polling | Adaptive interval + weekly count; token-bucket limiter; error-limit; robots Crawl-Delay |
@@ -209,3 +209,4 @@ Sequence is a guide, not a contract — reorder by what hurts most in daily use.
 _(Move shipped items here with their iteration number.)_
 - Starred view (`/starred`) — MVP.
 - History view (`/history`, read entries by `read_at`) — iter 2.
+- Categories (feeds → categories, aggregated category stream, CRUD) — iter 3.
