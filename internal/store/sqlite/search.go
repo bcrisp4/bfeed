@@ -17,7 +17,7 @@ func buildMatch(raw string) string {
 		if !hasIndexable(tok) {
 			continue
 		}
-		quoted = append(quoted, `"`+strings.ReplaceAll(tok, `"`, "")+`"`)
+		quoted = append(quoted, `"`+strings.ReplaceAll(tok, `"`, `""`)+`"`)
 	}
 	if len(quoted) == 0 {
 		return ""
