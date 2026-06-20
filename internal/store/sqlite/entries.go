@@ -110,30 +110,41 @@ func (s *Store) GetEntry(ctx context.Context, userID, entryID core.ID) (*core.En
 func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFilter) ([]*core.Entry, *core.Cursor, error) {
 	var where []string
 	var args []any
-	where = append(where, "user_id = ?")
+	where = append(where, "e.user_id = ?")
 	args = append(args, int64(userID))
 	if f.FeedID != nil {
-		where = append(where, "feed_id = ?")
+		where = append(where, "e.feed_id = ?")
 		args = append(args, int64(*f.FeedID))
 	}
 	if f.Status != nil {
-		where = append(where, "status = ?")
+		where = append(where, "e.status = ?")
 		args = append(args, string(*f.Status))
 	}
 	if f.Starred != nil {
-		where = append(where, "starred = ?")
+		where = append(where, "e.starred = ?")
 		args = append(args, b2i(*f.Starred))
+	}
+	// Category filter joins feeds (entries don't carry category). The all-statuses
+	// published-order scan is served sort-free by idx_entries_user_pub.
+	join := ""
+	if f.CategoryID != nil {
+		join = " JOIN feeds f ON e.feed_id = f.id"
+		where = append(where, "f.category_id = ?")
+		args = append(args, int64(*f.CategoryID))
+	} else if f.Uncategorised {
+		join = " JOIN feeds f ON e.feed_id = f.id"
+		where = append(where, "f.category_id IS NULL")
 	}
 	// Order column: history (read_at) vs default (published_at). The column name
 	// comes from this closed switch, never from user input.
-	orderCol := "published_at"
+	orderCol := "e.published_at"
 	if f.Order == core.OrderReadAtDesc {
-		orderCol = "read_at"
-		where = append(where, "read_at IS NOT NULL") // history membership
+		orderCol = "e.read_at"
+		where = append(where, "e.read_at IS NOT NULL") // history membership
 	}
 	if f.Cursor != nil {
 		// Strictly older than the cursor (newest-first keyset).
-		where = append(where, fmt.Sprintf("(%s < ? OR (%s = ? AND id < ?))", orderCol, orderCol))
+		where = append(where, fmt.Sprintf("(%s < ? OR (%s = ? AND e.id < ?))", orderCol, orderCol))
 		args = append(args, f.Cursor.Key, f.Cursor.Key, int64(f.Cursor.ID))
 	}
 	limit := f.Limit
@@ -141,10 +152,10 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 		limit = 50
 	}
 	query := fmt.Sprintf( //nolint:gosec // G201: orderCol is allowlisted; values are bound params
-		`SELECT id, user_id, feed_id, guid, url, title, author, content, summary,
-		        published_at, status, starred, read_at, created_at, hash
-		 FROM entries WHERE %s ORDER BY %s DESC, id DESC LIMIT ?`,
-		strings.Join(where, " AND "), orderCol)
+		`SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author, e.content, e.summary,
+		        e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash
+		 FROM entries e%s WHERE %s ORDER BY %s DESC, e.id DESC LIMIT ?`,
+		join, strings.Join(where, " AND "), orderCol)
 	args = append(args, int64(limit+1)) // fetch one extra to detect next page
 
 	rows, err := s.db.QueryContext(ctx, query, args...)

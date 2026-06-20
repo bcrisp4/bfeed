@@ -13,9 +13,16 @@ type User struct {
 	CreatedAt time.Time
 }
 
+type Category struct {
+	ID     ID
+	UserID ID
+	Title  string
+}
+
 type Feed struct {
 	ID           ID
 	UserID       ID
+	CategoryID   *ID // nil = uncategorised
 	FeedURL      string
 	SiteURL      string
 	Title        string
@@ -81,10 +88,12 @@ type Cursor struct {
 
 // EntryFilter expresses list criteria; zero value = all entries for the user.
 type EntryFilter struct {
-	FeedID  *ID
-	Status  *EntryStatus
-	Starred *bool
-	Limit   int
-	Cursor  *Cursor
-	Order   Order
+	FeedID        *ID
+	Status        *EntryStatus
+	Starred       *bool
+	CategoryID    *ID  // filter to one category (via a feeds JOIN)
+	Uncategorised bool // feeds with no category; distinct from a nil CategoryID (= all)
+	Limit         int
+	Cursor        *Cursor
+	Order         Order
 }

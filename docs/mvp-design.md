@@ -28,7 +28,7 @@ Everything not on that loop is deferred. Leanest possible first ship; iterate fr
 | Polling | **Fixed interval** + politeness (conditional GET, per-host concurrency cap, exp backoff), one bounded worker pool | Adaptive scheduler, weekly-count, token-bucket rate limiter, scrape pool (§12–13) |
 | Content | Show feed-provided content, **sanitised** | Full-content scrape / Readability (§13), image proxy (§10.6) |
 | Search | — | FTS5 full-text search (§15) |
-| Organisation | Flat feed list | Categories (§9.1) |
+| Organisation | Flat feed list | Categories (§9.1) — shipped iter 3 (see `docs/superpowers/specs/2026-06-20-feed-categories-design.md`) |
 | Retention | **Tombstones on delete** (correctness). No TTL cleaner. | TTL cleaner, prune, WAL maintenance job (§14) |
 | API | — | REST API + bearer tokens (§17) |
 | Data portability | — | OPML import/export (§19) |

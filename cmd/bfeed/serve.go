@@ -57,6 +57,7 @@ func runServe() int {
 			Jitter:     jitter,
 		})
 	entrySvc := core.NewEntryService(store, log)
+	catSvc := core.NewCategoryService(store, log)
 	poller := core.NewPoller(store, feedSvc, clock.Real{}, log,
 		core.PollerConfig{Tick: cfg.PollTick, BatchSize: cfg.BatchSize, Workers: cfg.FeedWorkers})
 
@@ -65,7 +66,7 @@ func runServe() int {
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, log),
+		Handler:           web.New(feedSvc, entrySvc, catSvc, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

@@ -38,6 +38,21 @@ func ptrUnix(n sql.NullInt64) *time.Time {
 	return &t
 }
 
+func nullID(id *core.ID) sql.NullInt64 {
+	if id == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*id), Valid: true}
+}
+
+func ptrID(n sql.NullInt64) *core.ID {
+	if !n.Valid {
+		return nil
+	}
+	id := core.ID(n.Int64)
+	return &id
+}
+
 // mapErr converts driver errors to core sentinels.
 func mapErr(err error) error {
 	if err == nil {

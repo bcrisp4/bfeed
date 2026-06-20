@@ -1028,6 +1028,11 @@ These hold across all sessions. Tests must defend them.
 - **History (iter 2):** `/history` lists read entries by `read_at` (keyset `(read_at,id)`);
   `idx_entries_readhist` gains a trailing `id DESC` so the keyset order needs no temp B-tree.
   Entry rows now render published time as a relative string ("2h ago") across all views.
+- **Categories (iter 3):** `categories` table + nullable `feeds.category_id` (ON DELETE SET NULL);
+  aggregated per-category entry stream filters via a `feeds` JOIN in `ListEntries`, kept sort-free
+  by a new `idx_entries_user_pub (user_id, published_at DESC, id DESC)`; `/categories` index shows
+  unread counts incl. an uncategorised bucket; assignment at subscribe time and via `SetFeedCategory`.
+  FTS5 search (the other half of iter 3) remains deferred.
 
 ## 30. Research basis & sources
 

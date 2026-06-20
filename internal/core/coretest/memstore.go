@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,11 +21,12 @@ type MemStore struct {
 	feeds      map[core.ID]*core.Feed
 	entries    map[core.ID]*core.Entry
 	tombstones map[string]bool // feedID|guid
+	categories map[core.ID]*core.Category
 	nextID     core.ID
 }
 
 func NewMemStore() *MemStore {
-	return &MemStore{feeds: map[core.ID]*core.Feed{}, entries: map[core.ID]*core.Entry{}, tombstones: map[string]bool{}, nextID: 1}
+	return &MemStore{feeds: map[core.ID]*core.Feed{}, entries: map[core.ID]*core.Entry{}, tombstones: map[string]bool{}, categories: map[core.ID]*core.Category{}, nextID: 1}
 }
 
 var _ core.Store = (*MemStore)(nil)
@@ -172,6 +174,18 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		if f.Starred != nil && e.Starred != *f.Starred {
 			continue
 		}
+		if f.CategoryID != nil || f.Uncategorised {
+			fd, ok := s.feeds[e.FeedID]
+			if !ok {
+				continue
+			}
+			if f.Uncategorised && fd.CategoryID != nil {
+				continue
+			}
+			if f.CategoryID != nil && (fd.CategoryID == nil || *fd.CategoryID != *f.CategoryID) {
+				continue
+			}
+		}
 		if f.Order == core.OrderReadAtDesc && e.ReadAt == nil { // history membership
 			continue
 		}
@@ -254,4 +268,120 @@ func (s *MemStore) DeleteEntry(_ context.Context, u, id core.ID) error {
 	s.tombstones[tkey(e.FeedID, e.GUID)] = true
 	delete(s.entries, id)
 	return nil
+}
+
+func (s *MemStore) CreateCategory(_ context.Context, c *core.Category) (core.ID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ex := range s.categories {
+		if ex.UserID == c.UserID && ex.Title == c.Title { // UNIQUE(user_id,title), case-sensitive
+			return 0, core.ErrConflict
+		}
+	}
+	id := s.nextID
+	s.nextID++
+	cp := *c
+	cp.ID = id
+	s.categories[id] = &cp
+	return id, nil
+}
+
+func (s *MemStore) GetCategory(_ context.Context, u, id core.ID) (*core.Category, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.categories[id]
+	if !ok || c.UserID != u {
+		return nil, core.ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (s *MemStore) ListCategories(_ context.Context, u core.ID) ([]*core.Category, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*core.Category
+	for _, c := range s.categories {
+		if c.UserID == u {
+			cp := *c
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title)
+	})
+	return out, nil
+}
+
+func (s *MemStore) UpdateCategory(_ context.Context, c *core.Category) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ex, ok := s.categories[c.ID]
+	if !ok || ex.UserID != c.UserID {
+		return core.ErrNotFound
+	}
+	for _, other := range s.categories {
+		if other.UserID == c.UserID && other.Title == c.Title && other.ID != c.ID {
+			return core.ErrConflict
+		}
+	}
+	cp := *ex
+	cp.Title = c.Title
+	s.categories[c.ID] = &cp
+	return nil
+}
+
+func (s *MemStore) DeleteCategory(_ context.Context, u, id core.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.categories[id]
+	if !ok || c.UserID != u {
+		return core.ErrNotFound
+	}
+	// Mirror ON DELETE SET NULL: re-home feeds to uncategorised.
+	for _, f := range s.feeds {
+		if f.CategoryID != nil && *f.CategoryID == id {
+			f.CategoryID = nil
+		}
+	}
+	delete(s.categories, id)
+	return nil
+}
+
+func (s *MemStore) SetFeedCategory(_ context.Context, u, feedID core.ID, categoryID *core.ID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	if categoryID == nil {
+		f.CategoryID = nil
+	} else {
+		cp := *categoryID
+		f.CategoryID = &cp
+	}
+	return nil
+}
+
+func (s *MemStore) UnreadCountsByCategory(_ context.Context, u core.ID) (map[core.ID]int, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	perCat := map[core.ID]int{}
+	uncat := 0
+	for _, e := range s.entries {
+		if e.UserID != u || e.Status != core.StatusUnread {
+			continue
+		}
+		f, ok := s.feeds[e.FeedID]
+		if !ok {
+			continue
+		}
+		if f.CategoryID == nil {
+			uncat++
+		} else {
+			perCat[*f.CategoryID]++
+		}
+	}
+	return perCat, uncat, nil
 }

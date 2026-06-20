@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -42,12 +43,39 @@ func (s *FeedService) Delete(ctx context.Context, userID, feedID ID) error {
 	return s.store.DeleteFeed(ctx, userID, feedID)
 }
 
+func (s *FeedService) SetCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error {
+	if err := s.ensureCategoryOwned(ctx, userID, categoryID); err != nil {
+		return err
+	}
+	return s.store.SetFeedCategory(ctx, userID, feedID, categoryID)
+}
+
+// ensureCategoryOwned validates that a non-nil categoryID exists for userID.
+// An absent/foreign category is a client error (ErrValidation); any other store
+// error (DB unavailable, context cancelled) is propagated as-is so transient
+// failures are not misreported as validation failures.
+func (s *FeedService) ensureCategoryOwned(ctx context.Context, userID ID, categoryID *ID) error {
+	if categoryID == nil {
+		return nil
+	}
+	if _, err := s.store.GetCategory(ctx, userID, *categoryID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: unknown category", ErrValidation)
+		}
+		return err
+	}
+	return nil
+}
+
 // Subscribe validates the URL, fetches it (discovering the feed if HTML), parses,
 // creates the feed, runs an initial poll to populate entries, and sets NextCheckAt.
-func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (*Feed, error) {
+func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, categoryID *ID) (*Feed, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
+	}
+	if err := s.ensureCategoryOwned(ctx, userID, categoryID); err != nil {
+		return nil, err
 	}
 	feedURL, pf, resp, err := s.resolveFeed(ctx, rawURL)
 	if err != nil {
@@ -55,7 +83,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string) (
 	}
 	now := s.clk.Now()
 	f := &Feed{
-		UserID: userID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
+		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
 		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
 	}

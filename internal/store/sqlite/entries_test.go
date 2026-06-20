@@ -225,3 +225,61 @@ func idOf(es []*core.Entry, i int) core.ID {
 	}
 	return -1
 }
+
+func TestListEntriesByCategoryAndUncategorised(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_100, 0).UTC()
+	catID, _ := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	fCat, _ := s.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a.test/f", CategoryID: &catID, NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	fUncat, _ := s.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	if _, err := s.UpsertEntries(ctx, fCat, []*core.Entry{mkEntry(fCat, "c1", now)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertEntries(ctx, fUncat, []*core.Entry{mkEntry(fUncat, "u1", now)}); err != nil {
+		t.Fatal(err)
+	}
+
+	inCat, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{CategoryID: &catID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inCat) != 1 || inCat[0].FeedID != fCat {
+		t.Fatalf("category filter got %d entries (want 1 from fCat)", len(inCat))
+	}
+
+	uncat, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Uncategorised: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uncat) != 1 || uncat[0].FeedID != fUncat {
+		t.Fatalf("uncategorised filter got %d entries (want 1 from fUncat)", len(uncat))
+	}
+}
+
+func TestCategoryStreamUsesIndexNoSort(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	rows, err := s.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN SELECT e.id FROM entries e JOIN feeds f ON e.feed_id = f.id
+		 WHERE e.user_id = 1 AND f.category_id = 1 ORDER BY e.published_at DESC, e.id DESC LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("category stream sorts in memory:\n%s", plan)
+	}
+	if !strings.Contains(plan, "idx_entries_user_pub") {
+		t.Fatalf("category stream not using idx_entries_user_pub:\n%s", plan)
+	}
+}

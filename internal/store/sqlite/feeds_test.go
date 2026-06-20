@@ -123,6 +123,50 @@ func TestDeleteFeedRemovesEntries(t *testing.T) {
 	}
 }
 
+func TestCreateFeedWithCategory(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	// Seed a category directly; the CategoryStore Go methods land in Task 2.
+	res, err := s.db.ExecContext(ctx, `INSERT INTO categories (user_id, title) VALUES (?, ?)`,
+		int64(core.DefaultUserID), "News")
+	if err != nil {
+		t.Fatalf("seed category: %v", err)
+	}
+	catID64, _ := res.LastInsertId()
+	catID := core.ID(catID64)
+
+	f := &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://x.test/f", CategoryID: &catID,
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	id, err := s.CreateFeed(ctx, f)
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	got, err := s.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatalf("GetFeed: %v", err)
+	}
+	if got.CategoryID == nil || *got.CategoryID != catID {
+		t.Fatalf("CategoryID round-trip = %v, want %d", got.CategoryID, catID)
+	}
+
+	// A feed with no category round-trips as nil.
+	id2, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://y.test/f",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateFeed 2: %v", err)
+	}
+	got2, _ := s.GetFeed(ctx, core.DefaultUserID, id2)
+	if got2.CategoryID != nil {
+		t.Fatalf("uncategorised feed CategoryID = %v, want nil", got2.CategoryID)
+	}
+}
+
 func TestListDueFeeds(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

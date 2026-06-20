@@ -1,14 +1,24 @@
 {{define "content"}}
 <h1>Feeds</h1>
+{{if .HasFeeds}}
+{{range .Groups}}
+<h2 class="cat-heading">{{.Title}}</h2>
 {{range .Feeds}}
 <div class="entry" id="feed-{{.ID}}">
-  <h2><a href="/feeds/{{.ID}}">{{.Title}}</a></h2>
+  <h3><a href="/feeds/{{.ID}}">{{.Title}}</a></h3>
   <div class="meta">{{.FeedURL}}{{if .LastError}} · <span style="color:#c0392b">error: {{.LastError}}</span>{{end}}</div>
   <div class="actions">
+    {{$f := .}}
+    <select name="category_id" hx-post="/feeds/{{.ID}}/category" hx-trigger="change" hx-swap="none">
+      <option value="" {{if eq $f.CategoryID 0}}selected{{end}}>Uncategorised</option>
+      {{range $.Categories}}<option value="{{.ID}}" {{if eq .ID $f.CategoryID}}selected{{end}}>{{.Title}}</option>{{end}}
+    </select>
     <button hx-post="/feeds/{{.ID}}/refresh" hx-target="#feed-{{.ID}}" hx-swap="none">Refresh</button>
     <button hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
       hx-confirm="Delete feed and all its entries?">Delete</button>
   </div>
 </div>
+{{end}}
+{{end}}
 {{else}}<p>No feeds yet. Subscribe from the <a href="/">home page</a>.</p>{{end}}
 {{end}}

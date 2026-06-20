@@ -12,6 +12,7 @@ func feedFromRow(r sqlc.Feed) *core.Feed {
 	return &core.Feed{
 		ID:           core.ID(r.ID),
 		UserID:       core.ID(r.UserID),
+		CategoryID:   ptrID(r.CategoryID),
 		FeedURL:      r.FeedUrl,
 		SiteURL:      r.SiteUrl,
 		Title:        r.Title,
@@ -51,6 +52,7 @@ func (s *Store) CreateFeed(ctx context.Context, f *core.Feed) (core.ID, error) {
 		LastError:    f.LastError,
 		CreatedAt:    toUnix(f.CreatedAt),
 		UpdatedAt:    toUnix(f.UpdatedAt),
+		CategoryID:   nullID(f.CategoryID),
 	})
 	if err != nil {
 		return 0, mapErr(err)

@@ -1,0 +1,25 @@
+{{define "content"}}
+<h1>Categories</h1>
+<form class="subscribe" method="post" action="/categories">
+  <input type="text" name="title" placeholder="New category" required>
+  <button class="primary" type="submit">Add</button>
+</form>
+<div id="categories">
+{{range .Categories}}
+<div class="entry" id="category-{{.ID}}">
+  <h2><a href="/categories/{{.ID}}">{{.Title}}</a> <span class="meta">{{.Unread}} unread</span></h2>
+  <div class="actions">
+    <form method="post" action="/categories/{{.ID}}/rename" style="display:inline">
+      <input type="text" name="title" value="{{.Title}}" required>
+      <button type="submit">Rename</button>
+    </form>
+    <button hx-post="/categories/{{.ID}}/delete" hx-target="#category-{{.ID}}" hx-swap="delete"
+      hx-confirm="Delete category? Its feeds become uncategorised.">Delete</button>
+  </div>
+</div>
+{{else}}<p>No categories yet.</p>{{end}}
+<div class="entry">
+  <h2><a href="/categories/none">Uncategorised</a> <span class="meta">{{.Uncategorised}} unread</span></h2>
+</div>
+</div>
+{{end}}
