@@ -24,6 +24,7 @@ type entryVM struct {
 	FeedID    core.ID
 	FeedTitle string
 	Published string
+	Summary   string
 }
 
 type listVM struct {
@@ -517,5 +518,6 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		FeedID:    e.FeedID,
 		FeedTitle: feedTitle,
 		Published: humanizeSince(e.PublishedAt, time.Now()),
+		Summary:   summaryText(e),
 	}
 }
