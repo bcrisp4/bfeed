@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bcrisp4/bfeed/internal/core"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
+
+	"github.com/bcrisp4/bfeed/internal/core"
 )
 
 // ftsIDs returns the entries.id rowids matching an FTS5 query, rank-ordered.
