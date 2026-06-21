@@ -67,19 +67,19 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 func parseTemplates() map[string]*template.Template {
 	// Each page = layout + its content template (layout calls "content").
 	pages := map[string][]string{
-		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
-		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml", "templates/_nav.gohtml"},
-		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml", "templates/_nav.gohtml"},
-		"categories": {"templates/layout.gohtml", "templates/categories.gohtml", "templates/_nav.gohtml"},
-		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
-		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml", "templates/_nav.gohtml"},
+		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"categories": {"templates/layout.gohtml", "templates/categories.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
 		out[name] = template.Must(template.ParseFS(templatesFS, files...))
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
-	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
+	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml", "templates/_icons.gohtml"))
 	return out
 }
 
