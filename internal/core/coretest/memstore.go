@@ -548,6 +548,24 @@ func (s *MemStore) CancelFeedExtractions(_ context.Context, feedID core.ID) erro
 	return nil
 }
 
+func (s *MemStore) EntryStatsByFeed(_ context.Context, u core.ID) (map[core.ID]core.FeedEntryStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[core.ID]core.FeedEntryStats{}
+	for _, e := range s.entries {
+		if e.UserID != u {
+			continue
+		}
+		st := out[e.FeedID]
+		st.Total++
+		if e.Status == core.StatusUnread {
+			st.Unread++
+		}
+		out[e.FeedID] = st
+	}
+	return out, nil
+}
+
 func (s *MemStore) UnreadCountsByCategory(_ context.Context, u core.ID) (map[core.ID]int, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

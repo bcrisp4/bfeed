@@ -135,6 +135,21 @@ func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
 	return nil
 }
 
+func (s *Store) EntryStatsByFeed(ctx context.Context, userID core.ID) (map[core.ID]core.FeedEntryStats, error) {
+	// One GROUP BY returns total and unread per feed in a single consistent scan
+	// (COUNT(*) FILTER yields a non-null INTEGER, so no transaction is needed to
+	// keep the two counts in sync).
+	rows, err := s.q.EntryStatsByFeed(ctx, int64(userID))
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make(map[core.ID]core.FeedEntryStats, len(rows))
+	for _, r := range rows {
+		out[core.ID(r.FeedID)] = core.FeedEntryStats{Total: int(r.Total), Unread: int(r.Unread)}
+	}
+	return out, nil
+}
+
 func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool) error {
 	n, err := s.q.SetFeedFullContent(ctx, sqlc.SetFeedFullContentParams{
 		FetchFullContent: b2i(on),

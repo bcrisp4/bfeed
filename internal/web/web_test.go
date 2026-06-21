@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -318,7 +319,7 @@ func TestSearchNoMatchesShowsEmptyState(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "0 matches") || !strings.Contains(body, "No entries match") {
+	if !strings.Contains(body, "0 matches") || !strings.Contains(body, "Nothing matches your search") {
 		t.Fatalf("missing zero-result feedback:\n%s", body)
 	}
 	if strings.Contains(body, "Kubernetes networking") {
@@ -492,5 +493,97 @@ func TestFeedPageShowsMarkAllReadButton(t *testing.T) {
 	h.ServeHTTP(rec2, req2)
 	if strings.Contains(rec2.Body.String(), "Mark all read") {
 		t.Fatal("home view should not show the mark-all-read button yet")
+	}
+}
+
+func TestListRendersDateTooltip(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "Hello", Status: core.StatusUnread, PublishedAt: time.Unix(1_600_000_000, 0)}})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	// Assert the <time> element itself carries both datetime and title — checking
+	// the two attributes independently is too weak (title=" also appears on the
+	// action buttons), so a missing tooltip on <time> could slip through.
+	if !regexp.MustCompile(`<time datetime="[^"]+" title="[^"]+">`).MatchString(body) {
+		t.Fatalf("list row <time> missing datetime+title tooltip:\n%s", body)
+	}
+}
+
+func TestEmptyUnreadShowsCaughtUp(t *testing.T) {
+	h, _ := newWeb(t) // no feeds, no entries
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "empty-state") || !strings.Contains(body, "caught up") {
+		t.Fatalf("empty unread view missing caught-up empty state:\n%s", body)
+	}
+}
+
+func TestEmptyStateAbsentWhenEntriesExist(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "Hi", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "empty-state") {
+		t.Fatalf("empty state shown despite an entry being present")
+	}
+}
+
+func TestFeedsPageShowsCounts(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "B", Status: core.StatusUnread, PublishedAt: time.Unix(101, 0)},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{"2 unread", "2 total"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("feeds page missing count %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestUnreadViewShowsTotalCount(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "B", Status: core.StatusUnread, PublishedAt: time.Unix(101, 0)},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "2 unread") {
+		t.Fatalf("unread view missing total count:\n%s", rec.Body.String())
+	}
+}
+
+func TestSingleFeedViewShowsCount(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+	req := httptest.NewRequest(http.MethodGet, "/feeds/"+strconv.FormatInt(int64(fid), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "1 unread · 1 total") {
+		t.Fatalf("single-feed view missing count:\n%s", rec.Body.String())
 	}
 }

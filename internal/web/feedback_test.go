@@ -125,8 +125,11 @@ func TestReaderStarReturnsStarFragment(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="reader-star"`) || !strings.Contains(body, `aria-label="Unstar"`) {
-		t.Fatalf("reader star did not return the star fragment:\n%s", body)
+	if !strings.Contains(body, `aria-label="Unstar"`) || !strings.Contains(body, `class="act star on"`) {
+		t.Fatalf("reader star did not return the toggled star button:\n%s", body)
+	}
+	if strings.Contains(body, "<html") || strings.Contains(body, "<body") {
+		t.Fatalf("reader star response should be the button fragment, not a full page:\n%s", body)
 	}
 	got, _ := store.GetEntry(context.Background(), core.DefaultUserID, id)
 	if !got.Starred {

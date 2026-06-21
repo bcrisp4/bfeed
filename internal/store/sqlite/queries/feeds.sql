@@ -31,3 +31,9 @@ UPDATE feeds SET category_id = ? WHERE id = ? AND user_id = ?;
 
 -- name: SetFeedFullContent :execrows
 UPDATE feeds SET fetch_full_content = ? WHERE id = ? AND user_id = ?;
+
+-- name: EntryStatsByFeed :many
+SELECT feed_id,
+  COUNT(*)                                  AS total,
+  COUNT(*) FILTER (WHERE status = 'unread') AS unread
+FROM entries WHERE user_id = ? GROUP BY feed_id;

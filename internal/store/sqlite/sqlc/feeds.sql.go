@@ -78,6 +78,42 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 	return result.RowsAffected()
 }
 
+const entryStatsByFeed = `-- name: EntryStatsByFeed :many
+SELECT feed_id,
+  COUNT(*)                                  AS total,
+  COUNT(*) FILTER (WHERE status = 'unread') AS unread
+FROM entries WHERE user_id = ? GROUP BY feed_id
+`
+
+type EntryStatsByFeedRow struct {
+	FeedID int64
+	Total  int64
+	Unread int64
+}
+
+func (q *Queries) EntryStatsByFeed(ctx context.Context, userID int64) ([]EntryStatsByFeedRow, error) {
+	rows, err := q.db.QueryContext(ctx, entryStatsByFeed, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EntryStatsByFeedRow
+	for rows.Next() {
+		var i EntryStatsByFeedRow
+		if err := rows.Scan(&i.FeedID, &i.Total, &i.Unread); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFeed = `-- name: GetFeed :one
 SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE id = ? AND user_id = ?
 `

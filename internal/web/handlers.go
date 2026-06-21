@@ -14,17 +14,19 @@ import (
 const uid = core.DefaultUserID
 
 type entryVM struct {
-	ID        core.ID
-	Title     string
-	URL       string
-	Author    string
-	Content   templateHTML
-	Status    string
-	Starred   bool
-	FeedID    core.ID
-	FeedTitle string
-	Published string
-	Summary   string
+	ID            core.ID
+	Title         string
+	URL           string
+	Author        string
+	Content       templateHTML
+	Status        string
+	Starred       bool
+	FeedID        core.ID
+	FeedTitle     string
+	Published     string
+	PublishedFull string // full date+time, shown as the hover tooltip
+	PublishedAttr string // RFC3339, the machine-readable <time datetime>
+	Summary       string
 }
 
 type listVM struct {
@@ -34,6 +36,9 @@ type listVM struct {
 	MarkReadPath string // non-empty only on the single-feed view → renders the "Mark all read" button
 	Entries      []entryVM
 	NextCursor   string
+	Empty        string // empty-state headline (shown when Entries is empty)
+	EmptySub     string // optional faint empty-state subline
+	HeaderCount  string // preformatted header count, e.g. "23 unread"; empty hides it
 }
 
 type entryPageVM struct {
@@ -54,6 +59,8 @@ type feedRowVM struct {
 	LastError   string
 	CategoryID  int64 // 0 = uncategorised
 	FullContent bool
+	Unread      int
+	Total       int
 }
 
 type feedGroupVM struct {
@@ -66,6 +73,7 @@ type feedsPageVM struct {
 	Categories []feedsCatVM
 	Groups     []feedGroupVM
 	HasFeeds   bool
+	ShowCounts bool // false when the stats lookup failed → omit per-feed counts
 }
 
 func (h *Handler) unread(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +129,28 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		}
 		return
 	}
+	vm.Empty, vm.EmptySub = emptyFor(f)
+	// HeaderCount is best-effort chrome: a failed stats lookup omits the count
+	// (the list itself still renders) but is logged so the failure isn't silent.
+	switch {
+	case listActive(f) == "unread":
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
+			h.log.Warn("header unread count", "error", err)
+		} else {
+			total := 0
+			for _, s := range stats {
+				total += s.Unread
+			}
+			vm.HeaderCount = fmt.Sprintf("%d unread", total)
+		}
+	case f.FeedID != nil:
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
+			h.log.Warn("header feed count", "feed_id", int64(*f.FeedID), "error", err)
+		} else {
+			s := stats[*f.FeedID]
+			vm.HeaderCount = fmt.Sprintf("%d unread · %d total", s.Unread, s.Total)
+		}
+	}
 	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
@@ -140,6 +170,21 @@ func listActive(f core.EntryFilter) string {
 		return "feeds"
 	default:
 		return "unread"
+	}
+}
+
+// emptyFor returns the empty-state copy for a list view. Copy deliberately
+// avoids the internal words "entry"/"entries".
+func emptyFor(f core.EntryFilter) (msg, sub string) {
+	switch listActive(f) {
+	case "starred":
+		return "Nothing saved yet.", "Tap the star to keep things here."
+	case "history":
+		return "Nothing read yet.", ""
+	case "unread":
+		return "You're all caught up.", ""
+	default: // single feed, category, uncategorised
+		return "Nothing here yet.", ""
 	}
 }
 
@@ -187,12 +232,20 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	// Counts are additive chrome: on a stats error, log and render the page
+	// without counts rather than failing the whole feed list (a nil map reads
+	// as the zero value, which ShowCounts then hides).
+	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	if statsErr != nil {
+		h.log.Warn("feed entry stats", "error", statsErr)
+	}
 	row := func(f *core.Feed) feedRowVM {
 		var cid int64
 		if f.CategoryID != nil {
 			cid = int64(*f.CategoryID)
 		}
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent}
+		st := stats[f.ID]
+		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total}
 	}
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM
@@ -203,7 +256,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 			byCat[*f.CategoryID] = append(byCat[*f.CategoryID], row(f))
 		}
 	}
-	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats)}
+	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats), ShowCounts: statsErr == nil}
 	// Only render groups that actually contain feeds — an empty heading with a
 	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
 	for _, c := range cats {
@@ -648,16 +701,18 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		body = e.Summary
 	}
 	return entryVM{
-		ID:        e.ID,
-		Title:     e.Title,
-		URL:       e.URL,
-		Author:    e.Author,
-		Content:   templateHTML(body),
-		Status:    string(e.Status),
-		Starred:   e.Starred,
-		FeedID:    e.FeedID,
-		FeedTitle: feedTitle,
-		Published: humanizeSince(e.PublishedAt, time.Now()),
-		Summary:   summaryText(e),
+		ID:            e.ID,
+		Title:         e.Title,
+		URL:           e.URL,
+		Author:        e.Author,
+		Content:       templateHTML(body),
+		Status:        string(e.Status),
+		Starred:       e.Starred,
+		FeedID:        e.FeedID,
+		FeedTitle:     feedTitle,
+		Published:     humanizeSince(e.PublishedAt, time.Now()),
+		PublishedFull: e.PublishedAt.Format("2 Jan 2006, 15:04"),
+		PublishedAttr: e.PublishedAt.Format(time.RFC3339),
+		Summary:       summaryText(e),
 	}
 }

@@ -15,8 +15,10 @@ func TestHumanizeSince(t *testing.T) {
 		{"just now", now.Add(-30 * time.Second), "just now"},
 		{"minutes", now.Add(-5 * time.Minute), "5m ago"},
 		{"hours", now.Add(-3 * time.Hour), "3h ago"},
-		{"days", now.Add(-2 * 24 * time.Hour), "2d ago"},
-		{"old absolute", now.Add(-40 * 24 * time.Hour), now.Add(-40 * 24 * time.Hour).Format("2006-01-02")},
+		{"just under a day", now.Add(-23 * time.Hour), "23h ago"},
+		{"exactly a day is absolute", now.Add(-24 * time.Hour), now.Add(-24 * time.Hour).Format("2 Jan 2006")},
+		{"two days is absolute", now.Add(-2 * 24 * time.Hour), now.Add(-2 * 24 * time.Hour).Format("2 Jan 2006")},
+		{"old absolute", now.Add(-400 * 24 * time.Hour), now.Add(-400 * 24 * time.Hour).Format("2 Jan 2006")},
 		{"future", now.Add(time.Hour), "just now"},
 	}
 	for _, c := range cases {

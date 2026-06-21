@@ -11,7 +11,7 @@
   --font-serif:'Literata',Georgia,'Times New Roman',serif;
   --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
   --sp-1:.25rem;--sp-2:.5rem;--sp-3:.75rem;--sp-4:1rem;--sp-5:1.5rem;--sp-6:2rem;
-  --radius:.5rem;--radius-sm:.375rem;--tap:44px;--bottombar-h:64px;--ease:160ms ease;
+  --radius:.5rem;--radius-sm:.375rem;--tap:44px;--bottombar-h:72px;--ease:160ms ease;
   --measure:34rem;--measure-list:40rem;
   /* Light (default) */
   --bg:#fbfaf7;--surface:#fff;--surface-2:#f6f2ea;--ink:#232020;--ink-soft:#2c2722;
@@ -156,7 +156,8 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 @media (max-width:639px){
   .topnav{display:none}
   body{padding-bottom:calc(var(--bottombar-h) + var(--sp-5))} /* clear the fixed bottom bar (mobile only) */
-  .bottombar{display:flex;position:fixed;left:0;right:0;bottom:0;border-top:1px solid var(--rule);background:var(--surface-2)}
+  .bottombar{display:flex;position:fixed;left:0;right:0;bottom:0;border-top:1px solid var(--rule);background:var(--surface-2);
+    padding-top:6px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
   .bottombar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
     color:var(--muted);text-decoration:none;font-family:var(--font-mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.04em}
   .bottombar .tab-ic{display:flex;align-items:center;justify-content:center}
@@ -169,3 +170,25 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 }
 @media (min-width:640px){.more-sheet a{display:none}} /* desktop: overflow lives in the top bar */
 .list-header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-2);flex-wrap:wrap}
+
+/* empty states */
+.empty-state{text-align:center;color:var(--muted);padding:var(--sp-6) 0}
+.empty-state .empty-head{font-size:1.05rem;margin:0}
+.empty-state .empty-sub{font-family:var(--font-mono);font-size:.72rem;color:var(--faint);margin:var(--sp-2) 0 0}
+
+.list-header .count{font-family:var(--font-mono);font-size:.7rem;font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)}
+
+.reader-actions #reader-star{display:inline-flex}
+
+/* whole entry-list card is a click target (scoped to #entries so the shared
+   .entry class on feeds/categories pages is unaffected). The title anchor is
+   stretched over the card; the action bar sits above it and stays clickable. */
+#entries .entry{position:relative;transition:background var(--ease);
+  padding-left:var(--sp-3);padding-right:var(--sp-3);
+  margin-left:calc(-1 * var(--sp-3));margin-right:calc(-1 * var(--sp-3));border-radius:var(--radius)}
+#entries .entry:hover{background:var(--surface-2)}
+#entries .entry h2 a::after{content:"";position:absolute;inset:0}
+#entries .entry .actbar{position:relative;z-index:1}
+/* lift the date above the stretched anchor so its hover tooltip stays reachable
+   (the trade-off: the date itself isn't a click-to-open target, the rest of the row is) */
+#entries .entry .meta time{position:relative;z-index:1}
