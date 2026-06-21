@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Feeds that publish an empty title now show their feed URL as the name instead of a blank, unclickable entry on the Feeds page.
+
 ## [0.3.0] - 2026-06-21
 
 ### Added

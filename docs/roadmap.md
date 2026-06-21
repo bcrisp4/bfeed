@@ -94,6 +94,7 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 | History view (recently-read, by `read_at`) | §9.2, §18 | `idx_entries_readhist`; `/history` route | Cheap | done (iter 2) |
 | Bulk mark-all-read | §9.2 | bulk UPDATE + button | High value for daily driver | deferred |
 | Feed enable/disable via UI | §9.1 | toggle route (schema `feeds.disabled` already present; poller already respects it) | UI only; backend ready | deferred |
+| Rename feed / custom title | §9.1 | `feeds.user_title` override column; `FeedService.Rename`; `POST /feeds/{id}/rename`; manage-page edit control (mirror category rename) | Must be a **separate** override column: each successful poll refreshes `feeds.title` from the feed's own title, so writing a custom name into `feeds.title` gets clobbered on the next poll. `feeds.title` = best automatic name (feed `<title>`, else feed-URL fallback); display = `user_title ?? title` | deferred |
 | Starred view | §18 | `/starred` route | **Shipped in MVP** (star action would be a half-feature without it) — see mvp-design §12 | done (MVP) |
 
 ### A8. Retention & maintenance

@@ -43,6 +43,65 @@ func TestSubscribeCreatesFeedAndEntries(t *testing.T) {
 	}
 }
 
+func TestSubscribeBlankTitleFallsBackToFeedURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	// Some feeds ship an empty <title></title> but still have entries, so the
+	// feed is accepted with a blank title.
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "  ", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: "https://b.test/1", Title: "P1"},
+	}}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if f.Title != "https://b.test/feed.xml" {
+		t.Fatalf("blank title not backfilled: Title=%q, want feed URL", f.Title)
+	}
+}
+
+func TestPollFeedBlankTitleStaysNonEmpty(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	// Simulate a feed whose stored title is already blank (e.g. pre-fix data).
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/feed.xml", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "", Entries: []core.ParsedEntry{{GUID: "g1", URL: "https://b.test/1"}}}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.Title != "https://b.test/feed.xml" {
+		t.Fatalf("poll left blank title: Title=%q, want feed URL", got.Title)
+	}
+}
+
+func TestPollFeed304BackfillsBlankTitle(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	// Pre-fix data: a feed stored with a blank title that now only returns 304.
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/feed.xml", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 304, NotModified: true}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{}})
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.Title != "https://b.test/feed.xml" {
+		t.Fatalf("304 poll left blank title: Title=%q, want feed URL", got.Title)
+	}
+}
+
 func TestSubscribeDuplicateConflict(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()
