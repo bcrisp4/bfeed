@@ -29,10 +29,11 @@ type entryVM struct {
 
 type listVM struct {
 	chrome
-	Title      string
-	ListPath   string
-	Entries    []entryVM
-	NextCursor string
+	Title        string
+	ListPath     string
+	MarkReadPath string // non-empty only on the single-feed view → renders the "Mark all read" button
+	Entries      []entryVM
+	NextCursor   string
 }
 
 type entryPageVM struct {
@@ -107,6 +108,9 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 	}
 
 	vm := listVM{Title: title, ListPath: path, Entries: toEntryVMs(entries, feedTitles)}
+	if f.FeedID != nil {
+		vm.MarkReadPath = path + "/mark-read" // path is "/feeds/{id}" → "/feeds/{id}/mark-read"
+	}
 	if next != nil {
 		vm.NextCursor = core.EncodeCursor(*next)
 	}
@@ -289,6 +293,23 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if err := h.feeds.Refresh(r.Context(), uid, id); err != nil {
 		h.log.Warn("refresh feed", "feed_id", int64(id), "error", err)
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) markFeedRead(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	n, err := h.entries.MarkAllRead(r.Context(), uid, core.EntryFilter{FeedID: &id})
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	h.log.Info("mark feed read", "feed_id", int64(id), "count", n)
+	// htmx reloads the page so every unread count, row styling, and button state
+	// stays consistent without fragment targeting.
+	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
 }
 

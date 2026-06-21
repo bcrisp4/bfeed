@@ -48,6 +48,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /entries/{id}", h.entry)
 	mux.HandleFunc("POST /feeds", h.subscribe)
 	mux.HandleFunc("POST /feeds/{id}/refresh", h.refresh)
+	mux.HandleFunc("POST /feeds/{id}/mark-read", h.markFeedRead)
 	mux.HandleFunc("POST /feeds/{id}/delete", h.deleteFeed)
 	mux.HandleFunc("POST /feeds/{id}/category", h.setFeedCategory)
 	mux.HandleFunc("POST /feeds/{id}/full-content", h.setFeedFullContent)

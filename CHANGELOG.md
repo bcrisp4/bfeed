@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Mark all entries in a feed as read, in one click from the feed page.
+
 ## [0.3.1] - 2026-06-21
 
 ### Fixed
