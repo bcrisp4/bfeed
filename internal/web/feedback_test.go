@@ -41,8 +41,9 @@ func TestLayoutHasBfcacheReloadScript(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), "pageshow") {
-		t.Fatalf("layout missing pageshow reload script:\n%s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "pageshow") || !strings.Contains(body, "persisted") {
+		t.Fatalf("layout missing pageshow/persisted bfcache reload guard:\n%s", body)
 	}
 }
 
