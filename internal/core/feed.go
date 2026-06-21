@@ -205,10 +205,13 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 		if err := s.ingest(ctx, f, pf); err != nil {
 			return err
 		}
-		f.Title = feedTitle(orKeep(pf.Title, f.Title), f.FeedURL)
+		f.Title = orKeep(pf.Title, f.Title)
 		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)
 		f.Description = orKeep(pf.Description, f.Description)
 	}
+	// Backfill on every successful poll — including 304 (pf == nil) — so a feed
+	// can never persist a blank Title. Idempotent once a title is set.
+	f.Title = feedTitle(f.Title, f.FeedURL)
 	if resp.ETag != "" {
 		f.ETag = resp.ETag
 	}
