@@ -433,3 +433,54 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 		t.Fatalf("toggle did not clear FetchFullContent")
 	}
 }
+
+func TestMarkFeedReadRefreshesAndMarks(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "a", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "b", Title: "B", Status: core.StatusUnread, PublishedAt: time.Unix(200, 0)},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/mark-read", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", rec.Code)
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("missing HX-Refresh: true header; got %q", rec.Header().Get("HX-Refresh"))
+	}
+	entries, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{FeedID: &fid})
+	for _, e := range entries {
+		if e.Status != core.StatusRead {
+			t.Fatalf("entry %d still unread after mark-read", e.ID)
+		}
+	}
+}
+
+func TestFeedPageShowsMarkAllReadButton(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "a", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds/"+strconv.FormatInt(int64(fid), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	want := "/feeds/" + strconv.FormatInt(int64(fid), 10) + "/mark-read"
+	if !strings.Contains(body, want) || !strings.Contains(body, "Mark all read") {
+		t.Fatalf("feed page missing mark-all-read button:\n%s", body)
+	}
+
+	// The home/unread view must NOT show it (button is feed-view only this iteration).
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if strings.Contains(rec2.Body.String(), "Mark all read") {
+		t.Fatal("home view should not show the mark-all-read button yet")
+	}
+}

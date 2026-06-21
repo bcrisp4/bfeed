@@ -118,3 +118,4 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
   .more-sheet a{color:var(--ink);text-decoration:none;min-height:var(--tap);display:flex;align-items:center}
 }
 @media (min-width:640px){.more-sheet a{display:none}} /* desktop: overflow lives in the top bar */
+.list-header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-2);flex-wrap:wrap}

@@ -60,6 +60,8 @@ make sqlc-check                               # fail if committed sqlc code is s
 ```
 Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. CI runs `make sqlc-check`'s equivalent, so regenerate and commit after touching `queries/` or `migrations/`. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
 
+**Exception — dynamic SQL is not sqlc:** queries with a runtime-variable shape (conditional `WHERE`, variadic `IN`, dynamic `ORDER`/keyset column) are hand-written `fmt.Sprintf` + bound-params directly in `store/sqlite/*.go`, **not** in `queries/` — e.g. `ListEntries`, `SetStatus`, `SetStarred`, `MarkReadByFilter`. sqlc only compiles static SQL, so these can't be expressed there; editing them needs **no** `make sqlc`. Safe because only the skeleton (column names, WHERE/ORDER fragments) is interpolated from a **closed code allowlist** — every value is a bound `?` — which is why the `//nolint:gosec // G201` on them is legitimate.
+
 ### Running / CLI
 ```bash
 BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=text go run ./cmd/bfeed serve
@@ -79,6 +81,8 @@ Dependencies point **inward**. `internal/core` holds domain types, the services 
 The poll pipeline lives in `FeedService.PollFeed` so the `Poller` only schedules; both share it. `Subscribe` does one immediate poll to populate the feed.
 
 Full-content extraction mirrors polling: `Scraper`/`ScrapeService` are the `Poller`/`FeedService` analogue, driven by DB-backed `entries.extract_state` (`none`/`pending`/`done`/`failed`) + `next_extract_at`; the `Scraper` shares the one `Fetcher` (per-host budget) with the `Poller`.
+
+**Web (htmx) response conventions:** per-item actions return a swapped HTML fragment (e.g. `entryrow`); bulk / whole-collection mutations return `204` + `HX-Refresh: true` (htmx does a full reload — keeps nav/sidebar unread counts consistent, no fragment targeting). List-view toolbar controls belong in the `content` block (`entries.gohtml`), **not** the `entrylist`/`entryrow` fragments (`rows.gohtml`) that htmx "load more" re-renders, or they get duplicated/lost on pagination.
 
 ## Invariants the tests defend (don't break these)
 

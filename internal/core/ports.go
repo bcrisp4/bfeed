@@ -72,6 +72,7 @@ type EntryStore interface {
 	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
 	MarkFeedEntriesPending(ctx context.Context, feedID ID, at time.Time) error
 	CancelFeedExtractions(ctx context.Context, feedID ID) error
+	MarkReadByFilter(ctx context.Context, userID ID, f EntryFilter) (int, error)
 }
 
 type CategoryStore interface {

@@ -1,4 +1,8 @@
 {{define "content"}}
-<h1>{{.Title}}</h1>
+<div class="list-header">
+  <h1>{{.Title}}</h1>
+  {{if .MarkReadPath}}<button class="mark-all-read" hx-post="{{.MarkReadPath}}"
+    hx-confirm="Mark all entries in this feed as read?">Mark all read</button>{{end}}
+</div>
 {{template "entrylist" .}}
 {{end}}
