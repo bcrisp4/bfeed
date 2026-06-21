@@ -441,3 +441,43 @@ func TestMarkReadByFilterCrossUserIsolation(t *testing.T) {
 		t.Fatalf("entry should remain unread after cross-user call: %+v", e)
 	}
 }
+
+func TestMarkReadByFilterAllFeeds(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	f1 := seedFeed(t, s)
+	// second feed for the same user (distinct feed_url)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	f2, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://f.test/y", NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := time.Unix(1_700_000_100, 0).UTC()
+	// f1: one unread entry
+	ins1, _ := s.UpsertEntries(ctx, f1, []*core.Entry{mkEntry(f1, "a", p)})
+	// f2: one unread entry
+	ins2, _ := s.UpsertEntries(ctx, f2, []*core.Entry{mkEntry(f2, "z", p)})
+
+	// Empty filter marks ALL unread entries from both feeds as read
+	n, err := s.MarkReadByFilter(ctx, core.DefaultUserID, core.EntryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("rows affected = %d, want 2", n)
+	}
+	// Both entries now read with read_at set
+	for _, id := range []core.ID{ins1[0].ID, ins2[0].ID} {
+		e, _ := s.GetEntry(ctx, core.DefaultUserID, id)
+		if e.Status != core.StatusRead || e.ReadAt == nil {
+			t.Fatalf("entry %d not marked read with read_at: %+v", id, e)
+		}
+	}
+	// idempotent: a second call marks nothing
+	n2, _ := s.MarkReadByFilter(ctx, core.DefaultUserID, core.EntryFilter{})
+	if n2 != 0 {
+		t.Fatalf("second call affected %d, want 0", n2)
+	}
+}
