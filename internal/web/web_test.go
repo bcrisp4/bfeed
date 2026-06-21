@@ -26,7 +26,7 @@ func newWeb(t *testing.T) (http.Handler, *coretest.MemStore) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log), store
+	return web.New(fs, es, cs, ss, log, nil, nil), store
 }
 
 func TestUnreadListRenders(t *testing.T) {
@@ -408,7 +408,7 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	srv := web.New(fs, es, cs, ss, log)
+	srv := web.New(fs, es, cs, ss, log, nil, nil)
 
 	// Subscribe with full_content checkbox checked.
 	form := url.Values{"url": {"https://x.example/feed"}, "full_content": {"on"}}
@@ -585,5 +585,46 @@ func TestSingleFeedViewShowsCount(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), "1 unread · 1 total") {
 		t.Fatalf("single-feed view missing count:\n%s", rec.Body.String())
+	}
+}
+
+func TestReaderRewritesImagesWhenProxyOn(t *testing.T) {
+	store := coretest.NewMemStore()
+	log := coretest.DiscardLogger()
+	fs := core.NewFeedService(store, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{}, log,
+		core.FeedServiceConfig{Reschedule: core.RescheduleConfig{Interval: time.Minute, MaxBackoff: time.Hour}, Jitter: func(time.Duration) time.Duration { return 0 }})
+	es := core.NewEntryService(store, log)
+	cs := core.NewCategoryService(store, log)
+	ss := core.NewSearchService(store, log)
+	rewrite := func(u string) string { return "/img?u=" + u }
+	h := web.New(fs, es, cs, ss, log, nil, rewrite)
+
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "P", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0), Content: `<p>x <img src="https://o.test/p.jpg"> y</p>`}})
+
+	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "/img?u=https://o.test/p.jpg") {
+		t.Fatalf("image not proxied:\n%s", body)
+	}
+	if strings.Contains(body, `src="https://o.test/p.jpg"`) {
+		t.Fatalf("origin src still present:\n%s", body)
+	}
+}
+
+func TestReaderKeepsOriginWhenProxyOff(t *testing.T) {
+	h, store := newWeb(t) // nil rewrite
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "P", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0), Content: `<p><img src="https://o.test/p.jpg"></p>`}})
+
+	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "https://o.test/p.jpg") {
+		t.Fatalf("origin src should be untouched when proxy off:\n%s", rec.Body.String())
 	}
 }

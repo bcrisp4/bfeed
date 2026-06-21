@@ -213,6 +213,9 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	// Single-entry: direct feed lookup (only one feed involved).
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
 	ev := toEntryVM(e, feedTitle)
+	if h.imgRewrite != nil {
+		ev.Content = templateHTML(proxifyImages(string(ev.Content), h.imgRewrite))
+	}
 	vm := entryPageVM{Entry: ev, ReadingTime: readingTime(string(ev.Content))}
 	vm.chrome = h.chromeFor(r, "")
 	if err := h.tmpl["entry"].ExecuteTemplate(w, "layout", vm); err != nil {

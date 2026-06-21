@@ -80,7 +80,7 @@ func runServe() int {
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log),
+		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, nil, nil),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
