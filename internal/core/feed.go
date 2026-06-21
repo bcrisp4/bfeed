@@ -95,7 +95,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 	}
 	now := s.clk.Now()
 	f := &Feed{
-		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: pf.Title,
+		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: feedTitle(pf.Title, feedURL),
 		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: fetchFullContent,
 	}
@@ -205,7 +205,7 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 		if err := s.ingest(ctx, f, pf); err != nil {
 			return err
 		}
-		f.Title = orKeep(pf.Title, f.Title)
+		f.Title = feedTitle(orKeep(pf.Title, f.Title), f.FeedURL)
 		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)
 		f.Description = orKeep(pf.Description, f.Description)
 	}
@@ -238,4 +238,16 @@ func orKeep(newv, old string) string {
 		return newv
 	}
 	return old
+}
+
+// feedTitle guarantees a feed always has a non-empty display name. Some feeds
+// ship a blank <title> but still have entries, so we fall back to the feed URL
+// — an empty Title leaves the manage-page link with no clickable text. This is
+// the best *automatic* name; a future user override (see roadmap A7) would sit
+// on top of it.
+func feedTitle(title, feedURL string) string {
+	if t := strings.TrimSpace(title); t != "" {
+		return t
+	}
+	return feedURL
 }
