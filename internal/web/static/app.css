@@ -183,6 +183,9 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 /* whole entry-list card is a click target (scoped to #entries so the shared
    .entry class on feeds/categories pages is unaffected). The title anchor is
    stretched over the card; the action bar sits above it and stays clickable. */
-#entries .entry{position:relative}
+#entries .entry{position:relative;transition:background var(--ease);
+  padding-left:var(--sp-3);padding-right:var(--sp-3);
+  margin-left:calc(-1 * var(--sp-3));margin-right:calc(-1 * var(--sp-3));border-radius:var(--radius)}
+#entries .entry:hover{background:var(--surface-2)}
 #entries .entry h2 a::after{content:"";position:absolute;inset:0}
 #entries .entry .actbar{position:relative;z-index:1}

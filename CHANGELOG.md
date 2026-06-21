@@ -19,7 +19,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 ### Changed
 
 - Dates older than a day now read as "2 May 2026" (recent items still show "2h ago"), with the full date and time shown on hover.
-- Tapping anywhere on an item in a list now opens it, not just its title.
+- Tapping anywhere on an item in a list now opens it, not just its title, and list items highlight on hover.
 - More breathing room around the icons in the mobile bottom bar.
 
 ### Fixed
