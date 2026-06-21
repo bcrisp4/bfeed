@@ -68,8 +68,9 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 .subscribe label{font-family:var(--font-mono);font-size:.75rem;color:var(--muted);display:inline-flex;align-items:center;gap:.35rem}
 .form-error{font-family:var(--font-mono);font-size:.78rem;color:var(--accent);margin:0 0 var(--sp-4)}
 /* cap the form so the trailing button doesn't stretch to the far reading-column
-   edge (it sat ~90px past where the nav ends, which read as "sticking out") */
-.search{display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-5);max-width:32rem}
+   edge (it sat ~90px past where the nav ends, which read as "sticking out");
+   centre it and lift it off the app-bar divider */
+.search{display:flex;gap:var(--sp-2);align-items:center;max-width:32rem;margin:var(--sp-6) auto var(--sp-5)}
 .search input[type=search]{flex:1;min-width:0}
 
 /* bottom tab bar (mobile only) */
