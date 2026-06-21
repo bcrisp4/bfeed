@@ -61,7 +61,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /search", h.searchHandler)
 	mux.HandleFunc("GET /settings", h.settings)
 	mux.HandleFunc("POST /settings", h.saveSettings)
-	return logging(log, mux)
+	return logging(log, noStore(mux))
 }
 
 func parseTemplates() map[string]*template.Template {
@@ -81,6 +81,18 @@ func parseTemplates() map[string]*template.Template {
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
 	return out
+}
+
+// noStore marks dynamic responses uncacheable so the browser refetches list
+// pages on Back/Forward instead of restoring a stale DOM (an opened entry is
+// marked read server-side; a bfcached page would still show it unread). The
+// static handler sets its own Cache-Control inside cacheStatic, which overrides
+// this for /static/ assets.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // cacheStatic sets cache headers on embedded static assets. Fonts are
