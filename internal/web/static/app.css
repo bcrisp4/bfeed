@@ -70,8 +70,14 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 /* cap the form so the trailing button doesn't stretch to the far reading-column
    edge (it sat ~90px past where the nav ends, which read as "sticking out");
    centre it and lift it off the app-bar divider */
-.search{display:flex;gap:var(--sp-2);align-items:center;max-width:32rem;margin:var(--sp-6) auto var(--sp-5)}
-.search input[type=search]{flex:1;min-width:0}
+.search{display:flex;align-items:stretch;max-width:32rem;margin:var(--sp-6) auto var(--sp-5)}
+/* input + button read as one control: no gap, squared meeting corners, and the
+   input drops its right border so the button abuts it flush */
+.search input[type=search]{flex:1;min-width:0;border-right:0;border-top-right-radius:0;border-bottom-right-radius:0}
+.search button{border-top-left-radius:0;border-bottom-left-radius:0}
+/* focus rings the whole control, not just the input, so it stays one element */
+.search:focus-within{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--radius-sm)}
+.search input[type=search]:focus-visible{outline:none}
 
 /* bottom tab bar (mobile only) */
 .bottombar{display:none}
