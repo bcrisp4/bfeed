@@ -240,6 +240,39 @@ func (s *Store) SetStarred(ctx context.Context, userID core.ID, ids []core.ID, s
 	return mapErr(err)
 }
 
+// MarkReadByFilter marks every UNREAD entry matching the filter's selection
+// (FeedID, else CategoryID, else Uncategorised; an empty selection = all the
+// user's feeds) read, stamping read_at. It ignores pagination/order and the
+// Status/Starred/Query fields — it always targets unread. Returns rows affected.
+// Mirrors ListEntries' dynamic WHERE, but UPDATE can't JOIN, so category
+// selection uses a user-scoped feed_id IN (subquery).
+func (s *Store) MarkReadByFilter(ctx context.Context, userID core.ID, f core.EntryFilter) (int, error) {
+	where := []string{"user_id = ?", "status = 'unread'"}
+	args := []any{int64(userID)}
+	switch {
+	case f.FeedID != nil:
+		where = append(where, "feed_id = ?")
+		args = append(args, int64(*f.FeedID))
+	case f.CategoryID != nil:
+		where = append(where, "feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND category_id = ?)")
+		args = append(args, int64(userID), int64(*f.CategoryID))
+	case f.Uncategorised:
+		where = append(where, "feed_id IN (SELECT id FROM feeds WHERE user_id = ? AND category_id IS NULL)")
+		args = append(args, int64(userID))
+	}
+	q := fmt.Sprintf(`UPDATE entries SET status = 'read', read_at = ? WHERE %s`, strings.Join(where, " AND ")) //nolint:gosec // G201: WHERE built from closed filter fields; values are bound params
+	all := append([]any{time.Now().UTC().Unix()}, args...)
+	res, err := s.db.ExecContext(ctx, q, all...)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(n), nil
+}
+
 func (s *Store) DeleteEntry(ctx context.Context, userID, entryID core.ID) error {
 	e, err := s.GetEntry(ctx, userID, entryID) // ownership + need feed_id/guid for tombstone
 	if err != nil {
