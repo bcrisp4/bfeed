@@ -179,3 +179,10 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .list-header .count{font-family:var(--font-mono);font-size:.7rem;font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)}
 
 .reader-actions #reader-star{display:inline-flex}
+
+/* whole entry-list card is a click target (scoped to #entries so the shared
+   .entry class on feeds/categories pages is unaffected). The title anchor is
+   stretched over the card; the action bar sits above it and stays clickable. */
+#entries .entry{position:relative}
+#entries .entry h2 a::after{content:"";position:absolute;inset:0}
+#entries .entry .actbar{position:relative;z-index:1}
