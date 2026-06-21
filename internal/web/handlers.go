@@ -351,16 +351,63 @@ func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, mutate fun
 }
 
 func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
+	if r.FormValue("from") == "reader" {
+		h.readerMarkUnread(w, r)
+		return
+	}
 	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
 		read := cur.Status != core.StatusRead
 		return h.entries.MarkRead(ctx, uid, []core.ID{id}, read)
 	})
 }
 
+// readerMarkUnread re-queues an entry to unread from the reader and sends the
+// client back to Unread. It must NOT re-render the reader: GET /entries/{id}
+// marks the entry read on open, which would immediately undo the unread.
+func (h *Handler) readerMarkUnread(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.entries.MarkRead(r.Context(), uid, []core.ID{id}, false); err != nil {
+		h.log.Warn("reader mark unread", "entry_id", int64(id), "error", err)
+	}
+	w.Header().Set("HX-Redirect", "/")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) toggleStar(w http.ResponseWriter, r *http.Request) {
+	if r.FormValue("from") == "reader" {
+		h.readerToggleStar(w, r)
+		return
+	}
 	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
 		return h.entries.Star(ctx, uid, []core.ID{id}, !cur.Starred)
 	})
+}
+
+// readerToggleStar flips the star and returns only the reader star button so the
+// reading position is preserved (no full reload).
+func (h *Handler) readerToggleStar(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	e, err := h.entries.Get(r.Context(), uid, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.entries.Star(r.Context(), uid, []core.ID{id}, !e.Starred); err != nil {
+		h.log.Warn("reader toggle star", "entry_id", int64(id), "error", err)
+	}
+	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
+		e = updated
+	}
+	ev := toEntryVM(e, h.singleFeedTitle(r.Context(), e.FeedID))
+	if err := h.tmpl["entry"].ExecuteTemplate(w, "readerstar", ev); err != nil {
+		h.log.Error("template execute", "template", "entry/readerstar", "error", err)
+	}
 }
 
 func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
@@ -370,6 +417,10 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.entries.Delete(r.Context(), uid, id); err != nil {
 		h.log.Warn("delete entry", "entry_id", int64(id), "error", err)
+	}
+	// From the reader there is no row to remove — send the client to Unread.
+	if r.FormValue("from") == "reader" {
+		w.Header().Set("HX-Redirect", "/")
 	}
 	w.WriteHeader(http.StatusOK)
 }

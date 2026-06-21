@@ -14,6 +14,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 ### Added
 
 - Mark all entries in a feed as read, in one click from the feed page.
+- Star, mark unread, and delete actions are now available directly in the reader view.
 
 ## [0.3.1] - 2026-06-21
 
