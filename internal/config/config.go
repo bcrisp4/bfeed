@@ -2,46 +2,55 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	ListenAddr        string
-	BaseURL           string
-	DatabasePath      string
-	LogLevel          string
-	LogFormat         string
-	PollTick          time.Duration
-	PollInterval      time.Duration
-	MaxBackoff        time.Duration
-	FeedWorkers       int
-	BatchSize         int
-	HostConcurrency   int
-	ScrapeWorkers     int
-	ScrapeTick        time.Duration
-	ScrapeBatch       int
-	ScrapeMaxAttempts int
+	ListenAddr           string
+	BaseURL              string
+	DatabasePath         string
+	LogLevel             string
+	LogFormat            string
+	PollTick             time.Duration
+	PollInterval         time.Duration
+	MaxBackoff           time.Duration
+	FeedWorkers          int
+	BatchSize            int
+	HostConcurrency      int
+	ScrapeWorkers        int
+	ScrapeTick           time.Duration
+	ScrapeBatch          int
+	ScrapeMaxAttempts    int
+	ImageProxy           bool
+	ImageProxySecret     string
+	BlockPrivateNetworks bool
+	AllowPrivateCIDRs    []netip.Prefix
 }
 
 func Load() (Config, error) {
 	c := Config{
-		ListenAddr:        env("BFEED_LISTEN_ADDR", ":8080"),
-		BaseURL:           env("BFEED_BASE_URL", ""),
-		DatabasePath:      env("BFEED_DATABASE_PATH", "./bfeed.db"),
-		LogLevel:          env("BFEED_LOG_LEVEL", "info"),
-		LogFormat:         env("BFEED_LOG_FORMAT", "json"),
-		PollTick:          envDur("BFEED_POLL_TICK", time.Minute),
-		PollInterval:      envDur("BFEED_POLL_INTERVAL", 15*time.Minute),
-		MaxBackoff:        envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
-		FeedWorkers:       envInt("BFEED_FEED_WORKERS", 20),
-		BatchSize:         envInt("BFEED_BATCH_SIZE", 100),
-		HostConcurrency:   envInt("BFEED_HOST_CONCURRENCY", 3),
-		ScrapeWorkers:     envInt("BFEED_SCRAPE_WORKERS", 20),
-		ScrapeTick:        envDur("BFEED_SCRAPE_TICK", time.Minute),
-		ScrapeBatch:       envInt("BFEED_SCRAPE_BATCH", 50),
-		ScrapeMaxAttempts: envInt("BFEED_SCRAPE_MAX_ATTEMPTS", 3),
+		ListenAddr:           env("BFEED_LISTEN_ADDR", ":8080"),
+		BaseURL:              env("BFEED_BASE_URL", ""),
+		DatabasePath:         env("BFEED_DATABASE_PATH", "./bfeed.db"),
+		LogLevel:             env("BFEED_LOG_LEVEL", "info"),
+		LogFormat:            env("BFEED_LOG_FORMAT", "json"),
+		PollTick:             envDur("BFEED_POLL_TICK", time.Minute),
+		PollInterval:         envDur("BFEED_POLL_INTERVAL", 15*time.Minute),
+		MaxBackoff:           envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
+		FeedWorkers:          envInt("BFEED_FEED_WORKERS", 20),
+		BatchSize:            envInt("BFEED_BATCH_SIZE", 100),
+		HostConcurrency:      envInt("BFEED_HOST_CONCURRENCY", 3),
+		ScrapeWorkers:        envInt("BFEED_SCRAPE_WORKERS", 20),
+		ScrapeTick:           envDur("BFEED_SCRAPE_TICK", time.Minute),
+		ScrapeBatch:          envInt("BFEED_SCRAPE_BATCH", 50),
+		ScrapeMaxAttempts:    envInt("BFEED_SCRAPE_MAX_ATTEMPTS", 3),
+		ImageProxy:           envBool("BFEED_IMAGE_PROXY", true),
+		ImageProxySecret:     env("BFEED_IMAGE_PROXY_SECRET", ""),
+		BlockPrivateNetworks: envBool("BFEED_BLOCK_PRIVATE_NETWORKS", true),
 	}
 	if c.BaseURL == "" {
 		return c, fmt.Errorf("BFEED_BASE_URL is required")
@@ -49,6 +58,11 @@ func Load() (Config, error) {
 	if c.FeedWorkers < 1 || c.HostConcurrency < 1 {
 		return c, fmt.Errorf("worker/host-concurrency must be >= 1")
 	}
+	cidrs, err := parseCIDRs(os.Getenv("BFEED_ALLOW_PRIVATE_CIDRS"))
+	if err != nil {
+		return c, fmt.Errorf("BFEED_ALLOW_PRIVATE_CIDRS: %w", err)
+	}
+	c.AllowPrivateCIDRs = cidrs
 	return c, nil
 }
 
@@ -75,4 +89,37 @@ func envDur(k string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+func envBool(k string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(k))) {
+	case "":
+		return def
+	case "1", "true", "on", "yes":
+		return true
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return def
+	}
+}
+
+func parseCIDRs(v string) ([]netip.Prefix, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
