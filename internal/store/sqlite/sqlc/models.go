@@ -8,6 +8,11 @@ import (
 	"database/sql"
 )
 
+type AppSetting struct {
+	Key   string
+	Value string
+}
+
 type Category struct {
 	ID     int64
 	UserID int64
