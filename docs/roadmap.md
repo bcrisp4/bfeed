@@ -66,11 +66,11 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| Signed image proxy endpoint | §10.6 | `imgproxy/` package; `GET /img?u=&s=`; HMAC signing | Never an open relay (signed URLs only) | deferred |
-| SSRF guard (reject private/loopback/link-local/metadata IPs) | §10.6 | IP resolution + allowlist; `image/*` content-type allowlist | | deferred |
+| Signed image proxy endpoint | §10.6 | `imgproxy/` package; `GET /img?u=&s=`; HMAC signing | Never an open relay (signed URLs only) | done (iter 5) |
+| SSRF guard (reject private/loopback/link-local/metadata IPs) | §10.6 | IP resolution + allowlist; `image/*` content-type allowlist | | done (iter 5) |
 | Image cache (on-disk/LRU, size cap + TTL) | §10.6 | cache dir; `BFEED_IMAGE_CACHE_*` | | deferred |
-| Proxy HMAC key resolution | §10.6 | `app_settings` table; `BFEED_IMAGE_PROXY_SECRET` else generate+persist | | deferred |
-| Sanitiser rewrites `<img src>`/`srcset` → proxy | §10.5 | extend `sanitize` policy | Needs imgproxy live | deferred |
+| Proxy HMAC key resolution | §10.6 | `app_settings` table; `BFEED_IMAGE_PROXY_SECRET` else generate+persist | | done (iter 5) |
+| Reader-view `<img src>` rewrite → proxy (render-time, not sanitiser) | §10.5 | web reader handler rewrites img URLs at render time; stored content keeps canonical origin URLs | Shipped as render-time rewrite, not sanitiser change | done (iter 5) |
 
 ### A5. Full-text search
 
@@ -200,7 +200,7 @@ Order chosen to unblock the most daily-driver value first; each iteration is add
 | 2 | Reading polish | History view, bulk mark-all-read, feed enable/disable UI, theme toggle, PWA add-to-home |
 | 3 | Find things | Categories ✓ done (iter 3); FTS5 search + UI ✓ done (iter 3) |
 | 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) ✓ done (iter 4) |
-| 5 | Privacy | Image proxy (+ sanitiser img rewrite) |
+| 5 | Privacy | Image proxy: signed `/img` endpoint, render-time rewrite, SSRF-guarded fetch, `app_settings`-backed HMAC secret ✓ done (iter 5); image cache deferred |
 | 6 | Smarter polling | Adaptive interval + weekly count; token-bucket limiter; error-limit; robots Crawl-Delay |
 | 7 | Housekeeping | TTL cleaner + per-user TTL + tombstone pruning + WAL maintenance |
 | 8 | Integrations | REST API + bearer tokens; OPML import/export |
@@ -220,3 +220,4 @@ _(Move shipped items here with their iteration number.)_
 - Full-text search (FTS5 over title/content/summary, bm25-ranked, /search) — iter 3.
 - Full-content extraction (opt-in per feed, DB-backed scrape sweep) — iter 4.
 - Content-hashed (fingerprinted) static asset URLs (`?v=<hash>` → `immutable`) + on-the-fly gzip/brotli response compression + body-font preload — A11.
+- Image proxy (signed same-origin /img, render-time rewrite, SSRF-guarded fetch with CIDR allowlist, app_settings-backed HMAC secret; cache deferred) — iter 5.

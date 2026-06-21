@@ -1063,6 +1063,15 @@ These hold across all sessions. Tests must defend them.
   its existing entries. Config `BFEED_SCRAPE_{WORKERS,TICK,BATCH,MAX_ATTEMPTS}`;
   `BFEED_BACKFILL_PER_HOST_PER_CYCLE` deferred. Full spec:
   `docs/superpowers/specs/2026-06-20-full-content-extraction-design.md`.
+- **Image proxy (iter 5):** signed same-origin `/img` (HMAC over the URL; bad sig → 403, never
+  an open relay), fetched through the shared SSRF-guarded `Fetcher` (private/loopback/link-local/
+  metadata/CGNAT blocked at the dial layer via `net.Dialer.Control`; `BFEED_ALLOW_PRIVATE_CIDRS`
+  escape hatch; guard applies to **all** outbound, not just images). HMAC key from
+  `BFEED_IMAGE_PROXY_SECRET` else generated once and persisted in the new `app_settings` table.
+  **Delta from §10.5:** `<img src>` is rewritten to the proxy URL at **render time** (web reader
+  view), not in the sanitiser at ingest — stored content stays canonical (origin URLs), so legacy
+  entries are also proxied, secret rotation is harmless, and toggling the proxy off is clean.
+  Default ON. `srcset` rewriting and a server-side image cache are deferred (roadmap A4).
 
 ## 30. Research basis & sources
 
