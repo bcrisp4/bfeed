@@ -149,6 +149,8 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
   .bottombar{display:flex;position:fixed;left:0;right:0;bottom:0;border-top:1px solid var(--rule);background:var(--surface-2)}
   .bottombar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
     color:var(--muted);text-decoration:none;font-family:var(--font-mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.04em}
+  .bottombar .tab-ic{display:flex;align-items:center;justify-content:center}
+  .bottombar .tab-ic svg{width:1.55rem;height:1.55rem;display:block}
   .bottombar .tab[aria-current="page"]{color:var(--accent)}
   .more{position:relative;flex:1}
   .more>summary{list-style:none;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-family:var(--font-mono);font-size:.6rem;text-transform:uppercase}

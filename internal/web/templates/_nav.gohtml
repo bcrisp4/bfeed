@@ -12,11 +12,11 @@
 
 {{define "bottombar"}}
 <nav class="bottombar" aria-label="Primary">
-  <a class="tab" href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">▪</span><span class="tab-l">Unread</span></a>
-  <a class="tab" href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">≡</span><span class="tab-l">Feeds</span></a>
-  <a class="tab" href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">★</span><span class="tab-l">Starred</span></a>
+  <a class="tab" href="/"{{if eq .Active "unread"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">{{template "ic-nav-unread"}}</span><span class="tab-l">Unread</span></a>
+  <a class="tab" href="/feeds"{{if eq .Active "feeds"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">{{template "ic-nav-feeds"}}</span><span class="tab-l">Feeds</span></a>
+  <a class="tab" href="/starred"{{if eq .Active "starred"}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">{{template "ic-star"}}</span><span class="tab-l">Starred</span></a>
   <details class="more">
-    <summary class="tab"{{if or (eq .Active "search") (eq .Active "categories") (eq .Active "history") (eq .Active "settings")}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">⋯</span><span class="tab-l">More</span></summary>
+    <summary class="tab"{{if or (eq .Active "search") (eq .Active "categories") (eq .Active "history") (eq .Active "settings")}} aria-current="page"{{end}}><span class="tab-ic" aria-hidden="true">{{template "ic-nav-more"}}</span><span class="tab-l">More</span></summary>
     <div class="more-sheet">
       <a href="/search">Search</a>
       <a href="/categories">Categories</a>

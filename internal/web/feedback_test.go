@@ -60,3 +60,15 @@ func TestEntryRowHasIconActions(t *testing.T) {
 		}
 	}
 }
+
+func TestIconsRenderInBottomBar(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	// The bottom bar tabs must use inline SVG icons now, not text glyphs.
+	if !strings.Contains(body, `class="bottombar"`) || !strings.Contains(body, `<span class="tab-ic" aria-hidden="true"><svg`) {
+		t.Fatalf("bottom bar not using SVG icons:\n%s", body)
+	}
+}
