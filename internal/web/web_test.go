@@ -408,8 +408,11 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther {
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("subscribe status %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("subscribe missing HX-Refresh: true; got %q", rec.Header().Get("HX-Refresh"))
 	}
 
 	feeds, _ := store.ListFeeds(context.Background(), core.DefaultUserID)

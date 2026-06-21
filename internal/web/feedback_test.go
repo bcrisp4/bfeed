@@ -144,3 +144,22 @@ func TestReaderDeleteRedirects(t *testing.T) {
 		t.Fatalf("reader delete HX-Redirect = %q, want /", rec.Header().Get("HX-Redirect"))
 	}
 }
+
+func TestSubscribeFailureShowsInlineError(t *testing.T) {
+	h, _ := newWeb(t)
+	// An URL with no scheme fails FeedService.Subscribe validation cleanly.
+	form := strings.NewReader("url=notaurl")
+	req := httptest.NewRequest(http.MethodPost, "/feeds", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscribe failure status %d, want 200", rec.Code)
+	}
+	if rec.Header().Get("HX-Refresh") == "true" {
+		t.Fatalf("failed subscribe must not refresh")
+	}
+	if !strings.Contains(rec.Body.String(), `class="form-error"`) {
+		t.Fatalf("missing inline error:\n%s", rec.Body.String())
+	}
+}

@@ -223,15 +223,26 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 	catID, ok := parseCategoryID(r)
 	if !ok {
-		http.Error(w, "bad category id", http.StatusBadRequest)
+		h.renderSubscribeError(w, "Invalid category.")
 		return
 	}
 	full := r.FormValue("full_content") == "on"
 	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID, full); err != nil {
-		http.Error(w, "subscribe failed: "+err.Error(), http.StatusUnprocessableEntity)
+		h.renderSubscribeError(w, "Couldn't subscribe: "+err.Error())
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// Stay on /feeds and show the new feed: htmx reloads the current page.
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// renderSubscribeError returns the inline error fragment (auto-escaped) with a
+// 200 so htmx swaps it; the typed URL stays because only the message area swaps.
+func (h *Handler) renderSubscribeError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl["feeds"].ExecuteTemplate(w, "subscribeError", msg); err != nil {
+		h.log.Error("template execute", "template", "feeds/subscribeError", "error", err)
+	}
 }
 
 func (h *Handler) setFeedFullContent(w http.ResponseWriter, r *http.Request) {
