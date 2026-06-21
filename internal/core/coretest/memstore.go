@@ -271,18 +271,22 @@ func (s *MemStore) MarkReadByFilter(_ context.Context, u core.ID, f core.EntryFi
 		if e.UserID != u || e.Status != core.StatusUnread {
 			continue
 		}
-		if f.FeedID != nil && e.FeedID != *f.FeedID {
-			continue
-		}
-		if f.CategoryID != nil || f.Uncategorised {
+		// Selection precedence mirrors the sqlite MarkReadByFilter switch
+		// (FeedID, else CategoryID, else Uncategorised) — exclusive, not
+		// AND-combined, so the fake doesn't lie about combined filters.
+		switch {
+		case f.FeedID != nil:
+			if e.FeedID != *f.FeedID {
+				continue
+			}
+		case f.CategoryID != nil:
 			fd, ok := s.feeds[e.FeedID]
-			if !ok {
+			if !ok || fd.CategoryID == nil || *fd.CategoryID != *f.CategoryID {
 				continue
 			}
-			if f.Uncategorised && fd.CategoryID != nil {
-				continue
-			}
-			if f.CategoryID != nil && (fd.CategoryID == nil || *fd.CategoryID != *f.CategoryID) {
+		case f.Uncategorised:
+			fd, ok := s.feeds[e.FeedID]
+			if !ok || fd.CategoryID != nil {
 				continue
 			}
 		}
