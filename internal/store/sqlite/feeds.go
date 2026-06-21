@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -137,34 +136,18 @@ func (s *Store) DeleteFeed(ctx context.Context, userID, feedID core.ID) error {
 }
 
 func (s *Store) EntryStatsByFeed(ctx context.Context, userID core.ID) (map[core.ID]core.FeedEntryStats, error) {
-	// Read both counts in one transaction so totals and unread come from a single
-	// consistent snapshot — otherwise a poll or mark-read interleaving between the
-	// two queries could yield a transient unread > total.
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	// One GROUP BY returns total and unread per feed in a single consistent scan
+	// (COUNT(*) FILTER yields a non-null INTEGER, so no transaction is needed to
+	// keep the two counts in sync).
+	rows, err := s.q.EntryStatsByFeed(ctx, int64(userID))
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	q := s.q.WithTx(tx)
-
-	totals, err := q.EntryTotalsByFeed(ctx, int64(userID))
-	if err != nil {
-		return nil, mapErr(err)
+	out := make(map[core.ID]core.FeedEntryStats, len(rows))
+	for _, r := range rows {
+		out[core.ID(r.FeedID)] = core.FeedEntryStats{Total: int(r.Total), Unread: int(r.Unread)}
 	}
-	unread, err := q.UnreadCountsByFeed(ctx, int64(userID))
-	if err != nil {
-		return nil, mapErr(err)
-	}
-	out := make(map[core.ID]core.FeedEntryStats, len(totals))
-	for _, r := range totals {
-		out[core.ID(r.FeedID)] = core.FeedEntryStats{Total: int(r.N)}
-	}
-	for _, r := range unread {
-		st := out[core.ID(r.FeedID)]
-		st.Unread = int(r.N)
-		out[core.ID(r.FeedID)] = st
-	}
-	return out, mapErr(tx.Commit())
+	return out, nil
 }
 
 func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool) error {

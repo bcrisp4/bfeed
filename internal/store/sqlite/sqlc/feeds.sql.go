@@ -78,26 +78,29 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 	return result.RowsAffected()
 }
 
-const entryTotalsByFeed = `-- name: EntryTotalsByFeed :many
-SELECT feed_id, COUNT(*) AS n
+const entryStatsByFeed = `-- name: EntryStatsByFeed :many
+SELECT feed_id,
+  COUNT(*)                                  AS total,
+  COUNT(*) FILTER (WHERE status = 'unread') AS unread
 FROM entries WHERE user_id = ? GROUP BY feed_id
 `
 
-type EntryTotalsByFeedRow struct {
+type EntryStatsByFeedRow struct {
 	FeedID int64
-	N      int64
+	Total  int64
+	Unread int64
 }
 
-func (q *Queries) EntryTotalsByFeed(ctx context.Context, userID int64) ([]EntryTotalsByFeedRow, error) {
-	rows, err := q.db.QueryContext(ctx, entryTotalsByFeed, userID)
+func (q *Queries) EntryStatsByFeed(ctx context.Context, userID int64) ([]EntryStatsByFeedRow, error) {
+	rows, err := q.db.QueryContext(ctx, entryStatsByFeed, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []EntryTotalsByFeedRow
+	var items []EntryStatsByFeedRow
 	for rows.Next() {
-		var i EntryTotalsByFeedRow
-		if err := rows.Scan(&i.FeedID, &i.N); err != nil {
+		var i EntryStatsByFeedRow
+		if err := rows.Scan(&i.FeedID, &i.Total, &i.Unread); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -276,39 +279,6 @@ func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContent
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const unreadCountsByFeed = `-- name: UnreadCountsByFeed :many
-SELECT feed_id, COUNT(*) AS n
-FROM entries WHERE user_id = ? AND status = 'unread' GROUP BY feed_id
-`
-
-type UnreadCountsByFeedRow struct {
-	FeedID int64
-	N      int64
-}
-
-func (q *Queries) UnreadCountsByFeed(ctx context.Context, userID int64) ([]UnreadCountsByFeedRow, error) {
-	rows, err := q.db.QueryContext(ctx, unreadCountsByFeed, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []UnreadCountsByFeedRow
-	for rows.Next() {
-		var i UnreadCountsByFeedRow
-		if err := rows.Scan(&i.FeedID, &i.N); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const updateFeed = `-- name: UpdateFeed :exec
