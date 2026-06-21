@@ -481,3 +481,60 @@ func TestMarkReadByFilterAllFeeds(t *testing.T) {
 		t.Fatalf("second call affected %d, want 0", n2)
 	}
 }
+
+func TestMarkReadByFilterCategoryScoped(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	// Create a category
+	catID, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create feed A and assign it to the category
+	fA, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://f.test/a", NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFeedCategory(ctx, core.DefaultUserID, fA, &catID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create feed B and leave it uncategorised
+	fB, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://f.test/b", NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert one unread entry in each feed
+	p := time.Unix(1_700_000_100, 0).UTC()
+	insA, _ := s.UpsertEntries(ctx, fA, []*core.Entry{mkEntry(fA, "a", p)})
+	insB, _ := s.UpsertEntries(ctx, fB, []*core.Entry{mkEntry(fB, "b", p)})
+
+	// Mark read only entries from feeds in the category
+	n, err := s.MarkReadByFilter(ctx, core.DefaultUserID, core.EntryFilter{CategoryID: &catID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("rows affected = %d, want 1", n)
+	}
+
+	// Feed A's entry should be read with read_at set
+	eA, _ := s.GetEntry(ctx, core.DefaultUserID, insA[0].ID)
+	if eA.Status != core.StatusRead || eA.ReadAt == nil {
+		t.Fatalf("feed A entry not marked read: %+v", eA)
+	}
+
+	// Feed B's entry should still be unread
+	eB, _ := s.GetEntry(ctx, core.DefaultUserID, insB[0].ID)
+	if eB.Status != core.StatusUnread {
+		t.Fatalf("feed B entry should stay unread: %+v", eB)
+	}
+}
