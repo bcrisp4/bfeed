@@ -24,13 +24,21 @@ func TestAppSettingsRoundtrip(t *testing.T) {
 	if err := st.PutSetting(ctx, "k", "v1"); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := st.GetSetting(ctx, "k"); v != "v1" {
+	v, err := st.GetSetting(ctx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != "v1" {
 		t.Fatalf("got %q want v1", v)
 	}
 	if err := st.PutSetting(ctx, "k", "v2"); err != nil { // upsert overwrites
 		t.Fatal(err)
 	}
-	if v, _ := st.GetSetting(ctx, "k"); v != "v2" {
+	v, err = st.GetSetting(ctx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != "v2" {
 		t.Fatalf("got %q want v2", v)
 	}
 }
