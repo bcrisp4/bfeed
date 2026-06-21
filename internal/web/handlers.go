@@ -14,17 +14,19 @@ import (
 const uid = core.DefaultUserID
 
 type entryVM struct {
-	ID        core.ID
-	Title     string
-	URL       string
-	Author    string
-	Content   templateHTML
-	Status    string
-	Starred   bool
-	FeedID    core.ID
-	FeedTitle string
-	Published string
-	Summary   string
+	ID            core.ID
+	Title         string
+	URL           string
+	Author        string
+	Content       templateHTML
+	Status        string
+	Starred       bool
+	FeedID        core.ID
+	FeedTitle     string
+	Published     string
+	PublishedFull string // full date+time, shown as the hover tooltip
+	PublishedAttr string // RFC3339, the machine-readable <time datetime>
+	Summary       string
 }
 
 type listVM struct {
@@ -648,16 +650,18 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		body = e.Summary
 	}
 	return entryVM{
-		ID:        e.ID,
-		Title:     e.Title,
-		URL:       e.URL,
-		Author:    e.Author,
-		Content:   templateHTML(body),
-		Status:    string(e.Status),
-		Starred:   e.Starred,
-		FeedID:    e.FeedID,
-		FeedTitle: feedTitle,
-		Published: humanizeSince(e.PublishedAt, time.Now()),
-		Summary:   summaryText(e),
+		ID:            e.ID,
+		Title:         e.Title,
+		URL:           e.URL,
+		Author:        e.Author,
+		Content:       templateHTML(body),
+		Status:        string(e.Status),
+		Starred:       e.Starred,
+		FeedID:        e.FeedID,
+		FeedTitle:     feedTitle,
+		Published:     humanizeSince(e.PublishedAt, time.Now()),
+		PublishedFull: e.PublishedAt.Format("2 Jan 2006, 15:04"),
+		PublishedAttr: e.PublishedAt.Format(time.RFC3339),
+		Summary:       summaryText(e),
 	}
 }

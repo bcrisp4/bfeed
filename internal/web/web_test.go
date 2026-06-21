@@ -494,3 +494,20 @@ func TestFeedPageShowsMarkAllReadButton(t *testing.T) {
 		t.Fatal("home view should not show the mark-all-read button yet")
 	}
 }
+
+func TestListRendersDateTooltip(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "Hello", Status: core.StatusUnread, PublishedAt: time.Unix(1_600_000_000, 0)}})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{`<time datetime="`, `title="`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("list row missing date tooltip markup %q:\n%s", want, body)
+		}
+	}
+}
