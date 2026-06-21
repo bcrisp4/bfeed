@@ -1,7 +1,8 @@
 {{define "layout"}}<!doctype html><html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}} data-summaries="{{.Summaries}}" data-width="{{.Width}}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bfeed</title><link rel="stylesheet" href="/static/app.css">
-<script src="/static/htmx.min.js"></script></head>
+<script src="/static/htmx.min.js"></script>
+<script>addEventListener("pageshow",function(e){if(e.persisted)location.reload()})</script></head>
 <body>
 <header class="appbar">
   <a class="brand" href="/">bfeed</a>

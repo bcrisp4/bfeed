@@ -14,6 +14,18 @@ section is renamed to the new version and becomes the GitHub Release notes.
 ### Added
 
 - Mark all entries in a feed as read, in one click from the feed page.
+- Star, mark-unread, and delete controls in the reading view.
+
+### Changed
+
+- Redesigned entry action buttons: clearer icons, a larger star, and bigger tap targets.
+- Larger, clearer icons in the mobile navigation bar.
+- Adding a feed now stays on the Feeds page and shows the new feed, instead of jumping to Unread.
+
+### Fixed
+
+- Entries opened from a list now reliably show as read after navigating back, and Mark read works on the first press.
+- The search page no longer overflows its column, and its redundant instructions were removed.
 
 ## [0.3.1] - 2026-06-21
 

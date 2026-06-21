@@ -1,6 +1,6 @@
 {{define "content"}}
 <h1>Feeds</h1>
-<form class="subscribe" hx-post="/feeds" hx-target="body" hx-swap="outerHTML">
+<form class="subscribe" hx-post="/feeds" hx-target="#subscribe-msg" hx-swap="innerHTML">
   <input type="url" name="url" placeholder="https://example.com/feed.xml" required>
   <select name="category_id">
     <option value="">Uncategorised</option>
@@ -9,6 +9,7 @@
   <label><input type="checkbox" name="full_content"> Fetch full content</label>
   <button class="primary" type="submit">Subscribe</button>
 </form>
+<div id="subscribe-msg" role="alert"></div>
 {{if .HasFeeds}}
 {{range .Groups}}
 <h2 class="cat-heading">{{.Title}}</h2>
@@ -33,3 +34,4 @@
 {{end}}
 {{else}}<p>No feeds yet. Add one above.</p>{{end}}
 {{end}}
+{{define "subscribeError"}}<p class="form-error">{{.}}</p>{{end}}

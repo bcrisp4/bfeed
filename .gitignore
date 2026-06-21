@@ -4,3 +4,6 @@
 /bfeed.db-shm
 /dist/
 docs/superpowers/plans/
+.superpowers/
+.claude/
+.playwright-mcp/

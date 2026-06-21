@@ -287,13 +287,20 @@ func TestSearchRendersOnlyMatches(t *testing.T) {
 	}
 }
 
-func TestSearchBlankQueryShowsPrompt(t *testing.T) {
+func TestSearchBlankQueryHasNoInstructions(t *testing.T) {
 	h, _ := newWeb(t)
 	req := httptest.NewRequest(http.MethodGet, "/search?q=", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Type a query") {
-		t.Fatalf("blank-query prompt missing, code=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "Type a query") {
+		t.Fatalf("search page still shows instructions:\n%s", body)
+	}
+	if !strings.Contains(body, `name="q"`) {
+		t.Fatalf("search form missing:\n%s", body)
 	}
 }
 
@@ -408,8 +415,11 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusSeeOther {
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("subscribe status %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("subscribe missing HX-Refresh: true; got %q", rec.Header().Get("HX-Refresh"))
 	}
 
 	feeds, _ := store.ListFeeds(context.Background(), core.DefaultUserID)

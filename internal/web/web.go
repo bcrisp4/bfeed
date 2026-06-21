@@ -61,26 +61,43 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /search", h.searchHandler)
 	mux.HandleFunc("GET /settings", h.settings)
 	mux.HandleFunc("POST /settings", h.saveSettings)
-	return logging(log, mux)
+	return logging(log, noStore(mux))
 }
 
 func parseTemplates() map[string]*template.Template {
-	// Each page = layout + its content template (layout calls "content").
+	// Partials every page includes: the shell, nav, and shared icon defines.
+	// Kept in one place so a new partial can't be silently omitted from a page
+	// (the bug _icons.gohtml itself was introduced to fix).
+	common := []string{"templates/layout.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"}
+	// Each page = common + its content template(s) (layout calls "content").
 	pages := map[string][]string{
-		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
-		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml", "templates/_nav.gohtml"},
-		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml", "templates/_nav.gohtml"},
-		"categories": {"templates/layout.gohtml", "templates/categories.gohtml", "templates/_nav.gohtml"},
-		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml"},
-		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml", "templates/_nav.gohtml"},
+		"entries":    {"templates/entries.gohtml", "templates/rows.gohtml"},
+		"entry":      {"templates/entry.gohtml"},
+		"feeds":      {"templates/feeds.gohtml"},
+		"categories": {"templates/categories.gohtml"},
+		"search":     {"templates/search.gohtml", "templates/rows.gohtml"},
+		"settings":   {"templates/settings.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
-		out[name] = template.Must(template.ParseFS(templatesFS, files...))
+		all := append(append([]string{}, common...), files...)
+		out[name] = template.Must(template.ParseFS(templatesFS, all...))
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
-	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml"))
+	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml", "templates/_icons.gohtml"))
 	return out
+}
+
+// noStore marks dynamic responses uncacheable so the browser refetches list
+// pages on Back/Forward instead of restoring a stale DOM (an opened entry is
+// marked read server-side; a bfcached page would still show it unread). The
+// static handler sets its own Cache-Control inside cacheStatic, which overrides
+// this for /static/ assets.
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // cacheStatic sets cache headers on embedded static assets. Fonts are
