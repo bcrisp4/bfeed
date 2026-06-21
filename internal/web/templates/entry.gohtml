@@ -4,7 +4,7 @@
 {{if .Entry.Author}}<p class="meta">by {{.Entry.Author}}</p>{{end}}
 <div class="readerbar">
   <div class="actbar reader-actions">
-    {{template "readerstar" .Entry}}
+    <span id="reader-star">{{template "readerstar" .Entry}}</span>
     <button class="act read-icon" hx-post="/entries/{{.Entry.ID}}/read" hx-vals='{"from":"reader"}' hx-swap="none" hx-disabled-elt="this"
       title="Mark unread" aria-label="Mark unread"><span class="on-unread">{{template "ic-check"}}</span><span class="on-read">{{template "ic-check-circle"}}</span></button>
     <button class="act del" hx-post="/entries/{{.Entry.ID}}/delete" hx-vals='{"from":"reader"}' hx-confirm="Delete this entry?" hx-swap="none" hx-disabled-elt="this"
@@ -16,6 +16,6 @@
 {{end}}
 
 {{define "readerstar"}}
-<button class="act star{{if .Starred}} on{{end}}" id="reader-star" hx-post="/entries/{{.ID}}/star" hx-vals='{"from":"reader"}' hx-target="#reader-star" hx-swap="outerHTML" hx-disabled-elt="this"
+<button class="act star{{if .Starred}} on{{end}}" hx-post="/entries/{{.ID}}/star" hx-vals='{"from":"reader"}' hx-target="#reader-star" hx-swap="innerHTML" hx-disabled-elt="this"
   title="{{if .Starred}}Unstar{{else}}Star{{end}}" aria-label="{{if .Starred}}Unstar{{else}}Star{{end}}">{{template "ic-star"}}</button>
 {{end}}

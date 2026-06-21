@@ -176,3 +176,5 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .empty-state .empty-sub{font-family:var(--font-mono);font-size:.72rem;color:var(--faint);margin:var(--sp-2) 0 0}
 
 .list-header .count{font-family:var(--font-mono);font-size:.7rem;font-weight:400;text-transform:none;letter-spacing:0;color:var(--faint)}
+
+.reader-actions #reader-star{display:inline-flex}
