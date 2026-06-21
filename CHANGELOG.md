@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-21
+
 ### Added
 
 - Mark all entries in a feed as read, in one click from the feed page.
@@ -97,7 +99,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bcrisp4/bfeed/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/bcrisp4/bfeed/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/bcrisp4/bfeed/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bcrisp4/bfeed/compare/v0.1.0...v0.2.0
