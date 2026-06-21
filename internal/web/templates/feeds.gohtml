@@ -16,7 +16,7 @@
 {{range .Feeds}}
 <div class="entry" id="feed-{{.ID}}">
   <h3><a href="/feeds/{{.ID}}">{{.Title}}</a></h3>
-  <div class="meta">{{.FeedURL}}{{if .LastError}} · <span style="color:#c0392b">error: {{.LastError}}</span>{{end}}</div>
+  <div class="meta">{{.FeedURL}} · {{.Unread}} unread · {{.Total}} total{{if .LastError}} · <span style="color:#c0392b">error: {{.LastError}}</span>{{end}}</div>
   <div class="actions">
     {{$f := .}}
     <select name="category_id" hx-post="/feeds/{{.ID}}/category" hx-trigger="change" hx-swap="none">

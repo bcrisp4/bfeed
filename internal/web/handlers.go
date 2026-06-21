@@ -58,6 +58,8 @@ type feedRowVM struct {
 	LastError   string
 	CategoryID  int64 // 0 = uncategorised
 	FullContent bool
+	Unread      int
+	Total       int
 }
 
 type feedGroupVM struct {
@@ -207,12 +209,18 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	stats, err := h.feeds.EntryStats(ctx, uid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	row := func(f *core.Feed) feedRowVM {
 		var cid int64
 		if f.CategoryID != nil {
 			cid = int64(*f.CategoryID)
 		}
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent}
+		st := stats[f.ID]
+		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total}
 	}
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM

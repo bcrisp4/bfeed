@@ -536,3 +536,23 @@ func TestEmptyStateAbsentWhenEntriesExist(t *testing.T) {
 		t.Fatalf("empty state shown despite an entry being present")
 	}
 }
+
+func TestFeedsPageShowsCounts(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "B", Status: core.StatusUnread, PublishedAt: time.Unix(101, 0)},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{"2 unread", "2 total"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("feeds page missing count %q:\n%s", want, body)
+		}
+	}
+}
