@@ -36,6 +36,8 @@ type listVM struct {
 	MarkReadPath string // non-empty only on the single-feed view → renders the "Mark all read" button
 	Entries      []entryVM
 	NextCursor   string
+	Empty        string // empty-state headline (shown when Entries is empty)
+	EmptySub     string // optional faint empty-state subline
 }
 
 type entryPageVM struct {
@@ -123,6 +125,7 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		}
 		return
 	}
+	vm.Empty, vm.EmptySub = emptyFor(f)
 	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
@@ -142,6 +145,21 @@ func listActive(f core.EntryFilter) string {
 		return "feeds"
 	default:
 		return "unread"
+	}
+}
+
+// emptyFor returns the empty-state copy for a list view. Copy deliberately
+// avoids the internal words "entry"/"entries".
+func emptyFor(f core.EntryFilter) (msg, sub string) {
+	switch listActive(f) {
+	case "starred":
+		return "Nothing saved yet.", "Tap the star to keep things here."
+	case "history":
+		return "Nothing read yet.", ""
+	case "unread":
+		return "You're all caught up.", ""
+	default: // single feed, category, uncategorised
+		return "Nothing here yet.", ""
 	}
 }
 

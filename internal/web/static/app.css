@@ -169,3 +169,8 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 }
 @media (min-width:640px){.more-sheet a{display:none}} /* desktop: overflow lives in the top bar */
 .list-header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-2);flex-wrap:wrap}
+
+/* empty states */
+.empty-state{text-align:center;color:var(--muted);padding:var(--sp-6) 0}
+.empty-state .empty-head{font-size:1.05rem;margin:0}
+.empty-state .empty-sub{font-family:var(--font-mono);font-size:.72rem;color:var(--faint);margin:var(--sp-2) 0 0}

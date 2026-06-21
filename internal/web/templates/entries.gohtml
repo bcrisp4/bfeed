@@ -4,5 +4,10 @@
   {{if .MarkReadPath}}<button class="mark-all-read" hx-post="{{.MarkReadPath}}"
     hx-confirm="Mark all entries in this feed as read?">Mark all read</button>{{end}}
 </div>
-{{template "entrylist" .}}
+{{if .Entries}}{{template "entrylist" .}}{{else}}
+<div class="empty-state">
+  <p class="empty-head">{{.Empty}}</p>
+  {{if .EmptySub}}<p class="empty-sub">{{.EmptySub}}</p>{{end}}
+</div>
+{{end}}
 {{end}}

@@ -318,7 +318,7 @@ func TestSearchNoMatchesShowsEmptyState(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "0 matches") || !strings.Contains(body, "No entries match") {
+	if !strings.Contains(body, "0 matches") || !strings.Contains(body, "Nothing matches your search") {
 		t.Fatalf("missing zero-result feedback:\n%s", body)
 	}
 	if strings.Contains(body, "Kubernetes networking") {
@@ -509,5 +509,30 @@ func TestListRendersDateTooltip(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("list row missing date tooltip markup %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestEmptyUnreadShowsCaughtUp(t *testing.T) {
+	h, _ := newWeb(t) // no feeds, no entries
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "empty-state") || !strings.Contains(body, "caught up") {
+		t.Fatalf("empty unread view missing caught-up empty state:\n%s", body)
+	}
+}
+
+func TestEmptyStateAbsentWhenEntriesExist(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "Hi", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), "empty-state") {
+		t.Fatalf("empty state shown despite an entry being present")
 	}
 }
