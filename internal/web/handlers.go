@@ -129,9 +129,13 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		return
 	}
 	vm.Empty, vm.EmptySub = emptyFor(f)
+	// HeaderCount is best-effort chrome: a failed stats lookup omits the count
+	// (the list itself still renders) but is logged so the failure isn't silent.
 	switch {
 	case listActive(f) == "unread":
-		if stats, err := h.feeds.EntryStats(r.Context(), uid); err == nil {
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
+			h.log.Warn("header unread count", "error", err)
+		} else {
 			total := 0
 			for _, s := range stats {
 				total += s.Unread
@@ -139,7 +143,9 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 			vm.HeaderCount = fmt.Sprintf("%d unread", total)
 		}
 	case f.FeedID != nil:
-		if stats, err := h.feeds.EntryStats(r.Context(), uid); err == nil {
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
+			h.log.Warn("header feed count", "feed_id", int64(*f.FeedID), "error", err)
+		} else {
 			s := stats[*f.FeedID]
 			vm.HeaderCount = fmt.Sprintf("%d unread · %d total", s.Unread, s.Total)
 		}
