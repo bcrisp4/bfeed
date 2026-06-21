@@ -65,18 +65,23 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 }
 
 func parseTemplates() map[string]*template.Template {
-	// Each page = layout + its content template (layout calls "content").
+	// Partials every page includes: the shell, nav, and shared icon defines.
+	// Kept in one place so a new partial can't be silently omitted from a page
+	// (the bug _icons.gohtml itself was introduced to fix).
+	common := []string{"templates/layout.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"}
+	// Each page = common + its content template(s) (layout calls "content").
 	pages := map[string][]string{
-		"entries":    {"templates/layout.gohtml", "templates/entries.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
-		"entry":      {"templates/layout.gohtml", "templates/entry.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
-		"feeds":      {"templates/layout.gohtml", "templates/feeds.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
-		"categories": {"templates/layout.gohtml", "templates/categories.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
-		"search":     {"templates/layout.gohtml", "templates/search.gohtml", "templates/rows.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
-		"settings":   {"templates/layout.gohtml", "templates/settings.gohtml", "templates/_nav.gohtml", "templates/_icons.gohtml"},
+		"entries":    {"templates/entries.gohtml", "templates/rows.gohtml"},
+		"entry":      {"templates/entry.gohtml"},
+		"feeds":      {"templates/feeds.gohtml"},
+		"categories": {"templates/categories.gohtml"},
+		"search":     {"templates/search.gohtml", "templates/rows.gohtml"},
+		"settings":   {"templates/settings.gohtml"},
 	}
 	out := map[string]*template.Template{}
 	for name, files := range pages {
-		out[name] = template.Must(template.ParseFS(templatesFS, files...))
+		all := append(append([]string{}, common...), files...)
+		out[name] = template.Must(template.ParseFS(templatesFS, all...))
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml", "templates/_icons.gohtml"))

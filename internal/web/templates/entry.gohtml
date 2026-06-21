@@ -5,9 +5,9 @@
 <div class="readerbar">
   <div class="actbar reader-actions">
     {{template "readerstar" .Entry}}
-    <button class="act read-icon" hx-post="/entries/{{.Entry.ID}}/read" hx-vals='{"from":"reader"}' hx-disabled-elt="this"
+    <button class="act read-icon" hx-post="/entries/{{.Entry.ID}}/read" hx-vals='{"from":"reader"}' hx-swap="none" hx-disabled-elt="this"
       title="Mark unread" aria-label="Mark unread"><span class="on-unread">{{template "ic-check"}}</span><span class="on-read">{{template "ic-check-circle"}}</span></button>
-    <button class="act del" hx-post="/entries/{{.Entry.ID}}/delete" hx-vals='{"from":"reader"}' hx-confirm="Delete this entry?" hx-disabled-elt="this"
+    <button class="act del" hx-post="/entries/{{.Entry.ID}}/delete" hx-vals='{"from":"reader"}' hx-confirm="Delete this entry?" hx-swap="none" hx-disabled-elt="this"
       title="Delete" aria-label="Delete">{{template "ic-trash"}}</button>
   </div>
   <a class="orig" href="{{.Entry.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a>

@@ -409,14 +409,14 @@ func (h *Handler) readerToggleStar(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := h.entries.Star(r.Context(), uid, []core.ID{id}, !e.Starred); err != nil {
+	starred := !e.Starred
+	if err := h.entries.Star(r.Context(), uid, []core.ID{id}, starred); err != nil {
 		h.log.Warn("reader toggle star", "entry_id", int64(id), "error", err)
+		starred = e.Starred // render the unchanged state on failure
 	}
-	if updated, err := h.entries.Get(r.Context(), uid, id); err == nil {
-		e = updated
-	}
-	ev := toEntryVM(e, h.singleFeedTitle(r.Context(), e.FeedID))
-	if err := h.tmpl["entry"].ExecuteTemplate(w, "readerstar", ev); err != nil {
+	e.Starred = starred
+	// readerstar renders only .ID and .Starred, so no feed-title lookup is needed.
+	if err := h.tmpl["entry"].ExecuteTemplate(w, "readerstar", toEntryVM(e, "")); err != nil {
 		h.log.Error("template execute", "template", "entry/readerstar", "error", err)
 	}
 }
@@ -430,8 +430,11 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("delete entry", "entry_id", int64(id), "error", err)
 	}
 	// From the reader there is no row to remove — send the client to Unread.
+	// 204 + HX-Redirect mirrors readerMarkUnread (no body to swap).
 	if r.FormValue("from") == "reader" {
 		w.Header().Set("HX-Redirect", "/")
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
