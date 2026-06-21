@@ -189,3 +189,6 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 #entries .entry:hover{background:var(--surface-2)}
 #entries .entry h2 a::after{content:"";position:absolute;inset:0}
 #entries .entry .actbar{position:relative;z-index:1}
+/* lift the date above the stretched anchor so its hover tooltip stays reachable
+   (the trade-off: the date itself isn't a click-to-open target, the rest of the row is) */
+#entries .entry .meta time{position:relative;z-index:1}
