@@ -74,3 +74,31 @@ func TestEntryServiceMarkAllReadByFeed(t *testing.T) {
 		t.Fatalf("other feed entry should stay unread: %+v", eo)
 	}
 }
+
+func TestEntryServiceMarkAllReadAllFeeds(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	gid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/g", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "a", Status: core.StatusUnread, PublishedAt: time.Unix(10, 0)},
+	})
+	insG, _ := store.UpsertEntries(ctx, gid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: gid, GUID: "b", Status: core.StatusUnread, PublishedAt: time.Unix(20, 0)},
+	})
+	svc := core.NewEntryService(store, coretest.DiscardLogger())
+
+	n, err := svc.MarkAllRead(ctx, core.DefaultUserID, core.EntryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("MarkAllRead affected %d, want 2", n)
+	}
+	for _, id := range []core.ID{ins[0].ID, insG[0].ID} {
+		e, _ := svc.Get(ctx, core.DefaultUserID, id)
+		if e.Status != core.StatusRead || e.ReadAt == nil {
+			t.Fatalf("entry %d not read with read_at: %+v", id, e)
+		}
+	}
+}
