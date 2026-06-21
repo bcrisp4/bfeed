@@ -58,6 +58,7 @@ type FeedStore interface {
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
 	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
+	EntryStatsByFeed(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error)
 }
 
 type EntryStore interface {

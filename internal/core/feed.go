@@ -236,6 +236,11 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 	return s.store.UpdateFeed(ctx, f)
 }
 
+// EntryStats returns per-feed total and unread counts for the user.
+func (s *FeedService) EntryStats(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error) {
+	return s.store.EntryStatsByFeed(ctx, userID)
+}
+
 func orKeep(newv, old string) string {
 	if strings.TrimSpace(newv) != "" {
 		return newv

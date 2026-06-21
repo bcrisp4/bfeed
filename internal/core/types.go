@@ -77,6 +77,12 @@ type Entry struct {
 	ExtractAttempts int
 }
 
+// FeedEntryStats holds per-feed entry counts for the feed list and headers.
+type FeedEntryStats struct {
+	Total  int
+	Unread int
+}
+
 type Tombstone struct {
 	FeedID    ID
 	GUID      string

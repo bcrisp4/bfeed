@@ -210,3 +210,33 @@ func TestListDueFeeds(t *testing.T) {
 		t.Fatalf("due = %+v, want only a.test", due)
 	}
 }
+
+func TestEntryStatsByFeed(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_100, 0).UTC()
+	fA, _ := s.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a.test/f", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	fB, _ := s.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	ins, err := s.UpsertEntries(ctx, fA, []*core.Entry{mkEntry(fA, "a1", now), mkEntry(fA, "a2", now), mkEntry(fA, "a3", now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mark one of feed A's entries read; feed A is then 3 total / 2 unread.
+	if err := s.SetStatus(ctx, core.DefaultUserID, []core.ID{ins[0].ID}, core.StatusRead); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertEntries(ctx, fB, []*core.Entry{mkEntry(fB, "b1", now)}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := s.EntryStatsByFeed(ctx, core.DefaultUserID)
+	if err != nil {
+		t.Fatalf("EntryStatsByFeed: %v", err)
+	}
+	if got := stats[fA]; got.Total != 3 || got.Unread != 2 {
+		t.Fatalf("feed A stats = %+v, want {Total:3 Unread:2}", got)
+	}
+	if got := stats[fB]; got.Total != 1 || got.Unread != 1 {
+		t.Fatalf("feed B stats = %+v, want {Total:1 Unread:1}", got)
+	}
+}

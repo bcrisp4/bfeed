@@ -78,6 +78,39 @@ func (q *Queries) DeleteFeed(ctx context.Context, arg DeleteFeedParams) (int64, 
 	return result.RowsAffected()
 }
 
+const entryTotalsByFeed = `-- name: EntryTotalsByFeed :many
+SELECT feed_id, COUNT(*) AS n
+FROM entries WHERE user_id = ? GROUP BY feed_id
+`
+
+type EntryTotalsByFeedRow struct {
+	FeedID int64
+	N      int64
+}
+
+func (q *Queries) EntryTotalsByFeed(ctx context.Context, userID int64) ([]EntryTotalsByFeedRow, error) {
+	rows, err := q.db.QueryContext(ctx, entryTotalsByFeed, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EntryTotalsByFeedRow
+	for rows.Next() {
+		var i EntryTotalsByFeedRow
+		if err := rows.Scan(&i.FeedID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFeed = `-- name: GetFeed :one
 SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE id = ? AND user_id = ?
 `
@@ -243,6 +276,39 @@ func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContent
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const unreadCountsByFeed = `-- name: UnreadCountsByFeed :many
+SELECT feed_id, COUNT(*) AS n
+FROM entries WHERE user_id = ? AND status = 'unread' GROUP BY feed_id
+`
+
+type UnreadCountsByFeedRow struct {
+	FeedID int64
+	N      int64
+}
+
+func (q *Queries) UnreadCountsByFeed(ctx context.Context, userID int64) ([]UnreadCountsByFeedRow, error) {
+	rows, err := q.db.QueryContext(ctx, unreadCountsByFeed, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UnreadCountsByFeedRow
+	for rows.Next() {
+		var i UnreadCountsByFeedRow
+		if err := rows.Scan(&i.FeedID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateFeed = `-- name: UpdateFeed :exec
