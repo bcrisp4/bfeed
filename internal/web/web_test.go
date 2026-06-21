@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -505,10 +506,11 @@ func TestListRendersDateTooltip(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	for _, want := range []string{`<time datetime="`, `title="`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("list row missing date tooltip markup %q:\n%s", want, body)
-		}
+	// Assert the <time> element itself carries both datetime and title — checking
+	// the two attributes independently is too weak (title=" also appears on the
+	// action buttons), so a missing tooltip on <time> could slip through.
+	if !regexp.MustCompile(`<time datetime="[^"]+" title="[^"]+">`).MatchString(body) {
+		t.Fatalf("list row <time> missing datetime+title tooltip:\n%s", body)
 	}
 }
 

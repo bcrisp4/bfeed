@@ -73,6 +73,7 @@ type feedsPageVM struct {
 	Categories []feedsCatVM
 	Groups     []feedGroupVM
 	HasFeeds   bool
+	ShowCounts bool // false when the stats lookup failed → omit per-feed counts
 }
 
 func (h *Handler) unread(w http.ResponseWriter, r *http.Request) {
@@ -231,10 +232,12 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	stats, err := h.feeds.EntryStats(ctx, uid)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+	// Counts are additive chrome: on a stats error, log and render the page
+	// without counts rather than failing the whole feed list (a nil map reads
+	// as the zero value, which ShowCounts then hides).
+	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	if statsErr != nil {
+		h.log.Warn("feed entry stats", "error", statsErr)
 	}
 	row := func(f *core.Feed) feedRowVM {
 		var cid int64
@@ -253,7 +256,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 			byCat[*f.CategoryID] = append(byCat[*f.CategoryID], row(f))
 		}
 	}
-	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats)}
+	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats), ShowCounts: statsErr == nil}
 	// Only render groups that actually contain feeds — an empty heading with a
 	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
 	for _, c := range cats {
