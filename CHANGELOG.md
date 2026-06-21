@@ -11,6 +11,22 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- An unread count on the Unread view and on each feed's own page, plus unread and total counts beside every feed on the Feeds page.
+- A clear message on empty lists, so an empty view no longer looks like a failed load.
+
+### Changed
+
+- Dates older than a day now read as "2 May 2026" (recent items still show "2h ago"), with the full date and time shown on hover.
+- Tapping anywhere on an item in a list now opens it, not just its title.
+- More breathing room around the icons in the mobile bottom bar.
+
+### Fixed
+
+- The star button in the reading view now updates immediately when tapped, instead of needing a page reload.
+- The circled "read" tick is now sized to match the star and delete icons.
+
 ## [0.4.0] - 2026-06-21
 
 ### Added
