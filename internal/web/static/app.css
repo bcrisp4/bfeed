@@ -85,6 +85,44 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 :root[data-summaries="hide"] .entry-summary{display:none}
 .actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2);align-items:center}
 .actions button,.actions select{min-height:var(--tap);font-size:.7rem}
+/* entry-list + reader icon actions (separate from feeds/categories .actions) */
+.actbar{display:flex;align-items:center;gap:var(--sp-2);margin-top:var(--sp-2)}
+.actbar .act{display:inline-flex;align-items:center;justify-content:center;width:2.75rem;height:2.75rem;
+  border:0;border-radius:var(--radius);background:none;color:var(--muted);cursor:pointer;transition:color var(--ease)}
+.actbar .act svg{width:1.5rem;height:1.5rem;display:block}
+.actbar .act:hover{color:var(--ink)}
+.actbar .act:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+/* read tick: bare check (unread) ⇄ check-in-circle (read); hover previews result */
+.actbar .read-icon .on-unread{display:block}
+.actbar .read-icon .on-read{display:none}
+.entry.read .actbar .read-icon .on-unread{display:none}
+.entry.read .actbar .read-icon .on-read{display:block}
+.entry:not(.read) .actbar .read-icon:hover .on-read,.entry:not(.read) .actbar .read-icon:focus-visible .on-read{display:block}
+.entry:not(.read) .actbar .read-icon:hover .on-unread,.entry:not(.read) .actbar .read-icon:focus-visible .on-unread{display:none}
+.entry.read .actbar .read-icon:hover .on-unread,.entry.read .actbar .read-icon:focus-visible .on-unread{display:block}
+.entry.read .actbar .read-icon:hover .on-read,.entry.read .actbar .read-icon:focus-visible .on-read{display:none}
+/* star: outline default → gold filled when on; hover previews the toggle */
+.actbar .star{color:var(--muted)}
+.actbar .star svg{fill:none;stroke:currentColor;stroke-width:1.6}
+.actbar .star.on{color:var(--star)}
+.actbar .star.on svg{fill:currentColor;stroke-width:1.3}
+.actbar .star:not(.on):hover,.actbar .star:not(.on):focus-visible{color:var(--star)}
+.actbar .star:not(.on):hover svg,.actbar .star:not(.on):focus-visible svg{fill:currentColor;stroke-width:1.3}
+.actbar .star.on:hover,.actbar .star.on:focus-visible{color:var(--muted)}
+.actbar .star.on:hover svg,.actbar .star.on:focus-visible svg{fill:none;stroke-width:1.6}
+/* delete */
+.actbar .del:hover,.actbar .del:focus-visible{color:var(--accent)}
+/* reader opens read → default to circle; hover previews bare check (mark unread) */
+.reader-actions .read-icon .on-unread{display:none}
+.reader-actions .read-icon .on-read{display:block}
+.reader-actions .read-icon:hover .on-unread,.reader-actions .read-icon:focus-visible .on-unread{display:block}
+.reader-actions .read-icon:hover .on-read,.reader-actions .read-icon:focus-visible .on-read{display:none}
+/* reader action bar layout */
+.readerbar{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:var(--sp-1) 0;margin:var(--sp-2) 0 var(--sp-4)}
+.readerbar .actbar{margin-top:0}
+.orig{font-family:var(--font-mono);font-size:.72rem;color:var(--accent);text-decoration:none;white-space:nowrap}
+.orig:hover{text-decoration:underline}
 
 /* reading view */
 .article{max-width:var(--measure);font-size:1.125rem;color:var(--ink-soft)}

@@ -11,13 +11,13 @@
   <h2>{{if ne .Status "read"}}<span class="unread-dot" aria-hidden="true">▪</span>{{end}}<a href="/entries/{{.ID}}">{{.Title}}</a></h2>
   <div class="meta">{{.FeedTitle}} · {{.Published}}</div>
   {{if .Summary}}<p class="entry-summary">{{.Summary}}</p>{{end}}
-  <div class="actions">
-    <button hx-post="/entries/{{.ID}}/read" hx-target="#entry-{{.ID}}" hx-swap="outerHTML">
-      {{if eq .Status "read"}}Mark unread{{else}}Mark read{{end}}</button>
-    <button hx-post="/entries/{{.ID}}/star" hx-target="#entry-{{.ID}}" hx-swap="outerHTML">
-      {{if .Starred}}★{{else}}☆{{end}}</button>
-    <button hx-post="/entries/{{.ID}}/delete" hx-target="#entry-{{.ID}}" hx-swap="delete"
-      hx-confirm="Delete this entry?">Delete</button>
+  <div class="actbar">
+    <button class="act read-icon" hx-post="/entries/{{.ID}}/read" hx-target="#entry-{{.ID}}" hx-swap="outerHTML" hx-disabled-elt="this"
+      title="{{if eq .Status "read"}}Mark unread{{else}}Mark read{{end}}" aria-label="{{if eq .Status "read"}}Mark unread{{else}}Mark read{{end}}"><span class="on-unread">{{template "ic-check"}}</span><span class="on-read">{{template "ic-check-circle"}}</span></button>
+    <button class="act star{{if .Starred}} on{{end}}" hx-post="/entries/{{.ID}}/star" hx-target="#entry-{{.ID}}" hx-swap="outerHTML" hx-disabled-elt="this"
+      title="{{if .Starred}}Unstar{{else}}Star{{end}}" aria-label="{{if .Starred}}Unstar{{else}}Star{{end}}">{{template "ic-star"}}</button>
+    <button class="act del" hx-post="/entries/{{.ID}}/delete" hx-target="#entry-{{.ID}}" hx-swap="delete" hx-confirm="Delete this entry?" hx-disabled-elt="this"
+      title="Delete" aria-label="Delete">{{template "ic-trash"}}</button>
   </div>
 </div>
 {{end}}
