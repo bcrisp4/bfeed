@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -18,6 +21,10 @@ type Config struct {
 	HostConcurrency int
 	Timeout         time.Duration
 	MaxBytes        int64
+	// BlockPrivateNetworks rejects connections to private/loopback/link-local/
+	// metadata IPs (SSRF guard). AllowedCIDRs re-permits specific ranges.
+	BlockPrivateNetworks bool
+	AllowedCIDRs         []netip.Prefix
 }
 
 type Client struct {
@@ -34,9 +41,21 @@ func New(cfg Config) *Client {
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = 10 << 20
 	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if cfg.BlockPrivateNetworks {
+		dialer.Control = guardDial(cfg.AllowedCIDRs)
+	}
+	tr := &http.Transport{
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
 	return &Client{
 		cfg:  cfg,
-		http: &http.Client{Timeout: cfg.Timeout, CheckRedirect: capRedirects(5)},
+		http: &http.Client{Timeout: cfg.Timeout, CheckRedirect: capRedirects(5), Transport: tr},
 		sems: make(map[string]chan struct{}),
 	}
 }
@@ -128,6 +147,50 @@ func capRedirects(n int) func(*http.Request, []*http.Request) error {
 	return func(_ *http.Request, via []*http.Request) error {
 		if len(via) >= n {
 			return fmt.Errorf("stopped after %d redirects", n)
+		}
+		return nil
+	}
+}
+
+// cgnat is the 100.64.0.0/10 shared-address space (RFC 6598). netip's IsPrivate
+// does not include it, but it is not publicly routable (and Tailscale uses it).
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// isBlockedIP reports whether ip is not safely public (SSRF target).
+func isBlockedIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return !ip.IsValid() ||
+		ip.IsLoopback() ||
+		ip.IsUnspecified() ||
+		ip.IsPrivate() || // RFC1918 + ULA fc00::/7
+		ip.IsLinkLocalUnicast() || // 169.254.0.0/16 (incl. 169.254.169.254 metadata) + fe80::/10
+		ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsInterfaceLocalMulticast() ||
+		cgnat.Contains(ip)
+}
+
+// guardDial returns a net.Dialer Control hook that runs once per dialled address
+// after DNS resolution (so it also covers redirect targets and defeats
+// DNS-rebind TOCTOU). It rejects blocked IPs unless they fall in an allowed CIDR.
+func guardDial(allowed []netip.Prefix) func(network, address string, c syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return fmt.Errorf("ssrf guard: bad address %q: %w", address, err)
+		}
+		ip, err := netip.ParseAddr(host)
+		if err != nil {
+			return fmt.Errorf("ssrf guard: unparseable ip %q: %w", host, err)
+		}
+		ip = ip.Unmap()
+		for _, p := range allowed {
+			if p.Contains(ip) {
+				return nil
+			}
+		}
+		if isBlockedIP(ip) {
+			return fmt.Errorf("ssrf guard: blocked address %s", ip)
 		}
 		return nil
 	}
