@@ -556,3 +556,32 @@ func TestFeedsPageShowsCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestUnreadViewShowsTotalCount(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)},
+		{UserID: core.DefaultUserID, FeedID: fid, GUID: "g2", Title: "B", Status: core.StatusUnread, PublishedAt: time.Unix(101, 0)},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "2 unread") {
+		t.Fatalf("unread view missing total count:\n%s", rec.Body.String())
+	}
+}
+
+func TestSingleFeedViewShowsCount(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g1", Title: "A", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+	req := httptest.NewRequest(http.MethodGet, "/feeds/"+strconv.FormatInt(int64(fid), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "1 unread · 1 total") {
+		t.Fatalf("single-feed view missing count:\n%s", rec.Body.String())
+	}
+}

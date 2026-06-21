@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="list-header">
-  <h1>{{.Title}}</h1>
+  <h1>{{.Title}}{{if .HeaderCount}} <span class="count">{{.HeaderCount}}</span>{{end}}</h1>
   {{if .MarkReadPath}}<button class="mark-all-read" hx-post="{{.MarkReadPath}}"
     hx-confirm="Mark all entries in this feed as read?">Mark all read</button>{{end}}
 </div>

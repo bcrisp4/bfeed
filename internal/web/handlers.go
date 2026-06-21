@@ -38,6 +38,7 @@ type listVM struct {
 	NextCursor   string
 	Empty        string // empty-state headline (shown when Entries is empty)
 	EmptySub     string // optional faint empty-state subline
+	HeaderCount  string // preformatted header count, e.g. "23 unread"; empty hides it
 }
 
 type entryPageVM struct {
@@ -128,6 +129,21 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		return
 	}
 	vm.Empty, vm.EmptySub = emptyFor(f)
+	switch {
+	case listActive(f) == "unread":
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err == nil {
+			total := 0
+			for _, s := range stats {
+				total += s.Unread
+			}
+			vm.HeaderCount = fmt.Sprintf("%d unread", total)
+		}
+	case f.FeedID != nil:
+		if stats, err := h.feeds.EntryStats(r.Context(), uid); err == nil {
+			s := stats[*f.FeedID]
+			vm.HeaderCount = fmt.Sprintf("%d unread · %d total", s.Unread, s.Total)
+		}
+	}
 	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
