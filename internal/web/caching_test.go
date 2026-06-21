@@ -2,6 +2,8 @@ package web_test
 
 import (
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,33 +13,36 @@ import (
 )
 
 // Fingerprinting: templates must reference CSS/JS by a cache-busting URL whose
-// ?v= is the real 12-char content hash, so a changed asset gets a new URL and
-// the browser can't serve a stale copy. Asserting the hash shape (and that two
-// distinct files hash differently) proves the value is content-derived rather
-// than a constant placeholder that would never bust.
+// ?v= is the first 12 hex chars of sha256 over the actually-served bytes. We
+// fetch each asset and recompute the hash, so the test fails if ?v= is ever a
+// constant, random, or time-based value — only a real content hash guarantees a
+// changed asset busts the cache.
 func TestTemplatesReferenceFingerprintedAssets(t *testing.T) {
 	h, _ := newWeb(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := rec.Body.String()
 
 	re := regexp.MustCompile(`/static/(app\.css|htmx\.min\.js)\?v=([0-9a-f]+)`)
-	hashes := map[string]string{}
+	rendered := map[string]string{}
 	for _, m := range re.FindAllStringSubmatch(body, -1) {
-		hashes[m[1]] = m[2]
+		rendered[m[1]] = m[2]
 	}
 	for _, name := range []string{"app.css", "htmx.min.js"} {
-		got, ok := hashes[name]
+		got, ok := rendered[name]
 		if !ok {
 			t.Fatalf("layout missing fingerprinted %s:\n%s", name, body)
 		}
-		if len(got) != 12 {
-			t.Fatalf("%s ?v=%q is not the 12-char content hash", name, got)
+		arec := httptest.NewRecorder()
+		h.ServeHTTP(arec, httptest.NewRequest(http.MethodGet, "/static/"+name, nil))
+		sum := sha256.Sum256(arec.Body.Bytes())
+		want := hex.EncodeToString(sum[:])[:12]
+		if got != want {
+			t.Fatalf("%s ?v=%q, want content hash %q of the served bytes", name, got, want)
 		}
 	}
-	if hashes["app.css"] == hashes["htmx.min.js"] {
-		t.Fatalf("css and js share hash %q — fingerprint is not content-derived", hashes["app.css"])
+	if rendered["app.css"] == rendered["htmx.min.js"] {
+		t.Fatalf("css and js share hash %q — fingerprint is not content-derived", rendered["app.css"])
 	}
 }
 

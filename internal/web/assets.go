@@ -16,7 +16,7 @@ var assetHashes = computeAssetHashes()
 
 func computeAssetHashes() map[string]string {
 	m := map[string]string{}
-	_ = fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -28,6 +28,12 @@ func computeAssetHashes() map[string]string {
 		m[strings.TrimPrefix(p, "static/")] = hex.EncodeToString(sum[:])[:12]
 		return nil
 	})
+	if err != nil {
+		// Assets are embedded at build time, so this walk cannot fail at runtime.
+		// If it somehow does, fail fast rather than silently fall back to
+		// un-fingerprinted URLs that would reintroduce stale-asset caching.
+		panic("web: hashing static assets: " + err.Error())
+	}
 	return m
 }
 
