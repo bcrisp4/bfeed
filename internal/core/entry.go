@@ -30,6 +30,12 @@ func (s *EntryService) MarkRead(ctx context.Context, userID ID, ids []ID, read b
 	return s.store.SetStatus(ctx, userID, ids, st)
 }
 
+// MarkAllRead marks every unread entry matching f's selection (feed / category /
+// uncategorised; empty = all the user's feeds) read. Returns the number affected.
+func (s *EntryService) MarkAllRead(ctx context.Context, userID ID, f EntryFilter) (int, error) {
+	return s.store.MarkReadByFilter(ctx, userID, f)
+}
+
 func (s *EntryService) Star(ctx context.Context, userID ID, ids []ID, starred bool) error {
 	return s.store.SetStarred(ctx, userID, ids, starred)
 }

@@ -262,6 +262,38 @@ func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st cor
 	return nil
 }
 
+func (s *MemStore) MarkReadByFilter(_ context.Context, u core.ID, f core.EntryFilter) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	n := 0
+	for _, e := range s.entries {
+		if e.UserID != u || e.Status != core.StatusUnread {
+			continue
+		}
+		if f.FeedID != nil && e.FeedID != *f.FeedID {
+			continue
+		}
+		if f.CategoryID != nil || f.Uncategorised {
+			fd, ok := s.feeds[e.FeedID]
+			if !ok {
+				continue
+			}
+			if f.Uncategorised && fd.CategoryID != nil {
+				continue
+			}
+			if f.CategoryID != nil && (fd.CategoryID == nil || *fd.CategoryID != *f.CategoryID) {
+				continue
+			}
+		}
+		e.Status = core.StatusRead
+		rt := now
+		e.ReadAt = &rt
+		n++
+	}
+	return n, nil
+}
+
 func (s *MemStore) SetStarred(_ context.Context, u core.ID, ids []core.ID, v bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
