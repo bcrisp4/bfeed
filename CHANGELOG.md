@@ -21,9 +21,11 @@ section is renamed to the new version and becomes the GitHub Release notes.
 - Redesigned entry action buttons: clearer icons, a larger star, and bigger tap targets.
 - Larger, clearer icons in the mobile navigation bar.
 - Adding a feed now stays on the Feeds page and shows the new feed, instead of jumping to Unread.
+- Pages, styles, and scripts are now sent compressed (gzip/brotli) and the main body font is preloaded, for faster page loads on slow or low-bandwidth connections.
 
 ### Fixed
 
+- After an update, the app's styles and scripts now refresh immediately instead of being served from a stale browser cache (up to an hour) until a manual hard refresh.
 - Entries opened from a list now reliably show as read after navigating back, and Mark read works on the first press.
 - The search page no longer overflows its column, and its redundant instructions were removed.
 
