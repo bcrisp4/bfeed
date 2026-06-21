@@ -135,7 +135,7 @@ Fine short-term; revisit before the DB grows large.
 | Light/dark/system theme toggle | §2, §18 | CSS vars + `prefers-color-scheme` + cookie | Light/Sepia/Dark, default follows OS — specced in `specs/2026-06-20-web-ui-redesign-design.md` | deferred |
 | Settings page (theme, summary, width) | §18 | `/settings` (cookie-backed, single-user) | Cookie-backed prefs specced in the UI-redesign spec; per-user TTL still needs auth+retention | deferred |
 | Persist user prefs in DB (multi-user) | §16, §18 | move the cookie-backed prefs (`bfeed_theme`/`bfeed_summary`/`bfeed_width`) onto a per-user `user_settings` table (or `users` columns) | When multi-user/auth (A1) lands — cookies are the deliberate single-user MVP form, so this is the additive upgrade path | deferred |
-| Content-hashed (fingerprinted) static asset URLs | §18 | hash each embedded asset (`app.css`, `htmx.min.js`, fonts) at startup, reference it by `…?v=<hash>` (or `name.<hash>.ext`) in templates, and serve **all** static assets `immutable` | Today `app.css`/`htmx.min.js` are served `max-age=3600` **not** `immutable`, because their names aren't fingerprinted — so after a deploy a client can show stale CSS/JS for up to an hour (or until a hard refresh). Fingerprinting makes them immutable **and** auto-bust on change. Can hash the embedded bytes at startup, so it stays build-step-free | deferred |
+| Content-hashed (fingerprinted) static asset URLs | §18 | `assetURL` hashes each embedded asset at startup; templates reference CSS/JS via the `asset` func as `…?v=<hash>`; `cacheStatic` serves any `?v=` request (and woff2) `immutable` | A `?v=` URL auto-busts on change and is cached for a year; a bare un-fingerprinted hit still gets `max-age=3600` as a safety net. Built-in on-the-fly gzip/brotli compression (`CAFxX/httpcompression`, allowlisted text types only — woff2 skipped) also landed alongside | done |
 
 ### A12. Observability — Prometheus
 MVP is **slog only**.
@@ -218,3 +218,4 @@ _(Move shipped items here with their iteration number.)_
 - Categories (feeds → categories, aggregated category stream, CRUD) — iter 3.
 - Full-text search (FTS5 over title/content/summary, bm25-ranked, /search) — iter 3.
 - Full-content extraction (opt-in per feed, DB-backed scrape sweep) — iter 4.
+- Content-hashed (fingerprinted) static asset URLs (`?v=<hash>` → `immutable`) + on-the-fly gzip/brotli response compression + body-font preload — A11.

@@ -1,7 +1,9 @@
 {{define "layout"}}<!doctype html><html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}} data-summaries="{{.Summaries}}" data-width="{{.Width}}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bfeed</title><link rel="stylesheet" href="/static/app.css">
-<script src="/static/htmx.min.js"></script>
+<title>bfeed</title>
+<link rel="preload" href="/static/fonts/literata-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{asset "app.css"}}">
+<script src="{{asset "htmx.min.js"}}" defer></script>
 <script>addEventListener("pageshow",function(e){if(e.persisted)location.reload()})</script></head>
 <body>
 <header class="appbar">
