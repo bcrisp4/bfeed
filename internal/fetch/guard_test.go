@@ -47,6 +47,32 @@ func TestFetchBlocksPrivateByDefault(t *testing.T) {
 	}
 }
 
+// TestProxyIgnoredWhileGuarding proves the SSRF guard is authoritative: with
+// BlockPrivateNetworks on, HTTP(S)_PROXY is NOT honoured (the request dials the
+// destination directly, where Control applies). If the proxy were used the
+// request would route to the bogus proxy below and fail.
+func TestProxyIgnoredWhileGuarding(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("img"))
+	}))
+	defer srv.Close()
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")  // refused if ever used
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1") //nolint:gosec // not a real secret
+	c := New(Config{
+		BlockPrivateNetworks: true,
+		AllowedCIDRs:         []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
+		Timeout:              5 * time.Second,
+	})
+	resp, err := c.Fetch(context.Background(), core.FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatalf("guard mode must dial directly (proxy ignored), got %v", err)
+	}
+	if resp.Status != 200 {
+		t.Fatalf("status = %d", resp.Status)
+	}
+}
+
 func TestFetchAllowsPrivateWhenAllowlisted(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("img"))
