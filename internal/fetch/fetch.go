@@ -46,6 +46,7 @@ func New(cfg Config) *Client {
 		dialer.Control = guardDial(cfg.AllowedCIDRs)
 	}
 	tr := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment, // preserve HTTP(S)_PROXY/NO_PROXY (DefaultTransport default)
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
