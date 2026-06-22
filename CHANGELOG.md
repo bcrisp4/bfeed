@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-22
+
 ### Added
 - Image proxy: entry images now load through a signed, same-origin `/img` endpoint, so your browser never contacts the origin or third-party tracker servers when viewing an article. Enabled by default; set `BFEED_IMAGE_PROXY=off` to load images directly instead.
 
@@ -123,7 +125,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/bcrisp4/bfeed/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bcrisp4/bfeed/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bcrisp4/bfeed/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/bcrisp4/bfeed/compare/v0.3.0...v0.3.1
