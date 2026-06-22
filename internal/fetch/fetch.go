@@ -42,17 +42,26 @@ func New(cfg Config) *Client {
 		cfg.MaxBytes = 10 << 20
 	}
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	if cfg.BlockPrivateNetworks {
-		dialer.Control = guardDial(cfg.AllowedCIDRs)
-	}
 	tr := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment, // preserve HTTP(S)_PROXY/NO_PROXY (DefaultTransport default)
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: time.Second,
+	}
+	if cfg.BlockPrivateNetworks {
+		// The SSRF guard inspects the *destination* IP in the dialer's Control
+		// hook. An egress proxy would make the transport dial the proxy instead,
+		// so Control would only see the proxy's address and the destination filter
+		// would be silently bypassed. The guard and HTTP(S)_PROXY are therefore
+		// mutually exclusive: while guarding, leave Proxy nil and dial directly so
+		// Control stays authoritative.
+		dialer.Control = guardDial(cfg.AllowedCIDRs)
+	} else {
+		// Guard disabled: restore the standard egress-proxy behaviour
+		// (HTTP_PROXY/HTTPS_PROXY/NO_PROXY) that http.DefaultTransport provides.
+		tr.Proxy = http.ProxyFromEnvironment
 	}
 	return &Client{
 		cfg:  cfg,
