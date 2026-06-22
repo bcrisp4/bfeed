@@ -11,6 +11,12 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+- Image proxy: entry images now load through a signed, same-origin `/img` endpoint, so your browser never contacts the origin or third-party tracker servers when viewing an article. Enabled by default; set `BFEED_IMAGE_PROXY=off` to load images directly instead.
+
+### Security
+- All outbound fetches (feed polls, article scrapes, and image proxying) now reject private, loopback, link-local, and cloud-metadata addresses (SSRF protection), on by default. Permit specific ranges with `BFEED_ALLOW_PRIVATE_CIDRS` (for example a feed hosted on your tailnet or LAN), or disable the guard with `BFEED_BLOCK_PRIVATE_NETWORKS=off`.
+
 ## [0.5.0] - 2026-06-21
 
 ### Added

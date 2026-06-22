@@ -46,7 +46,7 @@ func TestEndToEndSubscribeAndRead(t *testing.T) {
 	if _, err := feedSvc.Subscribe(context.Background(), core.DefaultUserID, origin.URL, nil, false); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
-	h := web.New(feedSvc, entrySvc, catSvc, searchSvc, log)
+	h := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if !strings.Contains(rec.Body.String(), "E2E Post") {

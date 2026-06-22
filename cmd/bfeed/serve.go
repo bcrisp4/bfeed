@@ -16,6 +16,7 @@ import (
 	"github.com/bcrisp4/bfeed/internal/core"
 	"github.com/bcrisp4/bfeed/internal/extract"
 	"github.com/bcrisp4/bfeed/internal/fetch"
+	"github.com/bcrisp4/bfeed/internal/imgproxy"
 	"github.com/bcrisp4/bfeed/internal/observability"
 	"github.com/bcrisp4/bfeed/internal/parse"
 	"github.com/bcrisp4/bfeed/internal/sanitize"
@@ -43,8 +44,12 @@ func runServe() int {
 	store := sqlite.New(db)
 
 	fetcher := fetch.New(fetch.Config{
-		UserAgent:       fmt.Sprintf("bfeed/%s (+%s)", version, cfg.BaseURL),
-		HostConcurrency: cfg.HostConcurrency, Timeout: 30 * time.Second, MaxBytes: 10 << 20,
+		UserAgent:            fmt.Sprintf("bfeed/%s (+%s)", version, cfg.BaseURL),
+		HostConcurrency:      cfg.HostConcurrency,
+		Timeout:              30 * time.Second,
+		MaxBytes:             10 << 20,
+		BlockPrivateNetworks: cfg.BlockPrivateNetworks,
+		AllowedCIDRs:         cfg.AllowPrivateCIDRs,
 	})
 	jitter := func(d time.Duration) time.Duration {
 		if d <= 0 {
@@ -78,9 +83,25 @@ func runServe() int {
 	scraperDone := make(chan struct{})
 	go func() { scraper.Run(ctx); close(scraperDone) }()
 
+	var imgHandler http.Handler
+	var imgRewrite func(string) string
+	if cfg.ImageProxy {
+		if s := cfg.ImageProxySecret; s != "" && len(s) < 16 {
+			log.Warn("BFEED_IMAGE_PROXY_SECRET is short; prefer >= 32 random bytes for a strong signing key", "len", len(s))
+		}
+		secret, err := imgproxy.ResolveSecret(ctx, store, cfg.ImageProxySecret)
+		if err != nil {
+			log.Error("image proxy secret", "error", err)
+			return 1
+		}
+		signer := imgproxy.NewSigner(secret)
+		imgHandler = imgproxy.New(fetcher, signer, log)
+		imgRewrite = signer.ProxyURL
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log),
+		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

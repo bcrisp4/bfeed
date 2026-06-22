@@ -89,11 +89,17 @@ type SearchIndex interface {
 	Search(ctx context.Context, userID ID, query string, f EntryFilter) ([]*Entry, *Cursor, error)
 }
 
+type SettingStore interface {
+	GetSetting(ctx context.Context, key string) (string, error)
+	PutSetting(ctx context.Context, key, value string) error
+}
+
 type Store interface {
 	FeedStore
 	EntryStore
 	CategoryStore
 	SearchIndex
+	SettingStore
 }
 
 // FeedPoller polls a single feed (fetch→parse→sanitise→upsert→reschedule).

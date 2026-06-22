@@ -353,6 +353,16 @@ bluemonday allowlist: permit semantic content tags; strip `<script>`, `<style>`,
 pixel images. Resolve relative URLs against the entry/base URL. **Output is what gets stored.**
 (Image-proxy `<img>` rewrite from §10.6 is deferred — MVP images load from origin.)
 
+> **As built (iter 5):** the image proxy is now live. `GET /img?u=&s=` proxies images through
+> a signed, same-origin endpoint (HMAC sig; bad sig → 403, never an open relay). All outbound
+> fetches (polls, scrapes, and image proxying) share one SSRF-guarded `Fetcher`
+> (private/loopback/link-local/metadata/CGNAT blocked at the dial layer;
+> `BFEED_ALLOW_PRIVATE_CIDRS` escape hatch). `<img src>` is rewritten at **render time** in the
+> web reader view — stored content keeps canonical origin URLs, so existing entries are proxied
+> immediately, secret rotation is harmless, and toggling off (`BFEED_IMAGE_PROXY=off`) is clean.
+> HMAC key from `BFEED_IMAGE_PROXY_SECRET` else generated once and persisted in the new
+> `app_settings` table. Default ON. `srcset` rewriting and an image cache are deferred.
+
 ## 12. Web UI (`web`)
 
 - Server-rendered `html/template` + htmx. Single-column, content-first, serif body text.

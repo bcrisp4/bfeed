@@ -23,6 +23,7 @@ type MemStore struct {
 	tombstones  map[string]bool // feedID|guid
 	categories  map[core.ID]*core.Category
 	nextExtract map[core.ID]time.Time // per-entry next extraction time
+	settings    map[string]string
 	nextID      core.ID
 }
 
@@ -33,6 +34,7 @@ func NewMemStore() *MemStore {
 		tombstones:  map[string]bool{},
 		categories:  map[core.ID]*core.Category{},
 		nextExtract: map[core.ID]time.Time{},
+		settings:    map[string]string{},
 		nextID:      1,
 	}
 }
@@ -564,6 +566,23 @@ func (s *MemStore) EntryStatsByFeed(_ context.Context, u core.ID) (map[core.ID]c
 		out[e.FeedID] = st
 	}
 	return out, nil
+}
+
+func (s *MemStore) GetSetting(_ context.Context, key string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.settings[key]
+	if !ok {
+		return "", core.ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *MemStore) PutSetting(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings[key] = value
+	return nil
 }
 
 func (s *MemStore) UnreadCountsByCategory(_ context.Context, u core.ID) (map[core.ID]int, int, error) {

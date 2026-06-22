@@ -37,19 +37,23 @@ var staticFS embed.FS
 
 // Handler is the HTTP handler for the bfeed web UI.
 type Handler struct {
-	feeds   *core.FeedService
-	entries *core.EntryService
-	cats    *core.CategoryService
-	search  *core.SearchService
-	log     *slog.Logger
-	tmpl    map[string]*template.Template
+	feeds      *core.FeedService
+	entries    *core.EntryService
+	cats       *core.CategoryService
+	search     *core.SearchService
+	log        *slog.Logger
+	tmpl       map[string]*template.Template
+	imgRewrite func(string) string // nil = image proxy disabled
 }
 
 // New constructs a fully-routed http.Handler for the bfeed web UI.
-func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger) http.Handler {
-	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates()}
+func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string) http.Handler {
+	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
+	if imgHandler != nil {
+		mux.Handle("GET /img", imgHandler)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)

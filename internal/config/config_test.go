@@ -41,3 +41,49 @@ func TestLoadOverrides(t *testing.T) {
 		t.Fatalf("overrides not applied: %+v", c)
 	}
 }
+
+func TestImageProxyDefaultsOn(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ImageProxy {
+		t.Fatal("ImageProxy should default on")
+	}
+	if !c.BlockPrivateNetworks {
+		t.Fatal("BlockPrivateNetworks should default on")
+	}
+}
+
+func TestImageProxyOff(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	t.Setenv("BFEED_IMAGE_PROXY", "off")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ImageProxy {
+		t.Fatal("ImageProxy should be off")
+	}
+}
+
+func TestParseAllowPrivateCIDRs(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	t.Setenv("BFEED_ALLOW_PRIVATE_CIDRS", "100.64.0.0/10, 192.168.0.0/16")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.AllowPrivateCIDRs) != 2 {
+		t.Fatalf("got %d prefixes", len(c.AllowPrivateCIDRs))
+	}
+}
+
+func TestInvalidCIDRErrors(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	t.Setenv("BFEED_ALLOW_PRIVATE_CIDRS", "not-a-cidr")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for invalid CIDR")
+	}
+}
