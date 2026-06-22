@@ -1,7 +1,6 @@
 package imgproxy_test
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,22 +11,13 @@ import (
 	"github.com/bcrisp4/bfeed/internal/imgproxy"
 )
 
-type stubFetcher struct {
-	resp *core.FetchResponse
-	err  error
-}
-
-func (s stubFetcher) Fetch(_ context.Context, _ core.FetchRequest) (*core.FetchResponse, error) {
-	return s.resp, s.err
-}
-
 func newHandler(f core.Fetcher) *imgproxy.Handler {
 	return imgproxy.New(f, imgproxy.NewSigner([]byte("k")), coretest.DiscardLogger())
 }
 
 func TestHandlerMissingParams(t *testing.T) {
 	rec := httptest.NewRecorder()
-	newHandler(stubFetcher{}).ServeHTTP(rec, httptest.NewRequest("GET", "/img", nil))
+	newHandler(coretest.StubFetcher{}).ServeHTTP(rec, httptest.NewRequest("GET", "/img", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d", rec.Code)
 	}
@@ -36,7 +26,7 @@ func TestHandlerMissingParams(t *testing.T) {
 func TestHandlerRejectsBadSig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/img?u=https%3A%2F%2Fx.com%2Fa.jpg&s=deadbeef", nil)
-	newHandler(stubFetcher{}).ServeHTTP(rec, req)
+	newHandler(coretest.StubFetcher{}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("code=%d", rec.Code)
 	}
@@ -45,7 +35,7 @@ func TestHandlerRejectsBadSig(t *testing.T) {
 func TestHandlerBadScheme(t *testing.T) {
 	s := imgproxy.NewSigner([]byte("k"))
 	rec := httptest.NewRecorder()
-	newHandler(stubFetcher{}).ServeHTTP(rec, httptest.NewRequest("GET", s.ProxyURL("ftp://x.com/a"), nil))
+	newHandler(coretest.StubFetcher{}).ServeHTTP(rec, httptest.NewRequest("GET", s.ProxyURL("ftp://x.com/a"), nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d", rec.Code)
 	}
@@ -53,7 +43,7 @@ func TestHandlerBadScheme(t *testing.T) {
 
 func TestHandlerNonImageContentType(t *testing.T) {
 	s := imgproxy.NewSigner([]byte("k"))
-	f := stubFetcher{resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>")}}
+	f := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>")}}
 	rec := httptest.NewRecorder()
 	newHandler(f).ServeHTTP(rec, httptest.NewRequest("GET", s.ProxyURL("https://x.com/a"), nil))
 	if rec.Code != http.StatusBadGateway {
@@ -63,7 +53,7 @@ func TestHandlerNonImageContentType(t *testing.T) {
 
 func TestHandlerServesImage(t *testing.T) {
 	s := imgproxy.NewSigner([]byte("k"))
-	f := stubFetcher{resp: &core.FetchResponse{Status: 200, ContentType: "image/png", Body: []byte("PNGDATA")}}
+	f := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "image/png", Body: []byte("PNGDATA")}}
 	rec := httptest.NewRecorder()
 	newHandler(f).ServeHTTP(rec, httptest.NewRequest("GET", s.ProxyURL("https://x.com/a.png"), nil))
 	if rec.Code != 200 {
@@ -77,6 +67,9 @@ func TestHandlerServesImage(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing nosniff")
+	}
+	if rec.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("missing Content-Security-Policy")
 	}
 	b, _ := io.ReadAll(rec.Body)
 	if string(b) != "PNGDATA" {

@@ -15,6 +15,13 @@ func TestIsBlockedIP(t *testing.T) {
 	blocked := []string{
 		"127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1",
 		"169.254.169.254", "100.64.0.1", "::1", "fc00::1", "fe80::1", "0.0.0.0",
+		"::",                   // IPv6 unspecified
+		"224.0.0.1", "ff02::1", // multicast (v4 + v6 link-local)
+		"::ffff:127.0.0.1", // IPv4-mapped loopback (Unmap path)
+		"0.1.2.3",          // 0.0.0.0/8 "this network"
+		"240.0.0.1",        // reserved Class E
+		"2002:7f00:1::1",   // 6to4 encoding 127.0.0.1
+		"64:ff9b::7f00:1",  // NAT64 encoding 127.0.0.1
 	}
 	for _, s := range blocked {
 		if !isBlockedIP(netip.MustParseAddr(s)) {

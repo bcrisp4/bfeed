@@ -119,7 +119,7 @@ func parseCIDRs(v string) ([]netip.Prefix, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
 		}
-		out = append(out, p)
+		out = append(out, p.Masked()) // canonical form (host bits cleared)
 	}
 	return out, nil
 }

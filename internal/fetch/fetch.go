@@ -152,22 +152,38 @@ func capRedirects(n int) func(*http.Request, []*http.Request) error {
 	}
 }
 
-// cgnat is the 100.64.0.0/10 shared-address space (RFC 6598). netip's IsPrivate
-// does not include it, but it is not publicly routable (and Tailscale uses it).
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+// blockedPrefixes are non-public ranges netip's Is* predicates miss: CGNAT
+// (RFC 6598, used by Tailscale); 0.0.0.0/8 "this network" (RFC 1122, which can
+// route to the local host); reserved Class E (RFC 1112); and the 6to4 (RFC 3056)
+// and NAT64 (RFC 6052) prefixes, which embed an IPv4 address and so can encode a
+// private/loopback target behind an IPv6 address on a host with such a gateway.
+var blockedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+}
 
 // isBlockedIP reports whether ip is not safely public (SSRF target).
 func isBlockedIP(ip netip.Addr) bool {
 	ip = ip.Unmap()
-	return !ip.IsValid() ||
+	if !ip.IsValid() ||
 		ip.IsLoopback() ||
 		ip.IsUnspecified() ||
 		ip.IsPrivate() || // RFC1918 + ULA fc00::/7
 		ip.IsLinkLocalUnicast() || // 169.254.0.0/16 (incl. 169.254.169.254 metadata) + fe80::/10
 		ip.IsLinkLocalMulticast() ||
 		ip.IsMulticast() ||
-		ip.IsInterfaceLocalMulticast() ||
-		cgnat.Contains(ip)
+		ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	for _, p := range blockedPrefixes {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // guardDial returns a net.Dialer Control hook that runs once per dialled address

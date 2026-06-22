@@ -86,6 +86,9 @@ func runServe() int {
 	var imgHandler http.Handler
 	var imgRewrite func(string) string
 	if cfg.ImageProxy {
+		if s := cfg.ImageProxySecret; s != "" && len(s) < 16 {
+			log.Warn("BFEED_IMAGE_PROXY_SECRET is short; prefer >= 32 random bytes for a strong signing key", "len", len(s))
+		}
 		secret, err := imgproxy.ResolveSecret(ctx, store, cfg.ImageProxySecret)
 		if err != nil {
 			log.Error("image proxy secret", "error", err)

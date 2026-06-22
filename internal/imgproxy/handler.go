@@ -54,7 +54,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", resp.ContentType)
+	// Long-lived browser cache. This Set overrides the no-store header the web
+	// layer's noStore middleware applies to every dynamic response (the last write
+	// before the body wins), so proxied images stay cacheable.
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Defence in depth: image/svg+xml passes the image/ prefix check but is active
+	// content. Served from our own origin and opened directly (e.g. "open image in
+	// new tab"), an embedded script would execute in our origin. The sandbox +
+	// locked-down policy neutralises script execution and any subresource load,
+	// while still letting the bytes render as an inert image.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	_, _ = w.Write(resp.Body)
 }
