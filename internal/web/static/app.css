@@ -90,6 +90,7 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 .entry.read{opacity:.6}.entry.read h2{font-weight:400}
 .unread-dot{color:var(--accent);margin-right:.45rem;font-size:.7em;vertical-align:.1em}
 .meta{font-family:var(--font-mono);font-size:.6875rem;color:var(--faint)}
+.feed-stalled{color:#c0392b;font-weight:600;cursor:help}
 .entry-summary{color:var(--muted);font-size:.9rem;line-height:1.5;margin:var(--sp-2) 0 0;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 :root[data-summaries="hide"] .entry-summary{display:none}

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	ext "github.com/mmcdole/gofeed/extensions"
 	"golang.org/x/net/html"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -28,6 +31,7 @@ func (p *Parser) Parse(data []byte, feedURL string) (*core.ParsedFeed, error) {
 	}
 	base, _ := url.Parse(feedURL)
 	out := &core.ParsedFeed{Title: f.Title, Description: f.Description, SiteURL: resolve(base, f.Link)}
+	out.TTL = feedTTL(f, data)
 	for _, it := range f.Items {
 		link := resolve(base, it.Link)
 		guid := it.GUID
@@ -64,6 +68,98 @@ func (p *Parser) Parse(data []byte, feedURL string) (*core.ParsedFeed, error) {
 // can set Entry.Hash consistently.
 func EntryHash(title, content, summary string) string {
 	return hashStr(title + "|" + content + "|" + summary)
+}
+
+// feedTTL derives the publisher's minimum poll interval from RSS <ttl> (scanned
+// from the raw bytes; the universal parser drops it) and the syndication module
+// (sy:updatePeriod / sy:updateFrequency, available via Extensions). The larger
+// of the two wins. Atom/JSON have no standard TTL -> 0.
+func feedTTL(f *gofeed.Feed, data []byte) time.Duration {
+	var ttl time.Duration
+	if f.FeedType == "rss" {
+		if m := rssTTLMinutes(data); m > 0 {
+			ttl = time.Duration(m) * time.Minute
+		}
+	}
+	if sy := syInterval(f); sy > ttl {
+		ttl = sy
+	}
+	return ttl
+}
+
+// rssTTLMinutes returns the channel-level RSS <ttl> value (minutes), or 0.
+// A targeted token scan — cheaper than re-running the full feed parser. <ttl> is
+// a core-RSS channel element that precedes the items, so the scan stops at the
+// first item/entry (bounding the work and ignoring any item-level <ttl>) and
+// skips namespaced elements (e.g. media:ttl) that merely share the local name.
+func rssTTLMinutes(data []byte) int {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return 0
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		switch se.Name.Local {
+		case "item", "entry": // ttl is channel-level, before items — stop scanning
+			return 0
+		case "ttl":
+			if se.Name.Space != "" { // foreign namespace, not core RSS <ttl>
+				continue
+			}
+			var v string
+			if dec.DecodeElement(&v, &se) == nil {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+					return n
+				}
+			}
+			return 0
+		}
+	}
+}
+
+// syInterval converts sy:updatePeriod / sy:updateFrequency to a duration, or 0.
+func syInterval(f *gofeed.Feed) time.Duration {
+	sy := f.Extensions["sy"]
+	if sy == nil {
+		return 0
+	}
+	period := extValue(sy, "updatePeriod")
+	if period == "" {
+		return 0
+	}
+	freq := 1
+	if fs := extValue(sy, "updateFrequency"); fs != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(fs)); err == nil && n > 0 {
+			freq = n
+		}
+	}
+	var base time.Duration
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case "hourly":
+		base = time.Hour
+	case "daily":
+		base = 24 * time.Hour
+	case "weekly":
+		base = 7 * 24 * time.Hour
+	case "monthly":
+		base = 30 * 24 * time.Hour
+	case "yearly":
+		base = 365 * 24 * time.Hour
+	default:
+		return 0
+	}
+	return base / time.Duration(freq)
+}
+
+func extValue(m map[string][]ext.Extension, key string) string {
+	if v := m[key]; len(v) > 0 {
+		return v[0].Value
+	}
+	return ""
 }
 
 func (p *Parser) Discover(data []byte, pageURL string) ([]string, error) {

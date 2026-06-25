@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 func newFeedSvc(store core.Store, fetcher core.Fetcher, parser core.FeedParser) (*core.FeedService, coretest.StubClock) {
 	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
 	cfg := core.FeedServiceConfig{
+		Schedule:   core.ScheduleConfig{MinInterval: 15 * time.Minute, MaxInterval: 24 * time.Hour, Factor: 1},
 		Reschedule: core.RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour},
 		Jitter:     func(time.Duration) time.Duration { return 0 },
 	}
@@ -183,5 +185,89 @@ func TestPollFeedErrorBacksOff(t *testing.T) {
 	}
 	if !got.NextCheckAt.Equal(clk.Now().Add(30 * time.Minute)) { // 15m * 2^1
 		t.Fatalf("backoff reschedule wrong: %v", got.NextCheckAt)
+	}
+}
+
+func newFeedSvcSched(store core.Store, fetcher core.Fetcher, parser core.FeedParser, sched core.ScheduleConfig) (*core.FeedService, coretest.StubClock) {
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	cfg := core.FeedServiceConfig{
+		Schedule:   sched,
+		Reschedule: core.RescheduleConfig{Interval: sched.MinInterval, MaxBackoff: sched.MaxInterval},
+		Jitter:     func(time.Duration) time.Duration { return 0 },
+	}
+	return core.NewFeedService(store, fetcher, parser, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), cfg), clk
+}
+
+func sched5m() core.ScheduleConfig {
+	return core.ScheduleConfig{MinInterval: 5 * time.Minute, MaxInterval: 24 * time.Hour, Factor: 1}
+}
+
+func TestPollColdStartUsesMinInterval(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b/f", Title: "b", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "b"}}
+	svc, clk := newFeedSvcSched(store, fetcher, parser, sched5m())
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if !got.NextCheckAt.Equal(clk.Now().Add(5 * time.Minute)) {
+		t.Fatalf("cold-start next = %v, want now+5m", got.NextCheckAt)
+	}
+}
+
+func TestPollAgedFeedAdapts(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	created := now.Add(-8 * 24 * time.Hour)
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b/f", Title: "b", NextCheckAt: now, CreatedAt: created, UpdatedAt: created})
+	es := make([]*core.Entry, 0, 14)
+	for i := 0; i < 14; i++ {
+		ts := now.Add(-time.Duration(i+1) * time.Hour)
+		es = append(es, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: fmt.Sprintf("g%d", i), PublishedAt: ts, CreatedAt: ts, Status: core.StatusUnread})
+	}
+	if _, err := store.UpsertEntries(ctx, fid, es); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "b"}} // no new entries
+	svc, clk := newFeedSvcSched(store, fetcher, parser, sched5m())
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	want := clk.Now().Add(7 * 24 * time.Hour / 14) // 12h
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if !got.NextCheckAt.Equal(want) {
+		t.Fatalf("aged next = %v, want %v", got.NextCheckAt, want)
+	}
+}
+
+func TestPollRefreshesTTL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b/f", Title: "b", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "b", TTL: 90 * time.Minute}}
+	svc, _ := newFeedSvcSched(store, fetcher, parser, sched5m())
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.TTL != 90*time.Minute {
+		t.Fatalf("TTL after poll = %v, want 90m", got.TTL)
 	}
 }

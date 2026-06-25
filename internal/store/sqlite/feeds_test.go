@@ -240,3 +240,74 @@ func TestEntryStatsByFeed(t *testing.T) {
 		t.Fatalf("feed B stats = %+v, want {Total:1 Unread:1}", got)
 	}
 }
+
+func TestWeeklyEntryCount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	fid, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://e.com/f", Title: "f",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mk := func(guid string, published, created time.Time) *core.Entry {
+		return &core.Entry{
+			UserID: core.DefaultUserID, FeedID: fid, GUID: guid,
+			PublishedAt: published, CreatedAt: created, Status: core.StatusUnread,
+		}
+	}
+	zero := time.Time{}
+	_, err = s.UpsertEntries(ctx, fid, []*core.Entry{
+		mk("a", now.Add(-2*24*time.Hour), now.Add(-2*24*time.Hour)),
+		mk("b", now.Add(-1*24*time.Hour), now.Add(-1*24*time.Hour)),
+		mk("c", now.Add(48*time.Hour), now.Add(-1*time.Hour)),         // future published -> excluded
+		mk("d", zero, now.Add(-3*time.Hour)),                          // date-less -> counted via created_at
+		mk("e", now.Add(-30*24*time.Hour), now.Add(-30*24*time.Hour)), // old -> excluded
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.WeeklyEntryCount(ctx, fid, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 { // a, b, d
+		t.Fatalf("WeeklyEntryCount = %d, want 3", got)
+	}
+}
+
+func TestFeedTTLRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	fid, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://e.com/ttl", Title: "t",
+		TTL: 45 * time.Minute, NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TTL != 45*time.Minute {
+		t.Fatalf("TTL after create = %v, want 45m", got.TTL)
+	}
+
+	got.TTL = 2 * time.Hour
+	got.UpdatedAt = now
+	if err := s.UpdateFeed(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if got2.TTL != 2*time.Hour {
+		t.Fatalf("TTL after update = %v, want 2h", got2.TTL)
+	}
+}

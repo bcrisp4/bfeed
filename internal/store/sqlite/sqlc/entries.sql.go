@@ -303,3 +303,23 @@ func (q *Queries) UpdateExtractState(ctx context.Context, arg UpdateExtractState
 	)
 	return err
 }
+
+const weeklyEntryCount = `-- name: WeeklyEntryCount :one
+SELECT COUNT(*) FROM entries
+WHERE feed_id = ?1
+  AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) >= ?2
+  AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) <= ?3
+`
+
+type WeeklyEntryCountParams struct {
+	FeedID      int64
+	WindowStart int64
+	WindowEnd   int64
+}
+
+func (q *Queries) WeeklyEntryCount(ctx context.Context, arg WeeklyEntryCountParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, weeklyEntryCount, arg.FeedID, arg.WindowStart, arg.WindowEnd)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}

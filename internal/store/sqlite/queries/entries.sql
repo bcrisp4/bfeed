@@ -42,3 +42,9 @@ WHERE feed_id = ? AND extract_state IN ('none','failed');
 -- name: CancelFeedExtractions :exec
 UPDATE entries SET extract_state = 'none', next_extract_at = NULL
 WHERE feed_id = ? AND extract_state = 'pending';
+
+-- name: WeeklyEntryCount :one
+SELECT COUNT(*) FROM entries
+WHERE feed_id = sqlc.arg(feed_id)
+  AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) >= sqlc.arg(window_start)
+  AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) <= sqlc.arg(window_end);

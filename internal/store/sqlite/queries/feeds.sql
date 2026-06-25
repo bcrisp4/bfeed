@@ -1,8 +1,8 @@
 -- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
   disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id,
-  fetch_full_content)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  fetch_full_content, ttl_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetFeed :one
@@ -20,7 +20,7 @@ ORDER BY next_check_at ASC LIMIT ?;
 UPDATE feeds SET
   site_url = ?, title = ?, description = ?, etag = ?, last_modified = ?,
   disabled = ?, checked_at = ?, next_check_at = ?, error_count = ?, last_error = ?,
-  updated_at = ?
+  updated_at = ?, ttl_seconds = ?
 WHERE id = ? AND user_id = ?;
 
 -- name: DeleteFeed :execrows

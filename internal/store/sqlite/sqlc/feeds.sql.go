@@ -13,8 +13,8 @@ import (
 const createFeed = `-- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
   disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id,
-  fetch_full_content)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  fetch_full_content, ttl_seconds)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -35,6 +35,7 @@ type CreateFeedParams struct {
 	UpdatedAt        int64
 	CategoryID       sql.NullInt64
 	FetchFullContent int64
+	TtlSeconds       sql.NullInt64
 }
 
 func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, error) {
@@ -55,6 +56,7 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) (int64, 
 		arg.UpdatedAt,
 		arg.CategoryID,
 		arg.FetchFullContent,
+		arg.TtlSeconds,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -115,7 +117,7 @@ func (q *Queries) EntryStatsByFeed(ctx context.Context, userID int64) ([]EntrySt
 }
 
 const getFeed = `-- name: GetFeed :one
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds WHERE id = ? AND user_id = ?
 `
 
 type GetFeedParams struct {
@@ -144,12 +146,13 @@ func (q *Queries) GetFeed(ctx context.Context, arg GetFeedParams) (Feed, error) 
 		&i.UpdatedAt,
 		&i.CategoryID,
 		&i.FetchFullContent,
+		&i.TtlSeconds,
 	)
 	return i, err
 }
 
 const listDueFeeds = `-- name: ListDueFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds
 WHERE disabled = 0 AND next_check_at <= ?
 ORDER BY next_check_at ASC LIMIT ?
 `
@@ -186,6 +189,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 			&i.UpdatedAt,
 			&i.CategoryID,
 			&i.FetchFullContent,
+			&i.TtlSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -201,7 +205,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 }
 
 const listFeeds = `-- name: ListFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
 `
 
 func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
@@ -231,6 +235,7 @@ func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 			&i.UpdatedAt,
 			&i.CategoryID,
 			&i.FetchFullContent,
+			&i.TtlSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +290,7 @@ const updateFeed = `-- name: UpdateFeed :exec
 UPDATE feeds SET
   site_url = ?, title = ?, description = ?, etag = ?, last_modified = ?,
   disabled = ?, checked_at = ?, next_check_at = ?, error_count = ?, last_error = ?,
-  updated_at = ?
+  updated_at = ?, ttl_seconds = ?
 WHERE id = ? AND user_id = ?
 `
 
@@ -301,6 +306,7 @@ type UpdateFeedParams struct {
 	ErrorCount   int64
 	LastError    string
 	UpdatedAt    int64
+	TtlSeconds   sql.NullInt64
 	ID           int64
 	UserID       int64
 }
@@ -318,6 +324,7 @@ func (q *Queries) UpdateFeed(ctx context.Context, arg UpdateFeedParams) error {
 		arg.ErrorCount,
 		arg.LastError,
 		arg.UpdatedAt,
+		arg.TtlSeconds,
 		arg.ID,
 		arg.UserID,
 	)

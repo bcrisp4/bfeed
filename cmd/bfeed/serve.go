@@ -52,15 +52,17 @@ func runServe() int {
 		AllowedCIDRs:         cfg.AllowPrivateCIDRs,
 	})
 	jitter := func(d time.Duration) time.Duration {
-		if d <= 0 {
+		n := int64(d) / 4
+		if n <= 0 { // d < 4ns: nothing to jitter, and rand.Int63n panics on n<=0
 			return 0
 		}
-		return time.Duration(rand.Int63n(int64(d) / 4)) //nolint:gosec // G404: jitter, not security-sensitive
+		return time.Duration(rand.Int63n(n)) //nolint:gosec // G404: jitter, not security-sensitive
 	}
 	san := sanitize.New()
 	feedSvc := core.NewFeedService(store, fetcher, parse.New(), san, clock.Real{}, log,
 		core.FeedServiceConfig{
-			Reschedule: core.RescheduleConfig{Interval: cfg.PollInterval, MaxBackoff: cfg.MaxBackoff},
+			Schedule:   core.ScheduleConfig{MinInterval: cfg.SchedMinInterval, MaxInterval: cfg.SchedMaxInterval, Factor: cfg.SchedFactor},
+			Reschedule: core.RescheduleConfig{Interval: cfg.SchedMinInterval, MaxBackoff: cfg.MaxBackoff},
 			Jitter:     jitter,
 		})
 	entrySvc := core.NewEntryService(store, log)
@@ -101,7 +103,7 @@ func runServe() int {
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite),
+		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

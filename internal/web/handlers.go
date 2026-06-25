@@ -61,6 +61,7 @@ type feedRowVM struct {
 	FullContent bool
 	Unread      int
 	Total       int
+	Stalled     bool // error_count >= configured error limit
 }
 
 type feedGroupVM struct {
@@ -251,7 +252,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 			cid = int64(*f.CategoryID)
 		}
 		st := stats[f.ID]
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total}
+		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit}
 	}
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM

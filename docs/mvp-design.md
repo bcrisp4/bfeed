@@ -306,6 +306,10 @@ never OFFSET. Driver errors mapped to core sentinels.
 
 ## 9. Poller (fixed interval)
 
+> **Superseded in iter 6** by adaptive scheduling — the fixed `BFEED_POLL_INTERVAL`
+> below is replaced by `BFEED_SCHED_MIN_INTERVAL`/`BFEED_SCHED_MAX_INTERVAL`/
+> `BFEED_SCHED_FACTOR`. See `docs/design.md` §12 for the authoritative behaviour.
+
 One scheduler goroutine on a tick (`BFEED_POLL_TICK`, default **1m**) selects due feeds:
 
 ```sql

@@ -35,6 +35,7 @@ type Feed struct {
 	NextCheckAt      time.Time
 	ErrorCount       int
 	LastError        string
+	TTL              time.Duration // publisher-declared min poll interval; 0 = none. Poll-owned.
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

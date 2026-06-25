@@ -11,6 +11,7 @@ import (
 )
 
 type FeedServiceConfig struct {
+	Schedule   ScheduleConfig
 	Reschedule RescheduleConfig
 	Jitter     func(time.Duration) time.Duration
 }
@@ -26,6 +27,23 @@ type FeedService struct {
 }
 
 func NewFeedService(store Store, fetcher Fetcher, parser FeedParser, san Sanitizer, clk Clock, log *slog.Logger, cfg FeedServiceConfig) *FeedService {
+	// Normalize so a zero-value config can never schedule now+0 (a tight re-poll
+	// loop). Prod passes validated values; this guards tests/other callers.
+	if cfg.Schedule.MinInterval <= 0 {
+		cfg.Schedule.MinInterval = 5 * time.Minute
+	}
+	if cfg.Schedule.MaxInterval <= cfg.Schedule.MinInterval {
+		cfg.Schedule.MaxInterval = 24 * time.Hour
+	}
+	if cfg.Schedule.Factor <= 0 {
+		cfg.Schedule.Factor = 1
+	}
+	if cfg.Reschedule.Interval <= 0 {
+		cfg.Reschedule.Interval = cfg.Schedule.MinInterval
+	}
+	if cfg.Reschedule.MaxBackoff <= 0 {
+		cfg.Reschedule.MaxBackoff = cfg.Schedule.MaxInterval
+	}
 	return &FeedService{store: store, fetcher: fetcher, parser: parser, san: san, clk: clk, log: log, cfg: cfg}
 }
 
@@ -96,7 +114,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 	now := s.clk.Now()
 	f := &Feed{
 		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: feedTitle(pf.Title, feedURL),
-		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
+		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified, TTL: pf.TTL,
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: fetchFullContent,
 	}
 	id, err := s.store.CreateFeed(ctx, f)
@@ -109,7 +127,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 		return nil, err
 	}
 	f.CheckedAt = &now
-	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	f.NextCheckAt = s.nextCheck(ctx, f, now)
 	f.ErrorCount = 0
 	if err := s.store.UpdateFeed(ctx, f); err != nil {
 		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
@@ -200,6 +218,33 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 	return err
 }
 
+// nextCheck computes the adaptive next-poll time for a successfully-polled feed.
+// A feed younger than one week has too few observed samples to trust the count
+// (its first poll carries historical dates outside the window), so it polls at
+// MinInterval until it settles; conditional GET keeps that cheap.
+func (s *FeedService) nextCheck(ctx context.Context, f *Feed, now time.Time) time.Time {
+	if now.Sub(f.CreatedAt) < Week {
+		return s.minCheck(now) // cold start: observe before adapting
+	}
+	wc, err := s.store.WeeklyEntryCount(ctx, f.ID, now)
+	if err != nil {
+		// A transient count failure must not silently park an active feed at
+		// MaxInterval (the weeklyCount==0 result); re-observe at MinInterval.
+		s.log.Warn("weekly entry count", "feed_id", int64(f.ID), "error", err)
+		return s.minCheck(now)
+	}
+	return now.Add(AdaptiveInterval(wc, s.cfg.Schedule, f.TTL, s.cfg.Jitter))
+}
+
+// minCheck schedules the next poll one MinInterval out (plus jitter).
+func (s *FeedService) minCheck(now time.Time) time.Time {
+	d := s.cfg.Schedule.MinInterval
+	if s.cfg.Jitter != nil {
+		d += s.cfg.Jitter(d)
+	}
+	return now.Add(d)
+}
+
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
 	if pf != nil {
 		if err := s.ingest(ctx, f, pf); err != nil {
@@ -208,6 +253,7 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 		f.Title = orKeep(pf.Title, f.Title)
 		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)
 		f.Description = orKeep(pf.Description, f.Description)
+		f.TTL = pf.TTL // poll-owned: refresh from the parsed feed
 	}
 	// Backfill on every successful poll — including 304 (pf == nil) — so a feed
 	// can never persist a blank Title. Idempotent once a title is set.
@@ -222,7 +268,7 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 	f.LastError = ""
 	f.CheckedAt = &now
 	f.UpdatedAt = now
-	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	f.NextCheckAt = s.nextCheck(ctx, f, now)
 	return s.store.UpdateFeed(ctx, f)
 }
 

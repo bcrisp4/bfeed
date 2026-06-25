@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"strconv"
@@ -16,7 +17,10 @@ type Config struct {
 	LogLevel             string
 	LogFormat            string
 	PollTick             time.Duration
-	PollInterval         time.Duration
+	SchedMinInterval     time.Duration
+	SchedMaxInterval     time.Duration
+	SchedFactor          float64
+	FeedErrorLimit       int
 	MaxBackoff           time.Duration
 	FeedWorkers          int
 	BatchSize            int
@@ -39,7 +43,10 @@ func Load() (Config, error) {
 		LogLevel:             env("BFEED_LOG_LEVEL", "info"),
 		LogFormat:            env("BFEED_LOG_FORMAT", "json"),
 		PollTick:             envDur("BFEED_POLL_TICK", time.Minute),
-		PollInterval:         envDur("BFEED_POLL_INTERVAL", 15*time.Minute),
+		SchedMinInterval:     envDur("BFEED_SCHED_MIN_INTERVAL", 5*time.Minute),
+		SchedMaxInterval:     envDur("BFEED_SCHED_MAX_INTERVAL", 24*time.Hour),
+		SchedFactor:          envFloat("BFEED_SCHED_FACTOR", 1.0),
+		FeedErrorLimit:       envInt("BFEED_FEED_ERROR_LIMIT", 20),
 		MaxBackoff:           envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
 		FeedWorkers:          envInt("BFEED_FEED_WORKERS", 20),
 		BatchSize:            envInt("BFEED_BATCH_SIZE", 100),
@@ -57,6 +64,17 @@ func Load() (Config, error) {
 	}
 	if c.FeedWorkers < 1 || c.HostConcurrency < 1 {
 		return c, fmt.Errorf("worker/host-concurrency must be >= 1")
+	}
+	if c.SchedMinInterval <= 0 || c.SchedMinInterval >= c.SchedMaxInterval {
+		return c, fmt.Errorf("BFEED_SCHED_MIN_INTERVAL must be > 0 and < BFEED_SCHED_MAX_INTERVAL")
+	}
+	// !(>0) rejects NaN (a malformed "NaN" parses as a valid float) as well as
+	// zero/negative; IsInf rejects +Inf, which would slip past the > 0 check.
+	if !(c.SchedFactor > 0) || math.IsInf(c.SchedFactor, 0) {
+		return c, fmt.Errorf("BFEED_SCHED_FACTOR must be a finite number > 0")
+	}
+	if c.FeedErrorLimit < 1 {
+		return c, fmt.Errorf("BFEED_FEED_ERROR_LIMIT must be >= 1")
 	}
 	cidrs, err := parseCIDRs(os.Getenv("BFEED_ALLOW_PRIVATE_CIDRS"))
 	if err != nil {
@@ -77,6 +95,15 @@ func envInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func envFloat(k string, def float64) float64 {
+	if v := os.Getenv(k); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return def
