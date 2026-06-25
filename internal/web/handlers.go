@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -350,7 +351,11 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 	full := r.FormValue("full_content") == "on"
 	f, err := h.feeds.CreateSubscription(r.Context(), uid, r.FormValue("url"), catID, full)
 	if err != nil {
-		h.renderSubscribeError(w, "Couldn't add feed: "+err.Error())
+		if errors.Is(err, core.ErrConflict) {
+			h.renderSubscribeError(w, "You're already subscribed to that feed.")
+		} else {
+			h.renderSubscribeError(w, "Couldn't add feed: "+err.Error())
+		}
 		return
 	}
 	// Resolve + ingest in the background; the reloaded page shows a pending row
@@ -471,7 +476,11 @@ func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id cor
 	row := h.buildFeedRow(f, stats[id], time.Now())
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
-	row.EditError = "Couldn't save: " + cause.Error()
+	if errors.Is(cause, core.ErrConflict) {
+		row.EditError = "A feed with that URL already exists."
+	} else {
+		row.EditError = "Couldn't save: " + cause.Error()
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {

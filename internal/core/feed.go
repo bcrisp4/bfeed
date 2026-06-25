@@ -132,7 +132,11 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
 	}
 	if feedURL != f.FeedURL {
 		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL); err != nil {
-			return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
+			msg := err.Error()
+			if errors.Is(err, ErrConflict) { // discovered a feed already subscribed under another row
+				msg = "already subscribed to this feed"
+			}
+			return s.recordError(ctx, f, s.clk.Now(), msg, 0)
 		}
 		f.FeedURL = feedURL
 	}

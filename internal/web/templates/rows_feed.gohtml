@@ -21,13 +21,13 @@
     </div>
     <div class="feed-acts">
       {{- if .Pending}}
-        <button class="act spin" title="Adding" disabled>{{template "ic-refresh"}}</button>
-        <button class="act del" title="Cancel" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete">{{template "ic-x"}}</button>
+        <button class="act spin" title="Adding" aria-label="Adding" disabled>{{template "ic-refresh"}}</button>
+        <button class="act del" title="Cancel" aria-label="Cancel" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete">{{template "ic-x"}}</button>
       {{- else}}
-        <button class="act{{if .Refreshing}} spin{{end}}" title="Refresh"
+        <button class="act{{if .Refreshing}} spin{{end}}" title="Refresh" aria-label="Refresh"
           hx-post="/feeds/{{.ID}}/refresh" hx-target="#feed-{{.ID}}" hx-swap="outerHTML"{{if .Refreshing}} disabled{{end}}>{{template "ic-refresh"}}</button>
-        <button class="act" title="Edit" hx-get="/feeds/{{.ID}}/edit" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">{{template "ic-edit"}}</button>
-        <button class="act del" title="Delete" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
+        <button class="act" title="Edit" aria-label="Edit" hx-get="/feeds/{{.ID}}/edit" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">{{template "ic-edit"}}</button>
+        <button class="act del" title="Delete" aria-label="Delete" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
           hx-confirm="Delete feed and all its entries?">{{template "ic-trash"}}</button>
       {{- end}}
     </div>
