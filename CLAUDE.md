@@ -50,6 +50,8 @@ CI/tooling gotchas:
 - CI triggers on **PRs and pushes to `main`** — a feature-branch push alone won't run it; open a PR.
 - Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use the `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
 - `goreleaser check` validates schema only, **not templates** — validate `.goreleaser.yaml` with `goreleaser release --snapshot --clean` (it catches bad fields like an invalid `{{ .IsPrerelease }}`; the engine is docker/buildx via `dockers_v2`, podman is unsupported in goreleaser ≥2.16).
+- Request a **Copilot PR review** via the API, not `gh pr edit --add-reviewer Copilot` (fails: "could not resolve user 'copilot'"): `gh api repos/{owner}/{repo}/pulls/{n}/requested_reviewers -f "reviewers[]=copilot-pull-request-reviewer[bot]"`. Reply in-thread via `.../pulls/{n}/comments/{id}/replies`.
+- macOS `sed` (BSD) has **no `\b`** word boundary — `sed 's/\bx\b/y/'` silently matches nothing. Use the Edit tool or `perl -i -pe` for whole-word renames.
 
 ### sqlc (critical, non-obvious)
 Store queries are written as SQL in `internal/store/sqlite/queries/*.sql` and compiled to Go by **sqlc**. After editing any file in `queries/` **or** `migrations/`, regenerate:
@@ -59,6 +61,8 @@ make sqlc-check                               # fail if committed sqlc code is s
 # install pinned tools (sqlc v1.31.1 + golangci-lint v2.12.2): make tools
 ```
 Generated code in `internal/store/sqlite/sqlc/` is committed and **never hand-edited**. CI runs `make sqlc-check`'s equivalent, so regenerate and commit after touching `queries/` or `migrations/`. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — the mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
+
+**sqlc param-inference gotcha:** `BETWEEN sqlc.arg(lo) AND sqlc.arg(hi)` *inside a `CASE` expression* drops the bound args — the generated func ends up with too few params (silent; fails only at call/compile). Use explicit `>= sqlc.arg(lo) AND … <= sqlc.arg(hi)` instead, and **always eyeball the generated signature after `make sqlc`**.
 
 **Exception — dynamic SQL is not sqlc:** queries with a runtime-variable shape (conditional `WHERE`, variadic `IN`, dynamic `ORDER`/keyset column) are hand-written `fmt.Sprintf` + bound-params directly in `store/sqlite/*.go`, **not** in `queries/` — e.g. `ListEntries`, `SetStatus`, `SetStarred`, `MarkReadByFilter`. sqlc only compiles static SQL, so these can't be expressed there; editing them needs **no** `make sqlc`. Safe because only the skeleton (column names, WHERE/ORDER fragments) is interpolated from a **closed code allowlist** — every value is a bound `?` — which is why the `//nolint:gosec // G201` on them is legitimate.
 
