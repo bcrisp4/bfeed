@@ -45,11 +45,12 @@ type Handler struct {
 	tmpl       map[string]*template.Template
 	imgRewrite func(string) string // nil = image proxy disabled
 	errorLimit int                 // a feed with error_count >= this is flagged stalled in the UI
+	busy       *inflightSet
 }
 
 // New constructs a fully-routed http.Handler for the bfeed web UI.
 func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int) http.Handler {
-	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit}
+	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit, busy: newInflightSet()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
 	if imgHandler != nil {
