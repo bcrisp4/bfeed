@@ -11,6 +11,7 @@ import (
 )
 
 type FeedServiceConfig struct {
+	Schedule   ScheduleConfig
 	Reschedule RescheduleConfig
 	Jitter     func(time.Duration) time.Duration
 }
@@ -109,7 +110,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 		return nil, err
 	}
 	f.CheckedAt = &now
-	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	f.NextCheckAt = s.nextCheck(ctx, f, now)
 	f.ErrorCount = 0
 	if err := s.store.UpdateFeed(ctx, f); err != nil {
 		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
@@ -200,6 +201,26 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 	return err
 }
 
+// nextCheck computes the adaptive next-poll time for a successfully-polled feed.
+// A feed younger than one week has too few observed samples to trust the count
+// (its first poll carries historical dates outside the window), so it polls at
+// MinInterval until it settles; conditional GET keeps that cheap.
+func (s *FeedService) nextCheck(ctx context.Context, f *Feed, now time.Time) time.Time {
+	if now.Sub(f.CreatedAt) < week {
+		d := s.cfg.Schedule.MinInterval
+		if s.cfg.Jitter != nil {
+			d += s.cfg.Jitter(d)
+		}
+		return now.Add(d)
+	}
+	wc, err := s.store.WeeklyEntryCount(ctx, f.ID, now)
+	if err != nil {
+		s.log.Warn("weekly entry count", "feed_id", int64(f.ID), "error", err)
+		wc = 0
+	}
+	return now.Add(AdaptiveInterval(wc, s.cfg.Schedule, f.TTL, s.cfg.Jitter))
+}
+
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
 	if pf != nil {
 		if err := s.ingest(ctx, f, pf); err != nil {
@@ -208,6 +229,7 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 		f.Title = orKeep(pf.Title, f.Title)
 		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)
 		f.Description = orKeep(pf.Description, f.Description)
+		f.TTL = pf.TTL // poll-owned: refresh from the parsed feed
 	}
 	// Backfill on every successful poll — including 304 (pf == nil) — so a feed
 	// can never persist a blank Title. Idempotent once a title is set.
@@ -222,7 +244,7 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 	f.LastError = ""
 	f.CheckedAt = &now
 	f.UpdatedAt = now
-	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, 0, 0, s.cfg.Jitter)
+	f.NextCheckAt = s.nextCheck(ctx, f, now)
 	return s.store.UpdateFeed(ctx, f)
 }
 
