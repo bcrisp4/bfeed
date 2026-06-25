@@ -59,6 +59,11 @@ type FeedStore interface {
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
 	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
 	EntryStatsByFeed(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error)
+	// WeeklyEntryCount counts entries for a feed in [now-week, now], using the
+	// entry's published_at when present and falling back to ingest time
+	// (created_at) when the publisher omitted a date. System/feed-scoped (no
+	// user_id): the feed id already implies its owner.
+	WeeklyEntryCount(ctx context.Context, feedID ID, now time.Time) (int, error)
 }
 
 type EntryStore interface {

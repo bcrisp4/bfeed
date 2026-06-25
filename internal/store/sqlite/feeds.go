@@ -164,3 +164,15 @@ func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, 
 	}
 	return nil
 }
+
+func (s *Store) WeeklyEntryCount(ctx context.Context, feedID core.ID, now time.Time) (int, error) {
+	n, err := s.q.WeeklyEntryCount(ctx, sqlc.WeeklyEntryCountParams{
+		FeedID:      int64(feedID),
+		WindowStart: toUnix(now.Add(-7 * 24 * time.Hour)),
+		WindowEnd:   toUnix(now),
+	})
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return int(n), nil
+}

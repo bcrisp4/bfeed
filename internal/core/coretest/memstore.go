@@ -100,6 +100,29 @@ func (s *MemStore) ListDueFeeds(_ context.Context, now time.Time, limit int) ([]
 	return out, nil
 }
 
+// WeeklyEntryCount mirrors the sqlite query: count a feed's entries in
+// [now-week, now], using published_at when present (Unix > 0) and falling back
+// to ingest time (created_at) when the publisher omitted a date.
+func (s *MemStore) WeeklyEntryCount(_ context.Context, feedID core.ID, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start := now.Add(-7 * 24 * time.Hour)
+	n := 0
+	for _, e := range s.entries {
+		if e.FeedID != feedID {
+			continue
+		}
+		eff := e.PublishedAt
+		if eff.Unix() <= 0 { // no/zero published date -> ingest time
+			eff = e.CreatedAt
+		}
+		if !eff.Before(start) && !eff.After(now) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
