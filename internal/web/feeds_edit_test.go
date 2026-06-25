@@ -22,6 +22,22 @@ func TestEditFormRendersPanel(t *testing.T) {
 	}
 }
 
+// The edit form's title input must seed from the raw user override (empty when
+// none), with the poll-owned title only as a placeholder — otherwise saving
+// without touching the title would pin the poll-owned title as a permanent
+// override and freeze the feed name against future poll updates.
+func TestEditFormTitleSeedsFromOverrideNotDisplayTitle(t *testing.T) {
+	h, st := newTestHandler(t, coretest.StubFetcher{})
+	id := seedFeed(t, st) // poll-owned Title "Test Feed", no user override
+	body := do(t, h, "GET", "/feeds/"+itoa(id)+"/edit").Body.String()
+	if strings.Contains(body, `value="Test Feed"`) {
+		t.Errorf("title input must not pre-fill the poll-owned title (sticky-override bug), body=%s", body)
+	}
+	if !strings.Contains(body, `placeholder="Test Feed"`) {
+		t.Errorf("poll-owned title should appear as the placeholder, body=%s", body)
+	}
+}
+
 func TestEditSaveRenamesAndSwapsRow(t *testing.T) {
 	h, st := newTestHandler(t, coretest.StubFetcher{})
 	id := seedFeed(t, st)

@@ -290,7 +290,7 @@ func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContent
 }
 
 const setFeedURL = `-- name: SetFeedURL :execrows
-UPDATE feeds SET feed_url = ? WHERE id = ? AND user_id = ?
+UPDATE feeds SET feed_url = ?, etag = '', last_modified = '' WHERE id = ? AND user_id = ?
 `
 
 type SetFeedURLParams struct {
@@ -299,6 +299,9 @@ type SetFeedURLParams struct {
 	UserID  int64
 }
 
+// Clears etag/last_modified too: they belong to the old URL, so reusing them as
+// conditional-GET headers against the new URL risks a spurious 304 that skips
+// the new feed's content. The next poll re-fetches in full and repopulates them.
 func (q *Queries) SetFeedURL(ctx context.Context, arg SetFeedURLParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setFeedURL, arg.FeedUrl, arg.ID, arg.UserID)
 	if err != nil {

@@ -120,10 +120,16 @@ func TestFeedRowFragmentIncludesOOBGroupHeadWhenIdle(t *testing.T) {
 	}
 }
 
-func TestFeedRowReturns404ForUnknownFeed(t *testing.T) {
+// An unknown feed (e.g. deleted out-of-band while a row was still polling) must
+// return 200 with an empty body, not 404: htmx's outerHTML swap then removes the
+// row and the poll stops. A 404 would not swap, leaving the row polling forever.
+func TestFeedRowForUnknownFeedReturnsEmpty200(t *testing.T) {
 	h, _ := newTestHandler(t, coretest.StubFetcher{})
 	rec := do(t, h, "GET", "/feeds/99999/row")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown feed, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for unknown feed, got %d", rec.Code)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "" {
+		t.Fatalf("expected empty body for unknown feed (so htmx removes the row), got %q", body)
 	}
 }

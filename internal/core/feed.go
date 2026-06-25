@@ -140,9 +140,11 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
 }
 
 // Subscribe is the synchronous convenience used by non-web callers and tests:
-// create the row, then resolve+ingest inline. On resolve failure it rolls the
-// partial subscribe back (the web layer instead keeps the failed row for the
-// user to dismiss, so it calls CreateSubscription + ResolveAndIngest directly).
+// create the row, then resolve+ingest inline. A fetch/parse failure is recorded
+// on the feed by ResolveAndIngest (which returns nil), so the row is kept in an
+// error state — matching the web path, which calls CreateSubscription +
+// ResolveAndIngest directly. The rollback below only fires on a hard store error
+// (ResolveAndIngest returning non-nil), where the half-written row is unusable.
 func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
 	f, err := s.CreateSubscription(ctx, userID, rawURL, categoryID, fetchFullContent)
 	if err != nil {

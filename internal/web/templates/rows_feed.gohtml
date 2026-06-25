@@ -44,7 +44,7 @@
 {{define "feededit"}}
 <form class="feed-edit" hx-post="/feeds/{{.ID}}" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">
   <div class="fld"><label for="ft-{{.ID}}">Title</label>
-    <input id="ft-{{.ID}}" type="text" name="title" value="{{.Title}}" placeholder="{{.Host}}"></div>
+    <input id="ft-{{.ID}}" type="text" name="title" value="{{.UserTitle}}" placeholder="{{.Title}}"></div>
   <div class="fld"><label for="fu-{{.ID}}">Feed URL</label>
     <input id="fu-{{.ID}}" type="url" name="url" value="{{.FeedURL}}" required></div>
   <div class="row2">

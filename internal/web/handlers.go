@@ -62,6 +62,7 @@ type feedEditCatVM struct {
 type feedRowVM struct {
 	ID          core.ID
 	Title       string // display title (user override or poll-owned)
+	UserTitle   string // raw rename override ("" = none); seeds the edit form so an unchanged save stays a no-op
 	FeedURL     string
 	Host        string
 	LastError   string
@@ -230,7 +231,7 @@ func (h *Handler) buildFeedRow(f *core.Feed, st core.FeedEntryStats, now time.Ti
 	}
 	inFlight := h.busy.has(f.ID)
 	row := feedRowVM{
-		ID: f.ID, Title: f.DisplayTitle(), FeedURL: f.FeedURL, Host: feedHost(f.FeedURL),
+		ID: f.ID, Title: f.DisplayTitle(), UserTitle: f.UserTitle, FeedURL: f.FeedURL, Host: feedHost(f.FeedURL),
 		LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent,
 		Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit,
 		Next: humanizeUntil(f.NextCheckAt, now),
@@ -443,13 +444,16 @@ func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 		h.renderEditError(w, r, id, err)
 		return
 	}
+	// Re-resolve a changed URL regardless of whether the category also moved —
+	// otherwise a combined category+URL edit would skip the background fetch and
+	// leave the feed pointing at the new URL with stale (now-empty) poll metadata.
+	if res.URLChanged {
+		h.startRefresh(id)
+	}
 	if res.CategoryChanged {
 		w.Header().Set("HX-Refresh", "true")
 		w.WriteHeader(http.StatusNoContent)
 		return
-	}
-	if res.URLChanged {
-		h.startRefresh(id)
 	}
 	h.renderFeedRow(w, r, id)
 }
@@ -523,7 +527,10 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 	ctx := r.Context()
 	f, err := h.feeds.Get(ctx, uid, id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		// The feed is gone (e.g. deleted out-of-band while a row was still
+		// polling). Reply 200 with an empty body so htmx's outerHTML swap removes
+		// the row — a 404 would not swap, leaving the row polling forever.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return
 	}
 	stats, _ := h.feeds.EntryStats(ctx, uid)
@@ -535,7 +542,7 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 		return
 	}
 	if !row.Refreshing && !row.Pending {
-		h.writeGroupHeadOOB(ctx, w, f, stats, now)
+		h.writeGroupHeadOOB(ctx, w, f, stats)
 	}
 }
 
@@ -551,7 +558,7 @@ func (h *Handler) feedRow(w http.ResponseWriter, r *http.Request) {
 
 // writeGroupHeadOOB renders an out-of-band swap for the feed's category group
 // head with recomputed feed and unread counts.
-func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats, _ time.Time) {
+func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats) {
 	feeds, err := h.feeds.List(ctx, uid)
 	if err != nil {
 		return
@@ -721,7 +728,7 @@ func (h *Handler) feedTitleMap(ctx context.Context) map[core.ID]string {
 	}
 	m := make(map[core.ID]string, len(feeds))
 	for _, f := range feeds {
-		m[f.ID] = f.Title
+		m[f.ID] = f.DisplayTitle()
 	}
 	return m
 }
@@ -733,7 +740,7 @@ func (h *Handler) singleFeedTitle(ctx context.Context, feedID core.ID) string {
 		h.log.Warn("get feed for title", "feed_id", int64(feedID), "error", err)
 		return ""
 	}
-	return f.Title
+	return f.DisplayTitle()
 }
 
 type categoryVM struct {

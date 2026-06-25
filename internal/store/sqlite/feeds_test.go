@@ -41,6 +41,35 @@ func TestCreateAndGetFeed(t *testing.T) {
 	}
 }
 
+// SetFeedURL must clear etag/last_modified: those headers belong to the old URL
+// and would cause a spurious 304 against the new host, skipping its content.
+func TestSetFeedURLClearsConditionalHeaders(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	id, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://old.test/feed", Title: "T",
+		ETag: `"abc"`, LastModified: "Wed, 01 Jan 2025 00:00:00 GMT",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	if err := s.SetFeedURL(ctx, core.DefaultUserID, id, "https://new.test/feed"); err != nil {
+		t.Fatalf("SetFeedURL: %v", err)
+	}
+	got, err := s.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatalf("GetFeed: %v", err)
+	}
+	if got.FeedURL != "https://new.test/feed" {
+		t.Errorf("feed_url = %q, want the new URL", got.FeedURL)
+	}
+	if got.ETag != "" || got.LastModified != "" {
+		t.Errorf("conditional headers not cleared: etag=%q last_modified=%q", got.ETag, got.LastModified)
+	}
+}
+
 func TestCreateFeedDuplicateURLConflict(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

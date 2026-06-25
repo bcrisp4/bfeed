@@ -471,6 +471,8 @@ func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) 
 	}
 	cp := *f
 	cp.FeedURL = url
+	cp.ETag = ""         // mirror the SQL: stale conditional-GET headers must not
+	cp.LastModified = "" // carry across a URL change (would risk a spurious 304).
 	s.feeds[feedID] = &cp
 	return nil
 }
