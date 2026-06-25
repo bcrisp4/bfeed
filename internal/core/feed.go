@@ -27,6 +27,23 @@ type FeedService struct {
 }
 
 func NewFeedService(store Store, fetcher Fetcher, parser FeedParser, san Sanitizer, clk Clock, log *slog.Logger, cfg FeedServiceConfig) *FeedService {
+	// Normalize so a zero-value config can never schedule now+0 (a tight re-poll
+	// loop). Prod passes validated values; this guards tests/other callers.
+	if cfg.Schedule.MinInterval <= 0 {
+		cfg.Schedule.MinInterval = 5 * time.Minute
+	}
+	if cfg.Schedule.MaxInterval <= cfg.Schedule.MinInterval {
+		cfg.Schedule.MaxInterval = 24 * time.Hour
+	}
+	if cfg.Schedule.Factor <= 0 {
+		cfg.Schedule.Factor = 1
+	}
+	if cfg.Reschedule.Interval <= 0 {
+		cfg.Reschedule.Interval = cfg.Schedule.MinInterval
+	}
+	if cfg.Reschedule.MaxBackoff <= 0 {
+		cfg.Reschedule.MaxBackoff = cfg.Schedule.MaxInterval
+	}
 	return &FeedService{store: store, fetcher: fetcher, parser: parser, san: san, clk: clk, log: log, cfg: cfg}
 }
 

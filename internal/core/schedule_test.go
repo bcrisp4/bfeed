@@ -43,3 +43,11 @@ func TestAdaptiveIntervalJitterApplied(t *testing.T) {
 		t.Fatalf("jittered = %v, want %v", got, want)
 	}
 }
+
+func TestAdaptiveIntervalJitterDoesNotBreachTTLCap(t *testing.T) {
+	jit := func(d time.Duration) time.Duration { return d / 4 } // max positive jitter
+	got := AdaptiveInterval(0, cfg(), 400*24*time.Hour, jit)
+	if got != 30*24*time.Hour {
+		t.Fatalf("got %v, want 30d — jitter applied after the TTL cap breaches the ceiling", got)
+	}
+}

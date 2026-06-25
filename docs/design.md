@@ -665,10 +665,11 @@ if feedAge < week:    interval = minInterval                 // cold start: obse
 elif weeklyCount<=0:  interval = maxInterval                 // quiet established feed
 else:                 interval = week / (weeklyCount * factor)
 interval = clamp(interval, minInterval, maxInterval)
-if feedTTL > 0:       interval = max(interval, min(feedTTL, ttlCap))  // honor publisher, capped
 interval += jitter(interval)                                 // avoid a lockstep herd
-// error path: interval = min(maxInterval, interval * 2^min(error_count, k)) + jitter  // graceful backoff,
-//                                                                                     // honors Retry-After
+if feedTTL > 0:       interval = max(interval, min(feedTTL, ttlCap))  // honor publisher (capped); applied
+                                                             // after jitter so ttlCap is a hard ceiling
+// error path: interval = min(maxBackoff, interval * 2^min(error_count, k)) + jitter  // graceful backoff
+//             (maxBackoff = BFEED_MAX_BACKOFF; honors Retry-After)
 next_check_at = now + interval
 ```
 
