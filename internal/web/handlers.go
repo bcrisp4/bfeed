@@ -53,6 +53,12 @@ type feedsCatVM struct {
 	Title string
 }
 
+type feedEditCatVM struct {
+	ID       int64
+	Title    string
+	Selected bool
+}
+
 type feedRowVM struct {
 	ID          core.ID
 	Title       string // display title (user override or poll-owned)
@@ -68,7 +74,8 @@ type feedRowVM struct {
 	Next        string // "in 1h"; "" if past/unknown
 	Refreshing  bool   // background refresh in flight (has CheckedAt)
 	Pending     bool   // background subscribe in flight (no CheckedAt yet)
-	Editing     bool   // edit form is open (Task 8); always false until then
+	Editing     bool   // edit form is open
+	Cats        []feedEditCatVM
 }
 
 type feedGroupVM struct {
@@ -369,24 +376,52 @@ func (h *Handler) renderSubscribeError(w http.ResponseWriter, msg string) {
 	}
 }
 
-func (h *Handler) setFeedFullContent(w http.ResponseWriter, r *http.Request) {
+// catOptions builds the category dropdown items for the inline edit form,
+// marking the currently selected category.
+func (h *Handler) catOptions(ctx context.Context, selected *core.ID) []feedEditCatVM {
+	cats, err := h.cats.List(ctx, uid)
+	if err != nil {
+		return nil
+	}
+	out := make([]feedEditCatVM, 0, len(cats))
+	for _, c := range cats {
+		out = append(out, feedEditCatVM{
+			ID:       int64(c.ID),
+			Title:    c.Title,
+			Selected: selected != nil && *selected == c.ID,
+		})
+	}
+	return out
+}
+
+// feedEditForm handles GET /feeds/{id}/edit: renders the feed row with its
+// edit panel expanded so the user can modify title, URL, category, and
+// full-content preference inline.
+func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	on := r.FormValue("full_content") == "on"
-	if err := h.feeds.SetFullContent(r.Context(), uid, id, on); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	ctx := r.Context()
+	f, err := h.feeds.Get(ctx, uid, id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	// The toggle's hx-vals is baked from the old state at render time, so reload
-	// the feeds page to re-render the button — otherwise it keeps posting the
-	// same value and the toggle is one-way.
-	w.Header().Set("HX-Refresh", "true")
-	w.WriteHeader(http.StatusNoContent)
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.Editing = true
+	row.Cats = h.catOptions(ctx, f.CategoryID)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow/edit", "error", err)
+	}
 }
 
-func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
+// editFeed handles POST /feeds/{id}: unified save for the inline edit panel.
+// On category change → HX-Refresh (row moves groups). On URL change →
+// background re-resolve then row swap. Otherwise → row swap.
+func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -396,11 +431,47 @@ func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad category id", http.StatusBadRequest)
 		return
 	}
-	if err := h.feeds.SetCategory(r.Context(), uid, id, catID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	in := core.EditFeedInput{
+		Title:       r.FormValue("title"),
+		URL:         r.FormValue("url"),
+		CategoryID:  catID,
+		FullContent: r.FormValue("full_content") == "on",
+	}
+	res, err := h.feeds.EditFeed(r.Context(), uid, id, in)
+	if err != nil {
+		h.renderEditError(w, r, id, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if res.CategoryChanged {
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if res.URLChanged {
+		h.startRefresh(id)
+	}
+	h.renderFeedRow(w, r, id, false)
+}
+
+// renderEditError re-renders the edit panel with an inline error message and
+// returns status 422 so htmx swaps it in without treating it as a success.
+func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id core.ID, cause error) {
+	ctx := r.Context()
+	f, gerr := h.feeds.Get(ctx, uid, id)
+	if gerr != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.Editing = true
+	row.Cats = h.catOptions(ctx, f.CategoryID)
+	row.LastError = "Couldn't save: " + cause.Error()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow/editerr", "error", err)
+	}
 }
 
 // parseCategoryID reads the optional category_id form field. Empty → (nil, true)

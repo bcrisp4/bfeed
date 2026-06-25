@@ -41,4 +41,23 @@
 <div class="fm-group-head" id="feed-group-{{.CatID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Title}} <span class="g-count">· {{.FeedCount}} feeds · {{.Unread}} unread</span></div>
 {{end}}
 
-{{define "feededit"}}{{end}}
+{{define "feededit"}}
+<form class="feed-edit" hx-post="/feeds/{{.ID}}" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">
+  <div class="fld"><label for="ft-{{.ID}}">Title</label>
+    <input id="ft-{{.ID}}" type="text" name="title" value="{{.Title}}" placeholder="{{.Host}}"></div>
+  <div class="fld"><label for="fu-{{.ID}}">Feed URL</label>
+    <input id="fu-{{.ID}}" type="url" name="url" value="{{.FeedURL}}" required></div>
+  <div class="row2">
+    <div class="fld" style="flex:1"><label for="fc-{{.ID}}">Category</label>
+      <select id="fc-{{.ID}}" name="category_id">
+        <option value="">Uncategorised</option>
+        {{range .Cats}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Title}}</option>{{end}}
+      </select></div>
+    <label class="opt"><input type="checkbox" name="full_content"{{if .FullContent}} checked{{end}}> Fetch full content</label>
+  </div>
+  <div class="acts">
+    <button class="primary" type="submit">Save</button>
+    <button type="button" hx-get="/feeds/{{.ID}}/row" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">Cancel</button>
+  </div>
+</form>
+{{end}}

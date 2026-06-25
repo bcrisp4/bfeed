@@ -169,9 +169,10 @@ func TestSetFeedCategoryAssignsAndClears(t *testing.T) {
 	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
 
-	assign := func(val string) int {
-		form := strings.NewReader("category_id=" + val)
-		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+	// POST /feeds/{id} is the unified edit save. Category change returns 204+HX-Refresh.
+	assign := func(catVal string) int {
+		body := strings.NewReader("title=&url=https://a/f&category_id=" + catVal)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10), body)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -280,9 +281,10 @@ func TestSetFeedCategoryRejectsMalformedID(t *testing.T) {
 	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", CategoryID: &catID, NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
 
+	// POST /feeds/{id} is the unified edit save; parseCategoryID still rejects bad values.
 	for _, bad := range []string{"abc", "0", "-5"} {
-		form := strings.NewReader("category_id=" + bad)
-		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+		form := strings.NewReader("title=&url=https://a/f&category_id=" + bad)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10), form)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -463,14 +465,16 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 		t.Fatalf("subscribe did not set FetchFullContent: %+v", feeds)
 	}
 
-	// Toggle off.
+	// Toggle off via the unified edit endpoint (full_content absent = off).
+	// Use the same URL to avoid URLChanged; category_id empty = uncategorised.
 	id := feeds[0].ID
-	off := url.Values{"full_content": {"off"}}
-	req = httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(id), 10)+"/full-content", strings.NewReader(off.Encode()))
+	off := url.Values{"title": {""}, "url": {"https://x.example/feed"}, "category_id": {""}}
+	req = httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(id), 10), strings.NewReader(off.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
+	// No category or URL change → row swap (200); full_content cleared.
+	if rec.Code != http.StatusOK {
 		t.Fatalf("toggle status %d, body: %s", rec.Code, rec.Body.String())
 	}
 
