@@ -380,8 +380,9 @@ above) and a `*slog.Logger`. They contain **all business logic and invariant enf
 HTTP/adapters are dumb translation layers.
 
 ### 9.1 FeedService
-Subscribe (discover + validate feed URL, dedupe per user), categorise, edit (full-content
-flag, enable/disable), delete (cascade + tombstones), OPML import/export. On subscribe it
+Subscribe (discover + validate feed URL, dedupe per user), categorise, edit (rename via
+`user_title` override, feed URL, category, full-content flag, enable/disable), delete (cascade
++ tombstones), OPML import/export. On subscribe it
 does one immediate fetch to populate title/entries and sets the first `NextCheckAt`.
 
 ### 9.2 EntryService
@@ -1094,6 +1095,14 @@ These hold across all sessions. Tests must defend them.
   view), not in the sanitiser at ingest — stored content stays canonical (origin URLs), so legacy
   entries are also proxied, secret rotation is harmless, and toggling the proxy off is clean.
   Default ON. `srcset` rewriting and a server-side image cache are deferred (roadmap A4).
+- **Feed manager redesign (iter 7):** non-blocking subscribe/refresh (goroutine on
+  `context.Background()` + in-memory `inflightSet`), self-polling `GET /feeds/{id}/row` fragment
+  (`hx-trigger="every 1500ms"`) with an `hx-swap-oob` group-head count update on completion,
+  feed list grouped by category, and an inline edit panel for title/url/category/full-content
+  (`FeedService.EditFeed`). `Subscribe` is split into `CreateSubscription` (validate+persist, no
+  I/O) + background `ResolveAndIngest` (records errors, no rollback). Rename via the new
+  `feeds.user_title` override column, displayed through `Feed.DisplayTitle()` (= `user_title ??
+  title`); `SetFeedURL` clears `etag`/`last_modified` so a changed URL re-fetches in full.
 
 ## 30. Research basis & sources
 
