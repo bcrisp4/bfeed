@@ -64,6 +64,7 @@ type Feed struct {
 	UpdatedAt        int64
 	CategoryID       sql.NullInt64
 	FetchFullContent int64
+	TtlSeconds       sql.NullInt64
 }
 
 type Tombstone struct {

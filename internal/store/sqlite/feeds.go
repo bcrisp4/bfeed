@@ -25,6 +25,7 @@ func feedFromRow(r sqlc.Feed) *core.Feed {
 		NextCheckAt:      fromUnix(r.NextCheckAt),
 		ErrorCount:       int(r.ErrorCount),
 		LastError:        r.LastError,
+		TTL:              durSec(r.TtlSeconds),
 		CreatedAt:        fromUnix(r.CreatedAt),
 		UpdatedAt:        fromUnix(r.UpdatedAt),
 	}
@@ -55,6 +56,7 @@ func (s *Store) CreateFeed(ctx context.Context, f *core.Feed) (core.ID, error) {
 		UpdatedAt:        toUnix(f.UpdatedAt),
 		CategoryID:       nullID(f.CategoryID),
 		FetchFullContent: b2i(f.FetchFullContent),
+		TtlSeconds:       nullDurSec(f.TTL),
 	})
 	if err != nil {
 		return 0, mapErr(err)
@@ -110,6 +112,7 @@ func (s *Store) UpdateFeed(ctx context.Context, f *core.Feed) error {
 		ErrorCount:   int64(f.ErrorCount),
 		LastError:    f.LastError,
 		UpdatedAt:    toUnix(f.UpdatedAt),
+		TtlSeconds:   nullDurSec(f.TTL),
 		ID:           int64(f.ID),
 		UserID:       int64(f.UserID),
 	}))

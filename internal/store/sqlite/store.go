@@ -38,6 +38,20 @@ func ptrUnix(n sql.NullInt64) *time.Time {
 	return &t
 }
 
+func nullDurSec(d time.Duration) sql.NullInt64 {
+	if d <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(d / time.Second), Valid: true}
+}
+
+func durSec(n sql.NullInt64) time.Duration {
+	if !n.Valid {
+		return 0
+	}
+	return time.Duration(n.Int64) * time.Second
+}
+
 func nullID(id *core.ID) sql.NullInt64 {
 	if id == nil {
 		return sql.NullInt64{}

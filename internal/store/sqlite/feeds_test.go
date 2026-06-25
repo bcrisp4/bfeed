@@ -280,3 +280,34 @@ func TestWeeklyEntryCount(t *testing.T) {
 		t.Fatalf("WeeklyEntryCount = %d, want 3", got)
 	}
 }
+
+func TestFeedTTLRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+
+	fid, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://e.com/ttl", Title: "t",
+		TTL: 45 * time.Minute, NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TTL != 45*time.Minute {
+		t.Fatalf("TTL after create = %v, want 45m", got.TTL)
+	}
+
+	got.TTL = 2 * time.Hour
+	got.UpdatedAt = now
+	if err := s.UpdateFeed(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := s.GetFeed(ctx, core.DefaultUserID, fid)
+	if got2.TTL != 2*time.Hour {
+		t.Fatalf("TTL after update = %v, want 2h", got2.TTL)
+	}
+}
