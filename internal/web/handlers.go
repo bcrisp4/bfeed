@@ -72,8 +72,12 @@ type feedRowVM struct {
 }
 
 type feedGroupVM struct {
-	Title string
-	Feeds []feedRowVM
+	CatID     int64
+	Title     string
+	FeedCount int
+	Unread    int
+	OOB       bool
+	Feeds     []feedRowVM
 }
 
 type feedGroupHeadVM struct {
@@ -307,13 +311,20 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats), ShowCounts: statsErr == nil}
 	// Only render groups that actually contain feeds — an empty heading with a
 	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
+	mkGroup := func(catID int64, title string, rows []feedRowVM) feedGroupVM {
+		g := feedGroupVM{CatID: catID, Title: title, Feeds: rows, FeedCount: len(rows)}
+		for _, rr := range rows {
+			g.Unread += rr.Unread
+		}
+		return g
+	}
 	for _, c := range cats {
 		if rows := byCat[c.ID]; len(rows) > 0 {
-			vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: rows})
+			vm.Groups = append(vm.Groups, mkGroup(int64(c.ID), c.Title, rows))
 		}
 	}
 	if len(uncat) > 0 {
-		vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
+		vm.Groups = append(vm.Groups, mkGroup(0, "Uncategorised", uncat))
 	}
 	vm.chrome = h.chromeFor(r, "feeds")
 	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", vm); err != nil {
@@ -328,11 +339,23 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := r.FormValue("full_content") == "on"
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID, full); err != nil {
-		h.renderSubscribeError(w, "Couldn't subscribe: "+err.Error())
+	f, err := h.feeds.CreateSubscription(r.Context(), uid, r.FormValue("url"), catID, full)
+	if err != nil {
+		h.renderSubscribeError(w, "Couldn't add feed: "+err.Error())
 		return
 	}
-	// Stay on /feeds and show the new feed: htmx reloads the current page.
+	// Resolve + ingest in the background; the reloaded page shows a pending row
+	// that polls until the feed populates (or turns into an error row).
+	if h.busy.start(f.ID) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			defer h.busy.done(f.ID)
+			if err := h.feeds.ResolveAndIngest(ctx, f); err != nil {
+				h.log.Warn("background subscribe", "feed_id", int64(f.ID), "error", err)
+			}
+		}()
+	}
 	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
 }
