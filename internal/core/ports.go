@@ -25,6 +25,7 @@ type Fetcher interface {
 
 type ParsedFeed struct {
 	Title, SiteURL, Description string
+	TTL                         time.Duration // publisher-declared min interval; 0 = none
 	Entries                     []ParsedEntry
 }
 
