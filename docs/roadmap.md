@@ -39,12 +39,13 @@ MVP uses a **fixed interval** + conditional GET + per-host concurrency cap + exp
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| Adaptive refresh interval (poll active feeds more) | §12 | `schedule.go` pure fn; replaces fixed-interval reschedule | Core differentiator vs MVP | deferred |
-| Spacing-based weekly virtual count | §12 | `FeedStore.WeeklyEntryCount` SQL | Feeds the adaptive math; burst-resistant | deferred |
+| Adaptive refresh interval (poll active feeds more) | §12 | `schedule.go` pure fn; replaces fixed-interval reschedule | Core differentiator vs MVP | done (iter 6) |
+| Weekly entry count (feeds the adaptive math) | §12 | `FeedStore.WeeklyEntryCount` SQL | Shipped as **`COUNT`-in-window** with ingest-time fallback, **not** the spacing-based virtual count originally specced (spacing min-pinned on tiny denominators — see the iter-6 review) | done (iter 6) |
+| Per-feed `<ttl>`/`sy:*` honouring | §12 | `feeds.ttl_seconds` column; RSS `<ttl>` + syndication module in parser; capped (~30d) | Folded into iter 6 (was the "feedTTL term") | done (iter 6) |
 | Per-host token-bucket rate limiter | §10.2 | `x/time/rate` per-host limiter alongside the semaphore | Politer; MVP has concurrency cap only | deferred |
 | Tighten limiter on 429/503 (`SetLimit` until deadline) | §10.2 | limiter state per host | Needs token-bucket limiter | deferred |
 | Honour robots `Crawl-Delay` | §10.2 | robots fetch/parse → `rate.Every(delay)` | | deferred |
-| Hard error-limit dispatch exclusion | §12 | `BFEED_FEED_ERROR_LIMIT`; `WHERE error_count < limit` in due query | MVP backs off but never excludes | deferred |
+| Hard error-limit dispatch exclusion | §12 | ~~`WHERE error_count < limit` in due query~~ | **Dropped (iter 6):** backoff already caps a dead feed at ~1 GET/day and a hard exclude risks permanent undispatch on a transient outage. `BFEED_FEED_ERROR_LIMIT` instead drives a Feeds-page "stalled" badge (done) | won't do |
 | Per-feed interval override (min/max pin) | §28 | `feeds` columns for override | Open question in design | deferred |
 
 ### A3. Full-content extraction (scrape)
@@ -92,7 +93,7 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
 | History view (recently-read, by `read_at`) | §9.2, §18 | `idx_entries_readhist`; `/history` route | Cheap | done (iter 2) |
-| Bulk mark-all-read | §9.2 | bulk UPDATE + button | High value for daily driver | deferred |
+| Bulk mark-all-read | §9.2 | bulk UPDATE + button | Backend (`MarkReadByFilter`, filter-scoped: feed/category/all) shipped iter 4; UI button wired on the feed page only — global/category mark-all button still deferred | done (iter 4, backend) |
 | Feed enable/disable via UI | §9.1 | toggle route (schema `feeds.disabled` already present; poller already respects it) | UI only; backend ready | deferred |
 | Rename feed / custom title | §9.1 | `feeds.user_title` override column; `FeedService.Rename`; `POST /feeds/{id}/rename`; manage-page edit control (mirror category rename) | Must be a **separate** override column: each successful poll refreshes `feeds.title` from the feed's own title, so writing a custom name into `feeds.title` gets clobbered on the next poll. `feeds.title` = best automatic name (feed `<title>`, else feed-URL fallback); display = `user_title ?? title` | deferred |
 | Starred view | §18 | `/starred` route | **Shipped in MVP** (star action would be a half-feature without it) — see mvp-design §12 | done (MVP) |
@@ -133,8 +134,8 @@ Fine short-term; revisit before the DB grows large.
 |---|---|---|---|---|
 | Add-to-home-screen (PWA, no service worker) | §2, §18 | `manifest.webmanifest`, app icons, `apple-touch-icon` + meta | Stated core want | deferred |
 | Localised / local-timezone time display | §18 | render times in the viewer's timezone + locale-aware date format — a small client-side formatter over the existing RFC3339 `<time datetime>`, or a timezone pref (cookie for single-user, per-user setting under A1) | Today times render as the stored **UTC** instant in a fixed `2 Jan 2006` / `2 Jan 2006, 15:04` format (`humanizeSince` + `toEntryVM`); fine for a single-user self-host on one timezone, but a viewer in another zone sees UTC. The `<time>` already carries a machine-readable RFC3339 `datetime`, so client-side rendering is the cheap additive path | deferred |
-| Light/dark/system theme toggle | §2, §18 | CSS vars + `prefers-color-scheme` + cookie | Light/Sepia/Dark, default follows OS — specced in `specs/2026-06-20-web-ui-redesign-design.md` | deferred |
-| Settings page (theme, summary, width) | §18 | `/settings` (cookie-backed, single-user) | Cookie-backed prefs specced in the UI-redesign spec; per-user TTL still needs auth+retention | deferred |
+| Light/dark/system theme toggle | §2, §18 | CSS vars + `prefers-color-scheme` + cookie | Light/Sepia/Dark, default follows OS — specced in `specs/2026-06-20-web-ui-redesign-design.md` | done (iter 3) |
+| Settings page (theme, summary, width) | §18 | `/settings` (cookie-backed, single-user) | Cookie-backed prefs specced in the UI-redesign spec; per-user TTL still needs auth+retention | done (iter 3) |
 | Persist user prefs in DB (multi-user) | §16, §18 | move the cookie-backed prefs (`bfeed_theme`/`bfeed_summary`/`bfeed_width`) onto a per-user `user_settings` table (or `users` columns) | When multi-user/auth (A1) lands — cookies are the deliberate single-user MVP form, so this is the additive upgrade path | deferred |
 | Content-hashed (fingerprinted) static asset URLs | §18 | `assetURL` hashes each embedded asset at startup; templates reference CSS/JS via the `asset` func as `…?v=<hash>`; `cacheStatic` serves any `?v=` request (and woff2) `immutable` | A `?v=` URL auto-busts on change and is cached for a year; a bare un-fingerprinted hit still gets `max-age=3600` as a safety net. Built-in on-the-fly gzip/brotli compression (`CAFxX/httpcompression`, allowlisted text types only — woff2 skipped) also landed alongside | done |
 
@@ -183,7 +184,7 @@ So a future iteration can see at a glance what it adds.
 `bfeed user …`, `bfeed token …`, `bfeed import …`, `bfeed export …`.
 
 ### B5. Open questions (decide before/at relevant iteration)
-- **License** — pick OSI license (AGPL-3.0 or MIT) before any public release (§28).
+- **License** — ✓ resolved: **Apache-2.0** (`LICENSE` in repo root).
 - **Read/write connection split** — only if single-writer + `busy_timeout` proves insufficient (§28).
 - **Search stemming** — flip `unicode61`→`porter` if search feels too literal (§28).
 - **Per-feed interval override** — add if a feed needs special cadence (§28).
@@ -221,3 +222,8 @@ _(Move shipped items here with their iteration number.)_
 - Full-content extraction (opt-in per feed, DB-backed scrape sweep) — iter 4.
 - Content-hashed (fingerprinted) static asset URLs (`?v=<hash>` → `immutable`) + on-the-fly gzip/brotli response compression + body-font preload — A11.
 - Image proxy (signed same-origin /img, render-time rewrite, SSRF-guarded fetch with CIDR allowlist, app_settings-backed HMAC secret; cache deferred) — iter 5.
+- Light/Sepia/Dark theme toggle (CSS vars + `prefers-color-scheme`, OS default, cookie) — iter 3.
+- Settings/Preferences page (cookie-backed theme/summary/width, single-user) — iter 3.
+- Bulk mark-all-read backend (`MarkReadByFilter`, feed/category/all scoped) + feed-page button — iter 4. Global/category mark-all UI button still deferred.
+- License chosen: Apache-2.0 (`LICENSE`).
+- Adaptive feed-poll scheduling (`COUNT`-in-window weekly count + ingest-time fallback, cold-start at min, capped publisher `<ttl>`/`sy:*`, success-interval jitter; `BFEED_SCHED_*` replace `BFEED_POLL_INTERVAL`) + Feeds-page "stalled" badge (`BFEED_FEED_ERROR_LIMIT`) — iter 6. Hard error-limit dispatch exclusion deliberately dropped; token-bucket limiter, robots Crawl-Delay, per-feed override still deferred.

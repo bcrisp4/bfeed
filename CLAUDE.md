@@ -68,7 +68,7 @@ BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=te
 ```
 Subcommands: `serve` (default), `migrate`, `healthcheck` (for container HEALTHCHECK), `version`.
 
-`BFEED_LISTEN_ADDR` (bind, default `:8080`) and `BFEED_BASE_URL` (external URL for links/cookies/User-Agent, **required**) are intentionally distinct — setting only `BASE_URL` does **not** change the bind port. Other env: `BFEED_DATABASE_PATH`, `BFEED_POLL_INTERVAL`, `BFEED_POLL_TICK`, `BFEED_FEED_WORKERS`, `BFEED_HOST_CONCURRENCY` (see `internal/config`).
+`BFEED_LISTEN_ADDR` (bind, default `:8080`) and `BFEED_BASE_URL` (external URL for links/cookies/User-Agent, **required**) are intentionally distinct — setting only `BASE_URL` does **not** change the bind port. Other env: `BFEED_DATABASE_PATH`, `BFEED_POLL_TICK`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`, `BFEED_SCHED_FACTOR`, `BFEED_FEED_ERROR_LIMIT`, `BFEED_FEED_WORKERS`, `BFEED_HOST_CONCURRENCY` (see `internal/config`).
 
 ## Architecture (ports & adapters)
 
@@ -96,6 +96,7 @@ Full-content extraction mirrors polling: `Scraper`/`ScrapeService` are the `Poll
 - **User scoping:** every *user-facing* store query is scoped by `user_id` (always `core.DefaultUserID` (1) in the MVP) — never trust an id without its owning user. **Background system sweeps are the deliberate exception** and take no `user_id`: `Poller.ListDueFeeds`, the cleaner, and the `Scraper`'s `ListPendingExtractions`/`SetEntryContent`/`UpdateExtractState` run as the system across all users — don't flag these as scoping violations.
 - **Tombstones** `(feed_id, guid)` block re-poll resurrection of individually deleted / TTL-expired entries **while the feed exists**. Deleting a whole feed cascades its entries *and* tombstones away and writes none (a re-subscribe gets a fresh `feed_id`). `(feed_id, guid)` is unique; re-fetched entries upsert by content hash.
 - **Politeness:** fetches use conditional GET (ETag/If-Modified-Since → 304 short-circuit), a per-host concurrency cap, and exponential backoff honoring `Retry-After`.
+- **Adaptive scheduling (iter 6):** the success-path interval is `core.AdaptiveInterval` (pure, `schedule.go`) = `week / (weeklyCount * factor)` clamped to `[min, max]`, where `weeklyCount` is `Store.WeeklyEntryCount` — a `COUNT` over `[now-week, now]` that falls back to `created_at` when `published_at` is absent. A feed younger than a week polls at `MinInterval` (cold start). Publisher TTL (`feeds.ttl_seconds`, poll-owned, from RSS `<ttl>`/`sy:*`) raises the interval, capped at 30d. The error path is unchanged (`PollReschedule` backoff). There is **no** hard error-limit dispatch exclusion — `BFEED_FEED_ERROR_LIMIT` only drives the Feeds-page "stalled" badge.
 
 ## Testing conventions
 

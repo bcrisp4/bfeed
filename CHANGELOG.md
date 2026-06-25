@@ -11,6 +11,16 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Feeds are now polled adaptively: active feeds are checked more often and quiet feeds less, within configurable bounds (`BFEED_SCHED_MIN_INTERVAL`, default 5m; `BFEED_SCHED_MAX_INTERVAL`, default 24h; `BFEED_SCHED_FACTOR`, default 1).
+- bfeed now honours a feed's own update hints (RSS `<ttl>` and the syndication module) so it never polls faster than a publisher asks, capped so a malformed hint can't silence a feed.
+- The Feeds page now shows a "⚠ stalled" badge on feeds that have failed repeatedly (after `BFEED_FEED_ERROR_LIMIT` consecutive errors, default 20), with the last error on hover.
+
+### Changed
+
+- **Breaking (config):** the single `BFEED_POLL_INTERVAL` is replaced by `BFEED_SCHED_MIN_INTERVAL` / `BFEED_SCHED_MAX_INTERVAL` / `BFEED_SCHED_FACTOR`. Update your environment: a feed previously polled every 15m now polls between 5m and 24h based on its activity.
+
 ## [0.6.0] - 2026-06-22
 
 ### Added
