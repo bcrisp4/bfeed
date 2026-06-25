@@ -11,8 +11,8 @@ func TestHumanizeUntil(t *testing.T) {
 		t    time.Time
 		want string
 	}{
-		{now.Add(-time.Minute), ""},          // past → empty
-		{now, ""},                            // now → empty
+		{now.Add(-time.Minute), ""}, // past → empty
+		{now, ""},                   // now → empty
 		{now.Add(30 * time.Second), "in <1m"},
 		{now.Add(5 * time.Minute), "in 5m"},
 		{now.Add(3 * time.Hour), "in 3h"},

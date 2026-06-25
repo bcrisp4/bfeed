@@ -329,7 +329,7 @@ func TestSetFeedUserTitle(t *testing.T) {
 	if f.UserTitle != "Renamed" || f.DisplayTitle() != "Renamed" {
 		t.Errorf("got UserTitle=%q display=%q", f.UserTitle, f.DisplayTitle())
 	}
-	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, 9999, "x"); err != core.ErrNotFound {
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, 9999, "x"); !errors.Is(err, core.ErrNotFound) {
 		t.Errorf("want ErrNotFound for unknown feed, got %v", err)
 	}
 }

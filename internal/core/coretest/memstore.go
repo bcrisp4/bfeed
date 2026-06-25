@@ -123,14 +123,28 @@ func (s *MemStore) WeeklyEntryCount(_ context.Context, feedID core.ID, now time.
 	return n, nil
 }
 
+// UpdateFeed updates only the poll-owned fields, matching the real SQLite
+// UpdateFeed query (which does not touch FetchFullContent, UserTitle, CategoryID,
+// or FeedURL — those are user-owned and updated by dedicated store methods).
 func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.feeds[f.ID]; !ok {
+	ex, ok := s.feeds[f.ID]
+	if !ok {
 		return core.ErrNotFound
 	}
-	cp := *f
-	s.feeds[f.ID] = &cp
+	ex.SiteURL = f.SiteURL
+	ex.Title = f.Title
+	ex.Description = f.Description
+	ex.ETag = f.ETag
+	ex.LastModified = f.LastModified
+	ex.Disabled = f.Disabled
+	ex.CheckedAt = f.CheckedAt
+	ex.NextCheckAt = f.NextCheckAt
+	ex.ErrorCount = f.ErrorCount
+	ex.LastError = f.LastError
+	ex.UpdatedAt = f.UpdatedAt
+	ex.TTL = f.TTL
 	return nil
 }
 

@@ -354,8 +354,9 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resolve + ingest in the background; the reloaded page shows a pending row
 	// that polls until the feed populates (or turns into an error row).
+	// context.Background() is intentional: the goroutine must outlive the request.
 	if h.busy.start(f.ID) {
-		go func() {
+		go func() { //nolint:gosec // G118: background goroutine intentionally outlives request; context.Background() is correct here
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			defer h.busy.done(f.ID)
