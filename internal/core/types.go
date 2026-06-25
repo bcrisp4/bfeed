@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type ID int64
 
@@ -26,6 +29,7 @@ type Feed struct {
 	FeedURL          string
 	SiteURL          string
 	Title            string
+	UserTitle        string // user rename override; "" = use poll-owned Title
 	Description      string
 	ETag             string
 	LastModified     string
@@ -115,4 +119,13 @@ type EntryFilter struct {
 	Limit         int
 	Cursor        *Cursor
 	Order         Order
+}
+
+// DisplayTitle is the name shown in the UI: the user override when set,
+// otherwise the poll-owned Title (which feedTitle guarantees is non-blank).
+func (f *Feed) DisplayTitle() string {
+	if t := strings.TrimSpace(f.UserTitle); t != "" {
+		return t
+	}
+	return f.Title
 }

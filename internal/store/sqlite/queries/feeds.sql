@@ -37,3 +37,6 @@ SELECT feed_id,
   COUNT(*)                                  AS total,
   COUNT(*) FILTER (WHERE status = 'unread') AS unread
 FROM entries WHERE user_id = ? GROUP BY feed_id;
+
+-- name: SetFeedUserTitle :execrows
+UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?;

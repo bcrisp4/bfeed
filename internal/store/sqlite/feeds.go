@@ -16,6 +16,7 @@ func feedFromRow(r sqlc.Feed) *core.Feed {
 		FeedURL:          r.FeedUrl,
 		SiteURL:          r.SiteUrl,
 		Title:            r.Title,
+		UserTitle:        r.UserTitle,
 		Description:      r.Description,
 		ETag:             r.Etag,
 		LastModified:     r.LastModified,
@@ -178,4 +179,19 @@ func (s *Store) WeeklyEntryCount(ctx context.Context, feedID core.ID, now time.T
 		return 0, mapErr(err)
 	}
 	return int(n), nil
+}
+
+func (s *Store) SetFeedUserTitle(ctx context.Context, userID, feedID core.ID, title string) error {
+	n, err := s.q.SetFeedUserTitle(ctx, sqlc.SetFeedUserTitleParams{
+		UserTitle: title,
+		ID:        int64(feedID),
+		UserID:    int64(userID),
+	})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return core.ErrNotFound
+	}
+	return nil
 }

@@ -311,3 +311,25 @@ func TestFeedTTLRoundTrip(t *testing.T) {
 		t.Fatalf("TTL after update = %v, want 2h", got2.TTL)
 	}
 }
+
+func TestSetFeedUserTitle(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	id, err := st.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://e.com/f", Title: "Auto", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, id, "Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.UserTitle != "Renamed" || f.DisplayTitle() != "Renamed" {
+		t.Errorf("got UserTitle=%q display=%q", f.UserTitle, f.DisplayTitle())
+	}
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, 9999, "x"); err != core.ErrNotFound {
+		t.Errorf("want ErrNotFound for unknown feed, got %v", err)
+	}
+}
