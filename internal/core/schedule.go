@@ -3,7 +3,10 @@ package core
 import "time"
 
 const (
-	week            = 7 * 24 * time.Hour  // 604800s
+	// Week is the adaptive-count window: WeeklyEntryCount samples entries over
+	// [now-Week, now] and AdaptiveInterval divides Week by that count, so the
+	// two must share one definition (the store/MemStore reference this).
+	Week            = 7 * 24 * time.Hour  // 604800s
 	maxTTLInfluence = 30 * 24 * time.Hour // a publisher hint may slow a feed, but not silence it
 )
 
@@ -27,38 +30,14 @@ func AdaptiveInterval(weeklyCount int, cfg ScheduleConfig, feedTTL time.Duration
 	if weeklyCount <= 0 {
 		iv = cfg.MaxInterval // quiet feed
 	} else {
-		iv = time.Duration(float64(week) / (float64(weeklyCount) * cfg.Factor))
+		iv = time.Duration(float64(Week) / (float64(weeklyCount) * cfg.Factor))
 	}
-	iv = clamp(iv, cfg.MinInterval, cfg.MaxInterval)
+	iv = min(max(iv, cfg.MinInterval), cfg.MaxInterval)
 	if feedTTL > 0 {
-		iv = maxDur(iv, minDur(feedTTL, maxTTLInfluence))
+		iv = max(iv, min(feedTTL, maxTTLInfluence))
 	}
 	if jitter != nil {
 		iv += jitter(iv)
 	}
 	return iv
-}
-
-func clamp(d, lo, hi time.Duration) time.Duration {
-	if d < lo {
-		return lo
-	}
-	if d > hi {
-		return hi
-	}
-	return d
-}
-
-func maxDur(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minDur(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
 }

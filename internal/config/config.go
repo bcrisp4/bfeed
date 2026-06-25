@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"strconv"
@@ -67,8 +68,10 @@ func Load() (Config, error) {
 	if c.SchedMinInterval <= 0 || c.SchedMinInterval >= c.SchedMaxInterval {
 		return c, fmt.Errorf("BFEED_SCHED_MIN_INTERVAL must be > 0 and < BFEED_SCHED_MAX_INTERVAL")
 	}
-	if c.SchedFactor <= 0 {
-		return c, fmt.Errorf("BFEED_SCHED_FACTOR must be > 0")
+	// !(>0) rejects NaN (a malformed "NaN" parses as a valid float) as well as
+	// zero/negative; IsInf rejects +Inf, which would slip past the > 0 check.
+	if !(c.SchedFactor > 0) || math.IsInf(c.SchedFactor, 0) {
+		return c, fmt.Errorf("BFEED_SCHED_FACTOR must be a finite number > 0")
 	}
 	if c.FeedErrorLimit < 1 {
 		return c, fmt.Errorf("BFEED_FEED_ERROR_LIMIT must be >= 1")

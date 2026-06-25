@@ -75,3 +75,30 @@ func TestParseTTL(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTTLChannelScoped(t *testing.T) {
+	cases := []struct {
+		name string
+		xml  string
+		want time.Duration
+	}{
+		{"namespaced ttl ignored", `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://x">` +
+			`<channel><title>t</title><media:ttl>5</media:ttl><item><title>i</title></item></channel></rss>`, 0},
+		{"item-level ttl ignored", `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>` +
+			`<item><title>i</title><ttl>5</ttl></item></channel></rss>`, 0},
+		{"channel ttl before items wins", `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>` +
+			`<ttl>45</ttl><item><title>i</title><ttl>9</ttl></item></channel></rss>`, 45 * time.Minute},
+	}
+	p := New()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pf, err := p.Parse([]byte(tc.xml), "https://e.com/f")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pf.TTL != tc.want {
+				t.Fatalf("TTL = %v, want %v", pf.TTL, tc.want)
+			}
+		})
+	}
+}

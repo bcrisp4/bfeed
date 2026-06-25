@@ -52,10 +52,11 @@ func runServe() int {
 		AllowedCIDRs:         cfg.AllowPrivateCIDRs,
 	})
 	jitter := func(d time.Duration) time.Duration {
-		if d <= 0 {
+		n := int64(d) / 4
+		if n <= 0 { // d < 4ns: nothing to jitter, and rand.Int63n panics on n<=0
 			return 0
 		}
-		return time.Duration(rand.Int63n(int64(d) / 4)) //nolint:gosec // G404: jitter, not security-sensitive
+		return time.Duration(rand.Int63n(n)) //nolint:gosec // G404: jitter, not security-sensitive
 	}
 	san := sanitize.New()
 	feedSvc := core.NewFeedService(store, fetcher, parse.New(), san, clock.Real{}, log,

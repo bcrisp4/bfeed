@@ -18,11 +18,11 @@ func TestAdaptiveInterval(t *testing.T) {
 	}{
 		{"quiet feed -> max", 0, 0, 24 * time.Hour},
 		{"negative count -> max", -3, 0, 24 * time.Hour},
-		{"14 per week -> 12h (in range)", 14, 0, week / 14},
+		{"14 per week -> 12h (in range)", 14, 0, Week / 14},
 		{"low count clamps to max", 2, 0, 24 * time.Hour},
 		{"very busy -> clamped to min", 100000, 0, 5 * time.Minute},
 		{"ttl raises a min-clamped interval", 100000, 5 * time.Hour, 5 * time.Hour},
-		{"ttl below computed is ignored", 14, time.Minute, week / 14},
+		{"ttl below computed is ignored", 14, time.Minute, Week / 14},
 		{"ttl capped at 30d", 0, 400 * 24 * time.Hour, 30 * 24 * time.Hour},
 	}
 	for _, tc := range tests {
@@ -38,7 +38,7 @@ func TestAdaptiveInterval(t *testing.T) {
 func TestAdaptiveIntervalJitterApplied(t *testing.T) {
 	jit := func(d time.Duration) time.Duration { return d / 10 }
 	got := AdaptiveInterval(14, cfg(), 0, jit)
-	want := week/14 + (week/14)/10
+	want := Week/14 + (Week/14)/10
 	if got != want {
 		t.Fatalf("jittered = %v, want %v", got, want)
 	}

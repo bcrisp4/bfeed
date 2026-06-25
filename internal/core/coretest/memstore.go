@@ -106,7 +106,7 @@ func (s *MemStore) ListDueFeeds(_ context.Context, now time.Time, limit int) ([]
 func (s *MemStore) WeeklyEntryCount(_ context.Context, feedID core.ID, now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	start := now.Add(-7 * 24 * time.Hour)
+	start := now.Add(-core.Week)
 	n := 0
 	for _, e := range s.entries {
 		if e.FeedID != feedID {

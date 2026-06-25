@@ -99,3 +99,13 @@ func TestInvalidCIDRErrors(t *testing.T) {
 		t.Fatal("expected error for invalid CIDR")
 	}
 }
+
+func TestSchedFactorRejectsNonFinite(t *testing.T) {
+	for _, v := range []string{"NaN", "Inf", "+Inf", "0", "-2"} {
+		t.Setenv("BFEED_BASE_URL", "http://x")
+		t.Setenv("BFEED_SCHED_FACTOR", v)
+		if _, err := Load(); err == nil {
+			t.Fatalf("BFEED_SCHED_FACTOR=%q should be rejected", v)
+		}
+	}
+}

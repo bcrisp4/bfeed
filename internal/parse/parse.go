@@ -87,8 +87,11 @@ func feedTTL(f *gofeed.Feed, data []byte) time.Duration {
 	return ttl
 }
 
-// rssTTLMinutes returns the first channel-level <ttl> value (minutes), or 0.
-// A targeted token scan — cheaper than re-running the full feed parser.
+// rssTTLMinutes returns the channel-level RSS <ttl> value (minutes), or 0.
+// A targeted token scan — cheaper than re-running the full feed parser. <ttl> is
+// a core-RSS channel element that precedes the items, so the scan stops at the
+// first item/entry (bounding the work and ignoring any item-level <ttl>) and
+// skips namespaced elements (e.g. media:ttl) that merely share the local name.
 func rssTTLMinutes(data []byte) int {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
@@ -96,7 +99,17 @@ func rssTTLMinutes(data []byte) int {
 		if err != nil {
 			return 0
 		}
-		if se, ok := tok.(xml.StartElement); ok && se.Name.Local == "ttl" {
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		switch se.Name.Local {
+		case "item", "entry": // ttl is channel-level, before items — stop scanning
+			return 0
+		case "ttl":
+			if se.Name.Space != "" { // foreign namespace, not core RSS <ttl>
+				continue
+			}
 			var v string
 			if dec.DecodeElement(&v, &se) == nil {
 				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {

@@ -97,7 +97,7 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 	now := s.clk.Now()
 	f := &Feed{
 		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: feedTitle(pf.Title, feedURL),
-		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified,
+		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified, TTL: pf.TTL,
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: fetchFullContent,
 	}
 	id, err := s.store.CreateFeed(ctx, f)
@@ -206,19 +206,26 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 // (its first poll carries historical dates outside the window), so it polls at
 // MinInterval until it settles; conditional GET keeps that cheap.
 func (s *FeedService) nextCheck(ctx context.Context, f *Feed, now time.Time) time.Time {
-	if now.Sub(f.CreatedAt) < week {
-		d := s.cfg.Schedule.MinInterval
-		if s.cfg.Jitter != nil {
-			d += s.cfg.Jitter(d)
-		}
-		return now.Add(d)
+	if now.Sub(f.CreatedAt) < Week {
+		return s.minCheck(now) // cold start: observe before adapting
 	}
 	wc, err := s.store.WeeklyEntryCount(ctx, f.ID, now)
 	if err != nil {
+		// A transient count failure must not silently park an active feed at
+		// MaxInterval (the weeklyCount==0 result); re-observe at MinInterval.
 		s.log.Warn("weekly entry count", "feed_id", int64(f.ID), "error", err)
-		wc = 0
+		return s.minCheck(now)
 	}
 	return now.Add(AdaptiveInterval(wc, s.cfg.Schedule, f.TTL, s.cfg.Jitter))
+}
+
+// minCheck schedules the next poll one MinInterval out (plus jitter).
+func (s *FeedService) minCheck(now time.Time) time.Time {
+	d := s.cfg.Schedule.MinInterval
+	if s.cfg.Jitter != nil {
+		d += s.cfg.Jitter(d)
+	}
+	return now.Add(d)
 }
 
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
