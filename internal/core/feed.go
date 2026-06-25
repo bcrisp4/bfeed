@@ -132,7 +132,7 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
 	}
 	if feedURL != f.FeedURL {
 		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL); err != nil {
-			return err
+			return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
 		}
 		f.FeedURL = feedURL
 	}

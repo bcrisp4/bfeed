@@ -302,6 +302,85 @@ func TestCreateSubscriptionRejectsBadURL(t *testing.T) {
 	}
 }
 
+// fixedFetcher always returns the same response, regardless of URL.
+type fixedFetcher struct{ resp *core.FetchResponse }
+
+func (f fixedFetcher) Fetch(_ context.Context, _ core.FetchRequest) (*core.FetchResponse, error) {
+	return f.resp, nil
+}
+
+// setFeedURLErrStore wraps MemStore and always returns an error from SetFeedURL.
+type setFeedURLErrStore struct {
+	*coretest.MemStore
+}
+
+func (s *setFeedURLErrStore) SetFeedURL(ctx context.Context, u, feedID core.ID, url string) error {
+	return errors.New("db locked")
+}
+
+// discoveryParser returns a parse error for the original URL so resolveFeed
+// falls into the Discover path, then succeeds for the discovered URL.
+type discoveryParser struct {
+	discoveredURL string
+	feed          *core.ParsedFeed
+}
+
+func (p discoveryParser) Parse(_ []byte, feedURL string) (*core.ParsedFeed, error) {
+	if feedURL == p.discoveredURL {
+		return p.feed, nil
+	}
+	return nil, errors.New("not a feed")
+}
+
+func (p discoveryParser) Discover(_ []byte, _ string) ([]string, error) {
+	return []string{p.discoveredURL}, nil
+}
+
+func TestResolveAndIngestSetFeedURLErrorRecordsError(t *testing.T) {
+	ctx := context.Background()
+	const originalURL = "https://example.com/page"
+	const discoveredURL = "https://example.com/feed.xml"
+
+	inner := coretest.NewMemStore()
+	store := &setFeedURLErrStore{inner}
+
+	// Both fetches (original URL → HTML, discovered URL → feed body) succeed.
+	fetcher := fixedFetcher{resp: &core.FetchResponse{Status: 200, Body: []byte("body")}}
+	parser := discoveryParser{
+		discoveredURL: discoveredURL,
+		feed:          &core.ParsedFeed{Title: "Blog"},
+	}
+
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	now := coretest.StubClock{T: time.Unix(1_700_000_000, 0)}.T
+	fid, err := inner.CreateFeed(ctx, &core.Feed{
+		UserID:      core.DefaultUserID,
+		FeedURL:     originalURL,
+		Title:       originalURL,
+		NextCheckAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := inner.GetFeed(ctx, core.DefaultUserID, fid)
+
+	_ = svc.ResolveAndIngest(ctx, f)
+
+	got, err := inner.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatalf("feed must still exist after SetFeedURL error: %v", err)
+	}
+	if got.ErrorCount == 0 {
+		t.Errorf("ErrorCount = 0, want > 0")
+	}
+	if got.LastError == "" {
+		t.Errorf("LastError is empty, want error message")
+	}
+}
+
 func TestResolveAndIngestRecordsErrorKeepsRow(t *testing.T) {
 	st := coretest.NewMemStore()
 	clk := coretest.StubClock{T: time.Unix(1000, 0)}
