@@ -654,7 +654,7 @@ and sends feed jobs to the **feed-poll pool** (bounded channel; backpressure cap
 5. `EntryStore.UpsertEntries` → returns newly-inserted entries (FTS stays in sync via triggers).
 6. If `FetchFullContent`, **enqueue** the new entries to the article-scrape stage (§13) —
    the poll worker does **not** block on scraping.
-7. Update feed metadata (title/site/desc, new ETag/Last-Modified), reset `error_count`.
+7. Update feed metadata (title/site/desc, publisher `ttl_seconds`, new ETag/Last-Modified), reset `error_count`.
 8. **Reschedule** `next_check_at = now + interval` and release semaphores.
 
 **Adaptive interval** (pure function in `schedule.go`, unit-tested with a fake `Clock`):
@@ -682,18 +682,22 @@ next_check_at = now + interval
   ```sql
   SELECT COUNT(*) FROM entries
   WHERE feed_id = ?
-    AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END)
-        BETWEEN ? AND ?;   -- now-604800, now (unix s)
+    AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) >= ?   -- now-604800
+    AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END) <= ?;  -- now (unix s)
   ```
+  (Written as explicit `>=`/`<=` rather than `BETWEEN`: sqlc mis-infers the bound args of a
+  `BETWEEN` nested in a `CASE` — see `CLAUDE.md` sqlc gotcha.)
 - **Cold start:** a feed younger than one window has too few observed samples to trust the
   count (its first poll carries historical dates outside the window). Until then it polls at
-  `minInterval`; conditional GET keeps that cheap. **Retry-After** is honoured on the error
-  path (the only path it occurs on), not the success path.
+  `minInterval`; conditional GET keeps that cheap. A **transient `WeeklyEntryCount` failure**
+  also falls back to `minInterval` (re-observe soon) rather than the `weeklyCount==0` →
+  `maxInterval` result, so a flaky read never parks an active feed for a day. **Retry-After**
+  is honoured on the error path (the only path it occurs on), not the success path.
 - **Publisher TTL** (RSS `<ttl>` / `sy:updatePeriod`÷`sy:updateFrequency`) is persisted per
   feed (poll-owned `ttl_seconds`) and honoured on every poll including 304, capped at `ttlCap`
   (≈30d) so one malformed tag can't silence a feed.
 - **Graceful error backoff** replaces Miniflux's hard "stop after 3 errors": the interval
-  doubles per consecutive error (capped at `maxInterval`), so a flapping feed slows down but
+  doubles per consecutive error (capped at `maxBackoff` = `BFEED_MAX_BACKOFF`), so a flapping feed slows down but
   **self-recovers** on the next success (which resets `error_count`). There is **no hard
   dispatch exclusion** — backoff already caps a dead feed at ~1 conditional GET/day, and a
   hard exclude risks a feed stuck undispatched through a transient outage. Instead, a feed
