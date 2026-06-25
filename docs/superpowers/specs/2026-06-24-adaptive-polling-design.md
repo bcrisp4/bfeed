@@ -1,61 +1,61 @@
 # Adaptive feed-poll scheduling — design
 
-> Status: approved design (iter 6, "smarter polling"). Implements the adaptive
-> half of roadmap §A2. Source of truth for the long-term target: `docs/design.md` §12.
+> Status: approved design (iter 6, "smarter polling"), revised after the
+> adversarial review in `2026-06-24-adaptive-polling-review.md`. Implements the
+> adaptive half of roadmap §A2. Long-term target: `docs/design.md` §12 (this
+> design **amends** §12 — see §11).
 
 ## Goal
 
-Replace the MVP's fixed poll interval with a Miniflux-style **entry-frequency
-adaptive** interval: active feeds are polled more often, quiet feeds less, all
-within `[min, max]` bounds, while honouring publisher and server hints. Add a
-hard error-limit that excludes hopelessly-broken feeds from dispatch, surfaced
-in the UI.
+Replace the MVP's fixed poll interval with an entry-frequency **adaptive**
+interval: active feeds polled more often, quiet feeds less, within `[min, max]`
+bounds, honouring publisher (`feedTTL`) and server hints. Surface persistently
+failing feeds with a Feeds-page warning badge.
 
-The current MVP polls every feed on a single fixed `BFEED_POLL_INTERVAL` (15m),
+The current MVP polls every feed on a fixed `BFEED_POLL_INTERVAL` (15m),
 rescheduling `now + Interval` on success and exponential backoff on error
-(`internal/core/reschedule.go`). This design makes the success interval adaptive
-and leaves the error backoff path as-is.
+(`internal/core/reschedule.go`). This design makes the **success** interval
+adaptive; the **error** backoff path is unchanged.
 
 ## Scope
 
 **In scope**
 
-1. Adaptive interval (a pure `schedule.go` function) + spacing-based weekly
-   virtual entry count (`WeeklyEntryCount` SQL) feeding it.
-2. Publisher TTL honouring (`feedTTL` term): parse RSS `<ttl>` / `sy:updatePeriod`
-   + `sy:updateFrequency`, persist per feed, honour on every poll (incl. 304).
-3. Hard error-limit dispatch exclusion (`BFEED_FEED_ERROR_LIMIT`) + a ⚠ badge on
-   the Feeds page for excluded feeds.
+1. Adaptive interval (pure `schedule.go` fn) fed by a **`COUNT`-in-window** weekly
+   entry count.
+2. Publisher TTL honouring (`feedTTL`): RSS `<ttl>` / `sy:updatePeriod` +
+   `sy:updateFrequency`, persisted per feed, honoured on every poll (incl. 304),
+   capped so a bad tag can't silence a feed.
+3. A ⚠ Feeds-page badge for feeds whose `error_count` has reached a threshold.
 
-**Out of scope (deferred to their own specs, still listed in `docs/roadmap.md` §A2)**
+**Out of scope** (deferred, still in `docs/roadmap.md` §A2)
 
 - Per-host token-bucket rate limiter + tighten-on-429/503.
 - Robots `Crawl-Delay`.
 - Per-feed interval override (min/max pin).
+- **Hard error-limit dispatch exclusion** — dropped (see §4 / review R8):
+  exponential backoff already caps a failing feed at ~1 conditional GET/day, so
+  a hard exclude saves almost nothing while risking a feed permanently stuck
+  undispatched through a transient outage. We keep the badge, not the exclusion.
 
 ## Approach (decided)
 
-Separate the success-path math from the error-path math:
+Separate success-path math from error-path math:
 
 - **`recordSuccess`** → new pure `AdaptiveInterval(...)` in `internal/core/schedule.go`.
-- **`recordError`** → keeps the existing `PollReschedule(...)` exponential backoff
-  in `internal/core/reschedule.go`, unchanged.
+- **`recordError`** → existing `PollReschedule(...)` exponential backoff
+  (`internal/core/reschedule.go`), unchanged.
 
-Two small pure functions, each with one job, each unit-tested with a fake `Clock`.
-This matches `docs/design.md` §12 ("pure function in `schedule.go`, unit-tested
-with a fake Clock") and keeps each function easy to read and test in isolation.
-
-(Rejected alternatives: extending the single `PollReschedule` to branch between
-adaptive and backoff modes — one function, two behaviours, harder to read;
-inlining the math in `recordSuccess` — untestable without a full service+store
-harness, violates the pure-fn/fake-clock invariant.)
+Two small pure functions, each unit-tested with a fake `Clock`. Matches
+`docs/design.md` §12's "pure function in `schedule.go`".
 
 ## 1. `schedule.go` — adaptive interval
 
 New file `internal/core/schedule.go`:
 
 ```go
-const week = 7 * 24 * time.Hour // 604800s
+const week = 7 * 24 * time.Hour            // 604800s
+const maxTTLInfluence = 30 * 24 * time.Hour // R6: a publisher hint can slow, but not silence
 
 type ScheduleConfig struct {
 	MinInterval time.Duration // BFEED_SCHED_MIN_INTERVAL, default 5m
@@ -64,122 +64,137 @@ type ScheduleConfig struct {
 }
 
 // AdaptiveInterval returns the poll interval for a successfully-polled feed.
-//   weeklyCount = spacing-based virtual entries/week (>= 0; see WeeklyEntryCount)
+//   weeklyCount = entries in the last week (COUNT; see WeeklyEntryCount), >= 0
 //   feedTTL     = publisher-declared minimum interval (0 if none)
-//   retryAfter  = server Retry-After (0 if none)
-func AdaptiveInterval(weeklyCount int, cfg ScheduleConfig, feedTTL, retryAfter time.Duration) time.Duration {
+//   jitter      = small +/- spread (nil in tests for determinism)
+func AdaptiveInterval(weeklyCount int, cfg ScheduleConfig, feedTTL time.Duration,
+	jitter func(time.Duration) time.Duration) time.Duration {
+
 	var iv time.Duration
 	if weeklyCount <= 0 {
-		iv = cfg.MaxInterval // new/quiet feed
+		iv = cfg.MaxInterval // quiet feed
 	} else {
 		iv = time.Duration(float64(week) / (float64(weeklyCount) * cfg.Factor))
 	}
 	iv = clamp(iv, cfg.MinInterval, cfg.MaxInterval) // [min, max]
-	return maxDur(iv, feedTTL, retryAfter)           // server/publisher hints may exceed max
+
+	if feedTTL > 0 { // R6: honour publisher politeness, but capped
+		iv = maxDur(iv, minDur(feedTTL, maxTTLInfluence))
+	}
+	if jitter != nil { // R7: avoid a lockstep herd (the error path already jitters)
+		iv += jitter(iv)
+	}
+	return iv
 }
 ```
 
-`clamp` and `maxDur` are small unexported helpers in the same file.
-`recordSuccess` computes `f.NextCheckAt = now.Add(AdaptiveInterval(...))`.
+`clamp`, `maxDur`, `minDur` are small unexported helpers in the file.
 
-**Why `feedTTL`/`retryAfter` "may exceed max":** an explicit publisher or server
-request to slow down always wins over our computed cap — politeness.
+**Cold start (R3) — handled in `recordSuccess`, not the pure fn.** A feed younger
+than one week has too few observed samples to trust the count (a high-frequency
+new feed's first poll carries *historical* `published_at` dates, all outside the
+window → count 0 → would wrongly pick `MaxInterval`). So:
 
-## 2. `WeeklyEntryCount` — spacing-based virtual count
+```
+if now.Sub(f.CreatedAt) < week:
+    f.NextCheckAt = now + MinInterval(+jitter)   // observe before adapting
+else:
+    f.NextCheckAt = now + AdaptiveInterval(weeklyCount, cfg, f.TTL, jitter)
+```
+
+Conditional GET keeps the first week of `MinInterval` polling cheap (a 304 is a
+few hundred bytes). After a week of observation the feed adapts normally; a
+genuinely quiet established feed then settles to `MaxInterval`.
+
+**Why `retryAfter` is not a parameter (R5):** only `200`/`304` reach
+`recordSuccess`; `429`/`5xx` route to `recordError`. `FetchResponse.RetryAfter`
+is always 0 on the success path, so the parameter would be dead. `Retry-After`
+is honoured where it actually occurs — the error path's `PollReschedule`.
+
+## 2. `WeeklyEntryCount` — COUNT in a bounded window
 
 Static-shape query → `internal/store/sqlite/queries/entries.sql`, sqlc-generated
-(regenerate with `make sqlc`; CI enforces sync):
+(`make sqlc`; CI enforces sync):
 
 ```sql
 -- name: WeeklyEntryCount :one
-SELECT COALESCE(CAST(CEIL(
-  604800.0 / NULLIF((MAX(published_at) - MIN(published_at)) / NULLIF(COUNT(*) - 1, 0), 0)
-) AS INTEGER), 0)
-FROM entries
-WHERE feed_id = ? AND published_at >= ? - 604800; -- ? = now (unix s)
+SELECT COUNT(*) FROM entries
+WHERE feed_id = ?
+  AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END)
+      BETWEEN ? AND ?;   -- ?2 = now - 604800, ?3 = now (unix s)
 ```
 
-This is a **virtual** count (entries/week implied by the average spacing of the
-last week's entries), not `COUNT(*)`, so a burst doesn't pin a feed to the floor:
+Decisions baked in:
 
-- A same-instant dump → `MAX(published_at) - MIN(published_at) = 0` →
-  `NULLIF(0, 0) = NULL` → division yields `NULL` → `COALESCE(..., 0) = 0` →
-  `AdaptiveInterval` returns `MaxInterval`.
-- A single entry in the window → `COUNT(*) - 1 = 0` → `NULLIF(0, 0) = NULL` →
-  `0` → `MaxInterval`.
-- A historical backfill (old `published_at` dates) is mostly excluded by the
-  `published_at >= now - 604800` window, so it doesn't inflate the count.
+- **`COUNT`, not the spacing formula (R4).** A plain count over a bounded window
+  degrades gracefully (2 entries/week → `week/2` ≈ 3.5d) and has no
+  tiny-denominator explosion. The historical-dump burst the spacing formula was
+  meant to resist is *already* excluded by the window. The rejected-in-v1
+  alternative is the more robust one.
+- **Both window bounds (R2).** `BETWEEN now-week AND now` — a future-dated entry
+  (timezone bug, publisher posting ahead) cannot enter the window.
+- **Ingest-time fallback (R1).** `published_at` is `NOT NULL` and stored `0` for
+  date-less items. `CASE WHEN published_at > 0 THEN published_at ELSE created_at`
+  uses the entry's ingest time (`created_at`, always set in `ingest`) for the
+  frequency signal when the publisher omits a date. Display ordering still uses
+  `published_at` — only the frequency estimate gains the fallback. This stops
+  busy-but-date-less feeds (common) from being starved at `MaxInterval`.
 
-Called only in `recordSuccess` (the only path that needs it). `core.Store` gains
-`WeeklyEntryCount(ctx, feedID ID, now time.Time) (int, error)`.
-`coretest.MemStore` gets a behavioral implementation (same spacing math over its
-in-memory entries) so `core_test` stays honest.
+`core.Store` gains `WeeklyEntryCount(ctx, feedID ID, now time.Time) (int, error)`,
+called only in `recordSuccess`. `coretest.MemStore` mirrors it faithfully — a
+`COUNT` over in-memory entries with the same effective-date/window rule is trivial
+to reproduce (R10: no SQLite `NULLIF`/`CEIL` semantics to fake).
 
-This is a system/feed-scoped aggregate keyed by `feed_id`; like the other
-background-sweep queries it takes no `user_id` (the feed id already implies its
-owner). It runs once per successful poll, off the hot list path.
+System/feed-scoped aggregate keyed by `feed_id` → no `user_id` (documented
+background-sweep exception). Off the hot list path (once per successful poll).
+The `CASE` expression can't fully use a published_at index, but `idx_entries_feed_pub
+(feed_id, published_at DESC)` still narrows to one feed's rows; verify the plan
+with `EXPLAIN QUERY PLAN` and add a covering index only if it regresses.
 
 ## 3. Schema + `Feed` type
 
 - **Migration** (additive): `ALTER TABLE feeds ADD COLUMN ttl_seconds INTEGER;`
-  (nullable; `NULL`/absent = no publisher TTL).
+  (nullable; `NULL` = no publisher TTL).
 - `core.Feed` gains `TTL time.Duration`.
 - `store/sqlite` `feeds.go` scan/bind maps `ttl_seconds` ↔ `TTL` via
-  `sql.NullInt64` seconds (consistent with `emit_pointers_for_null_types: false`;
-  reuse/extend the existing null helpers).
+  `sql.NullInt64` seconds (consistent with `emit_pointers_for_null_types: false`).
 - **TTL is poll-owned** (same invariant as `feeds.title`): refreshed from the
-  parsed feed on every successful 2xx poll. On a 304 there is no parse, so the
-  persisted `ttl_seconds` is what `AdaptiveInterval` reads — which is exactly why
-  it is a column and not a parse-time-only value.
+  parsed feed on every successful 2xx poll; read from the column on a 304 (no
+  parse) — which is why it is persisted, not parse-time-only.
 
-## 4. Error-limit dispatch exclusion
+## 4. Error badge (no dispatch change)
 
-`ListDueFeeds` (sqlc, `queries/feeds.sql`) gains the error-limit predicate and a
-parameter:
+The hard error-limit dispatch exclusion is **dropped** (review R8). `ListDueFeeds`
+is **unchanged** — backoff already bounds a failing feed's cost, and a hard
+exclude risks a feed stuck permanently undispatched after a transient outage
+(manual-refresh-only recovery is hand-waving for a background system). Backoff
+self-heals on the next success.
 
-```sql
--- name: ListDueFeeds :many
-SELECT ... FROM feeds
-WHERE disabled = 0 AND error_count < ? AND next_check_at <= ?
-ORDER BY next_check_at ASC
-LIMIT ?;
-```
+What remains is purely presentational:
 
-- `core.Store.ListDueFeeds` signature gains `errorLimit int`.
-  `Poller.dispatch` passes `cfg.ErrorLimit`.
-- This is a **system sweep** (no `user_id`) — the deliberate scoping exception,
-  same as today.
-- **Relationship to graceful backoff:** backoff (unchanged) already slows a
-  failing feed toward `MaxBackoff`; the error-limit is a *hard stop* on top —
-  once `error_count >= limit` the feed is not dispatched at all.
-- **Recovery:** an excluded feed cannot self-recover (it is never re-polled).
-  `error_count` resets on the next *successful* poll, which in practice happens
-  when the user manually refreshes/edits the feed (existing behaviour). This is
-  the design-intended "surface in the UI rather than silently disable".
-- Index: `ListDueFeeds`'s plan must stay temp-B-tree-free; verify with `EXPLAIN
-  QUERY PLAN` after the predicate change (the existing `next_check_at` ordering
-  index should still serve it; add a covering predicate index only if `EXPLAIN`
-  regresses).
+- `BFEED_FEED_ERROR_LIMIT` (default 20) becomes a **display threshold** only — it
+  does not touch dispatch. A feed is "stalled" when `error_count >= limit`.
+- The web layer learns this threshold (a `web` config field) to render the badge.
 
 ## 5. Parser TTL extraction (`internal/parse`)
 
-`core.ParsedFeed` gains `TTL time.Duration`.
+`core.ParsedFeed` gains `TTL time.Duration`. **No blanket double-parse (R9).**
+The universal `gofeed.Feed` (v1.3.0) exposes `Extensions`, `Custom`, and
+`FeedType`:
 
-gofeed's **universal** `gofeed.Feed` discards RSS `<ttl>` and the syndication
-module (`sy:*`), so extraction branches on feed type:
+- `sy:updatePeriod` / `sy:updateFrequency` are a namespaced module → read from
+  `feed.Extensions["sy"]` directly (no second parse).
+- RSS `<ttl>` (un-namespaced core element) → check `feed.Custom["ttl"]` first.
+  Only if gofeed's universal translator does not surface `<ttl>` there, fall back
+  to a single RSS-typed parse (`gofeed/rss`) of the same in-memory bytes — and
+  only for `FeedType == "rss"`. Confirm `Custom`/`Extensions` contents against a
+  fixture at implementation time before adding any second parse.
+- Effective `TTL = max(<ttl> minutes, updatePeriod / updateFrequency)`. Atom /
+  JSON Feed have no standard TTL → `0`.
+- Isolated helper `feedTTL(feed *gofeed.Feed, data []byte) time.Duration`,
+  unit-tested against `testdata` fixtures.
 
-- After the universal parse, when `feed.FeedType` is RSS, run gofeed's RSS
-  sub-parser (`github.com/mmcdole/gofeed/rss`) over the same in-memory bytes to
-  read `TTL` (minutes), `SyUpdatePeriod` (`hourly|daily|weekly|monthly|yearly`),
-  and `SyUpdateFrequency`.
-- Effective `TTL = max(<ttl> minutes, updatePeriod / updateFrequency)`.
-  Atom and JSON Feed have no standard TTL → `TTL = 0`.
-- Implemented as an isolated helper `rssTTL(data []byte) time.Duration`,
-  unit-tested against `testdata` fixtures. The second parse is RSS-only and
-  cheap (bytes already in memory; no extra fetch).
-
-`recordSuccess` sets `f.TTL = pf.TTL` before calling `AdaptiveInterval`
-(poll-owned refresh).
+`recordSuccess` sets `f.TTL = pf.TTL` (poll-owned) before computing the interval.
 
 ## 6. Config + wiring
 
@@ -190,72 +205,97 @@ module (`sy:*`), so extraction branches on feed type:
 | `BFEED_SCHED_MIN_INTERVAL` | `5m` | `> 0` and `< max` |
 | `BFEED_SCHED_MAX_INTERVAL` | `24h` | `> min` |
 | `BFEED_SCHED_FACTOR` | `1.0` (float) | `> 0` |
-| `BFEED_FEED_ERROR_LIMIT` | `20` | `>= 1` |
+| `BFEED_FEED_ERROR_LIMIT` | `20` | `>= 1` (badge threshold only — §4) |
 
 Unchanged: `BFEED_POLL_TICK` (`1m`), `BFEED_BATCH_SIZE`, `BFEED_FEED_WORKERS`,
 `BFEED_HOST_CONCURRENCY`. The "tick ≪ min interval" invariant holds
-(`1m ≪ 5m`); validation may warn if `tick >= min`.
+(`1m ≪ 5m`); validation warns if `tick >= min`.
 
 `cmd/bfeed` wiring:
 
-- Build `core.ScheduleConfig{MinInterval, MaxInterval, Factor}` → `FeedService`.
-- `FeedService` keeps a `RescheduleConfig` for the **error** path; its `Interval`
-  is seeded from `MinInterval` (backoff base), `MaxBackoff` from `MaxInterval`.
-- `PollerConfig` gains `ErrorLimit int`, passed to `ListDueFeeds`.
-- The web layer learns `errorLimit` (a `web` config field) to render the badge.
+- `core.ScheduleConfig{MinInterval, MaxInterval, Factor}` → `FeedService`.
+- `FeedService` keeps a `RescheduleConfig` for the **error** path (`Interval`
+  seeded from `MinInterval`, `MaxBackoff` from `MaxInterval`) and reuses its
+  existing `Jitter` func for the success interval too (R7).
+- The web layer learns `errorLimit` for the badge (§7).
 
-This is a **breaking config change** (no back-compat alias, by decision —
-pre-1.0, single-user, operator controls the deploy).
+**Breaking config change** (no back-compat alias — pre-1.0, single-user).
 
-## 7. Error-limit UI badge (`internal/web`)
+## 7. Error badge (`internal/web`)
 
-- The Feeds page already renders per-feed stats; extend that viewmodel with a
-  `stalled bool` (`error_count >= errorLimit`) and the `last_error` string.
-- Render a ⚠ badge next to a stalled feed, `title`/tooltip = `last_error`, so the
-  user sees *why* a feed went quiet.
-- Reuse existing `.feed`/stats styling; no new top-level CSS class needed beyond
-  a small badge rule. Follows the shared-partial conventions in `CLAUDE.md`
-  (Feeds/categories pages share `.entry`/`.actions` — do not restyle those for
-  this).
+- Feeds page already renders per-feed stats; extend that viewmodel with
+  `stalled bool` (`error_count >= errorLimit`) + the `last_error` string.
+- Render a ⚠ badge next to a stalled feed, `title`/tooltip = `last_error`.
+- Reuse existing `.feed`/stats styling plus a small badge rule; do not restyle the
+  shared `.entry`/`.actions` classes (per `CLAUDE.md`).
 
 ## 8. Testing
 
-- **`schedule_test.go`** (pure, fake clock): quiet feed (`count<=0`) → `max`;
-  busy feed → clamped to `min`; `factor` scaling (e.g. `2` halves interval);
-  `feedTTL` and `retryAfter` override and may exceed `max`; clamp boundaries.
-- **store (`store/sqlite`, real temp DB):** `WeeklyEntryCount` spacing cases
-  (even cadence, single entry → 0, same-instant burst → 0, empty window → 0);
-  `ListDueFeeds` excludes `error_count >= limit` and still includes feeds under
-  it; `EXPLAIN QUERY PLAN` shows the expected index, no temp B-tree.
-- **`coretest.MemStore`:** behavioral `WeeklyEntryCount` parity; `ListDueFeeds`
-  honours `errorLimit`.
-- **parse:** `rssTTL` fixtures — RSS `<ttl>`, `sy:updatePeriod`+`updateFrequency`,
-  combined (max wins), Atom/JSON → `0`.
-- **feed service:** `recordSuccess` sets `NextCheckAt` from `AdaptiveInterval`
-  and refreshes `f.TTL`; 304 path reads persisted TTL; `recordError` still backs
-  off (regression guard).
-- **web:** badge present when `error_count >= limit`, absent below.
+- **`schedule_test.go`** (pure, `jitter=nil`): quiet feed (`count<=0`) → `max`;
+  busy feed → clamped to `min`; `factor` scaling (`2` halves); `feedTTL` raises
+  interval but is capped at `maxTTLInfluence` (R6); clamp boundaries. A separate
+  case asserts a non-nil jitter perturbs the result (R7).
+- **feed service** (fake clock + `MemStore`): cold start — feed age `< week` →
+  `MinInterval` regardless of count (R3); aged feed adapts from the count; 304
+  reads persisted `f.TTL`; date-less entries still produce a non-zero count via
+  the ingest-time fallback (R1); `recordError` still backs off (regression guard).
+- **store (`store/sqlite`, real temp DB):** `WeeklyEntryCount` cases — even
+  cadence; future-dated entry excluded (R2); date-less entry counted via
+  `created_at` (R1); empty window → 0; `EXPLAIN QUERY PLAN` acceptable.
+- **`coretest.MemStore`:** behavioral `WeeklyEntryCount` parity (R10).
+- **parse:** `feedTTL` fixtures — RSS `<ttl>`, `sy:updatePeriod`+`updateFrequency`,
+  combined (max wins), Atom/JSON → `0`; assert no second parse when `Extensions`
+  /`Custom` already carry the values (R9).
+- **web:** badge present when `error_count >= limit`, absent below; `ListDueFeeds`
+  unchanged (no dispatch regression).
 
 ## 9. Invariants honoured (per `CLAUDE.md`)
 
-- **Poll-owned metadata:** `ttl_seconds` refreshed on every 2xx (like
-  title/site/desc); not a user-editable field.
-- **Injected `Clock`:** `schedule.go` is pure over durations; `now` comes from
+- **Poll-owned metadata:** `ttl_seconds` refreshed on every 2xx (like title); not
+  user-editable.
+- **Injected `Clock`:** `schedule.go` is pure over durations; `now` from
   `clk.Now()` in the service. No `time.Now()` in core.
-- **Sanitise before persistence / keyset pagination / STRICT tables /
-  single-writer pool:** untouched.
-- **User scoping:** `WeeklyEntryCount` and `ListDueFeeds` are system/feed-scoped
-  background sweeps — the documented `user_id`-free exception.
-- **sqlc discipline:** `WeeklyEntryCount` and the `ListDueFeeds` change are
-  static SQL → `queries/*.sql` + `make sqlc`; no hand-edited generated code.
+- **Sanitise before persistence / keyset pagination / STRICT / single-writer:**
+  untouched.
+- **User scoping:** `WeeklyEntryCount` is a system/feed-scoped sweep — the
+  documented `user_id`-free exception. `ListDueFeeds` unchanged.
+- **sqlc discipline:** `WeeklyEntryCount` is static SQL → `queries/*.sql` +
+  `make sqlc`; no hand-edited generated code.
 
 ## 10. Docs / changelog
 
 - **`CHANGELOG.md` `[Unreleased]`** — `Added`: adaptive poll interval (active
-  feeds polled more often, quiet feeds less); publisher TTL honouring; broken-feed
-  exclusion + Feeds-page warning badge. `Changed`/**breaking**: `BFEED_POLL_INTERVAL`
-  removed, replaced by `BFEED_SCHED_MIN_INTERVAL` / `BFEED_SCHED_MAX_INTERVAL` /
-  `BFEED_SCHED_FACTOR`; new `BFEED_FEED_ERROR_LIMIT`.
-- Update `CLAUDE.md` env list, `docs/mvp-design.md` (note fixed-interval
-  superseded), and move the relevant `docs/roadmap.md` §A2 rows to **§ Done
-  (iter 6)** on completion.
+  feeds polled more often, quiet feeds less); publisher TTL honouring; Feeds-page
+  warning badge for persistently failing feeds. `Changed`/**breaking**:
+  `BFEED_POLL_INTERVAL` removed → `BFEED_SCHED_MIN_INTERVAL` /
+  `BFEED_SCHED_MAX_INTERVAL` / `BFEED_SCHED_FACTOR`; new `BFEED_FEED_ERROR_LIMIT`.
+- Update `CLAUDE.md` env list, `docs/mvp-design.md` (fixed-interval superseded),
+  amend `docs/design.md` §12 (§11 below), and move the relevant
+  `docs/roadmap.md` §A2 rows to **§ Done (iter 6)** on completion.
+
+## 11. Amendment to `docs/design.md` §12
+
+§12 specifies a *spacing-based virtual count* for `weeklyCount`. The review
+verified that formula min-pins on tiny denominators (e.g. two entries 1s apart →
+`MinInterval` forever) and treats a same-instant dump as quiet. This design
+supersedes it with a **`COUNT` over `[now-week, now]` with an ingest-time
+fallback** (§2). `docs/design.md` §12 will be amended to match (replace the
+`WeeklyEntryCount` SQL and the "spacing-based" rationale; keep the rest of §12 —
+the success/error split, clamp, TTL/Retry-After honouring, graceful backoff).
+
+## 12. Review resolutions (`2026-06-24-adaptive-polling-review.md`)
+
+| # | Verdict | Resolution |
+|---|---|---|
+| R1 date-less starvation | accepted | ingest-time fallback in `WeeklyEntryCount` (§2) |
+| R2 no upper window bound | accepted | `BETWEEN now-week AND now` (§2) |
+| R3 cold-start backwards | accepted | seed `MinInterval` while feed age `< week` (§1) |
+| R4 spacing fragile | accepted | switched to `COUNT`-in-window (§2, §11) |
+| R5 dead `retryAfter` param | accepted | dropped from `AdaptiveInterval` (§1) |
+| R6 uncapped TTL | accepted | `maxTTLInfluence` 30d cap (§1) |
+| R7 no jitter | accepted | jitter on success interval (§1) |
+| R8 hard error-limit footgun | accepted | dropped exclusion; badge only (§4) |
+| R9 double parse | accepted | prefer `Extensions`/`Custom`; typed parse only if needed (§5) |
+| R10 MemStore parity lies | accepted | `COUNT` is faithfully mirrorable (§2) |
+| CEIL/NULLIF portability | n/a | moot — no longer used (COUNT) |
+| `ListDueFeeds` index | n/a | unchanged (exclusion dropped) |

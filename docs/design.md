@@ -637,7 +637,7 @@ more often, quiet feeds less, all within `[min, max]` bounds.
 
 ```sql
 SELECT ... FROM feeds
-WHERE disabled = 0 AND error_count < :error_limit AND next_check_at <= :now
+WHERE disabled = 0 AND next_check_at <= :now
 ORDER BY next_check_at ASC LIMIT :batch;        -- BFEED_BATCH_SIZE, default 100
 ```
 
@@ -660,27 +660,44 @@ and sends feed jobs to the **feed-poll pool** (bounded channel; backpressure cap
 **Adaptive interval** (pure function in `schedule.go`, unit-tested with a fake `Clock`):
 
 ```
-if weeklyCount <= 0:  interval = maxInterval                 // new/quiet feed
+// success path (200/304):
+if feedAge < week:    interval = minInterval                 // cold start: observe before adapting
+elif weeklyCount<=0:  interval = maxInterval                 // quiet established feed
 else:                 interval = week / (weeklyCount * factor)
 interval = clamp(interval, minInterval, maxInterval)
-interval = max(interval, feedTTL, retryAfter)                // honor server hints (may exceed max)
-on error: interval = min(maxInterval, interval * 2^min(error_count, k)) + jitter  // graceful backoff
+if feedTTL > 0:       interval = max(interval, min(feedTTL, ttlCap))  // honor publisher, capped
+interval += jitter(interval)                                 // avoid a lockstep herd
+// error path: interval = min(maxInterval, interval * 2^min(error_count, k)) + jitter  // graceful backoff,
+//                                                                                     // honors Retry-After
 next_check_at = now + interval
 ```
 
-- **`weeklyCount` is a spacing-based virtual count**, not `COUNT(*)`, so a burst (a new feed
-  dumping hundreds of entries) doesn't pin it to the floor. `WeeklyEntryCount` SQL:
+- **`weeklyCount` is a `COUNT` over a bounded window** `[now-week, now]`. A plain count
+  degrades gracefully (2 entries/week → ~3.5d) and has no tiny-denominator instability; the
+  historical-dump burst is already excluded by the window, so `COUNT` needs no spacing trick.
+  The frequency signal falls back to ingest time (`created_at`) when a publisher omits a date,
+  so busy-but-date-less feeds (common) aren't starved; display ordering still uses
+  `published_at`. `WeeklyEntryCount` SQL:
   ```sql
-  SELECT COALESCE(CAST(CEIL(
-    604800.0 / NULLIF((MAX(published_at) - MIN(published_at)) / NULLIF(COUNT(*) - 1, 0), 0)
-  ) AS INTEGER), 0)
-  FROM entries WHERE feed_id = ? AND published_at >= ? - 604800;   -- ? = now (unix s)
+  SELECT COUNT(*) FROM entries
+  WHERE feed_id = ?
+    AND (CASE WHEN published_at > 0 THEN published_at ELSE created_at END)
+        BETWEEN ? AND ?;   -- now-604800, now (unix s)
   ```
+- **Cold start:** a feed younger than one window has too few observed samples to trust the
+  count (its first poll carries historical dates outside the window). Until then it polls at
+  `minInterval`; conditional GET keeps that cheap. **Retry-After** is honoured on the error
+  path (the only path it occurs on), not the success path.
+- **Publisher TTL** (RSS `<ttl>` / `sy:updatePeriod`÷`sy:updateFrequency`) is persisted per
+  feed (poll-owned `ttl_seconds`) and honoured on every poll including 304, capped at `ttlCap`
+  (≈30d) so one malformed tag can't silence a feed.
 - **Graceful error backoff** replaces Miniflux's hard "stop after 3 errors": the interval
   doubles per consecutive error (capped at `maxInterval`), so a flapping feed slows down but
-  **self-recovers** on the next success (which resets `error_count`). A separate hard
-  `error_limit` (default high, e.g. 20) excludes hopelessly-broken feeds from dispatch until
-  a manual or successful reset; we surface errors in the UI rather than silently disabling.
+  **self-recovers** on the next success (which resets `error_count`). There is **no hard
+  dispatch exclusion** — backoff already caps a dead feed at ~1 conditional GET/day, and a
+  hard exclude risks a feed stuck undispatched through a transient outage. Instead, a feed
+  whose `error_count` reaches `BFEED_FEED_ERROR_LIMIT` (default 20) is flagged in the UI with
+  a warning badge; dispatch is unaffected.
 - Defaults: factor **1**, min **5m**, max **24h** (`BFEED_SCHED_*`).
 
 Global concurrency = feed-poll worker count (`BFEED_FEED_WORKERS`, default **100** to meet the
