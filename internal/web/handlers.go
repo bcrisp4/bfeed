@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -52,21 +54,48 @@ type feedsCatVM struct {
 	Title string
 }
 
+type feedEditCatVM struct {
+	ID       int64
+	Title    string
+	Selected bool
+}
+
 type feedRowVM struct {
 	ID          core.ID
-	Title       string
+	Title       string // display title (user override or poll-owned)
+	UserTitle   string // raw rename override ("" = none); seeds the edit form so an unchanged save stays a no-op
 	FeedURL     string
+	Host        string
 	LastError   string
-	CategoryID  int64 // 0 = uncategorised
+	EditError   string // validation/save error from the inline edit form
+	CategoryID  int64  // 0 = uncategorised
 	FullContent bool
 	Unread      int
 	Total       int
-	Stalled     bool // error_count >= configured error limit
+	Stalled     bool   // error_count >= configured error limit
+	Updated     string // "2h ago"; "" if never checked
+	Next        string // "in 1h"; "" if past/unknown
+	Refreshing  bool   // background refresh in flight (has CheckedAt)
+	Pending     bool   // background subscribe in flight (no CheckedAt yet)
+	Editing     bool   // edit form is open
+	Cats        []feedEditCatVM
 }
 
 type feedGroupVM struct {
-	Title string
-	Feeds []feedRowVM
+	CatID     int64
+	Title     string
+	FeedCount int
+	Unread    int
+	OOB       bool
+	Feeds     []feedRowVM
+}
+
+type feedGroupHeadVM struct {
+	CatID     int64
+	Title     string
+	FeedCount int
+	Unread    int
+	OOB       bool
 }
 
 type feedsPageVM struct {
@@ -189,6 +218,38 @@ func emptyFor(f core.EntryFilter) (msg, sub string) {
 	}
 }
 
+func feedHost(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
+func (h *Handler) buildFeedRow(f *core.Feed, st core.FeedEntryStats, now time.Time) feedRowVM {
+	var cid int64
+	if f.CategoryID != nil {
+		cid = int64(*f.CategoryID)
+	}
+	inFlight := h.busy.has(f.ID)
+	row := feedRowVM{
+		ID: f.ID, Title: f.DisplayTitle(), UserTitle: f.UserTitle, FeedURL: f.FeedURL, Host: feedHost(f.FeedURL),
+		LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent,
+		Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit,
+		Next: humanizeUntil(f.NextCheckAt, now),
+	}
+	if f.CheckedAt != nil {
+		row.Updated = humanizeSince(*f.CheckedAt, now)
+	}
+	if inFlight {
+		if f.CheckedAt == nil {
+			row.Pending = true
+		} else {
+			row.Refreshing = true
+		}
+	}
+	return row
+}
+
 func toCatVMs(cats []*core.Category) []feedsCatVM {
 	out := make([]feedsCatVM, 0, len(cats))
 	for _, c := range cats {
@@ -246,14 +307,8 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	if statsErr != nil {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
-	row := func(f *core.Feed) feedRowVM {
-		var cid int64
-		if f.CategoryID != nil {
-			cid = int64(*f.CategoryID)
-		}
-		st := stats[f.ID]
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit}
-	}
+	now := time.Now()
+	row := func(f *core.Feed) feedRowVM { return h.buildFeedRow(f, stats[f.ID], now) }
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM
 	for _, f := range feeds {
@@ -266,13 +321,20 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	vm := feedsPageVM{HasFeeds: len(feeds) > 0, Categories: toCatVMs(cats), ShowCounts: statsErr == nil}
 	// Only render groups that actually contain feeds — an empty heading with a
 	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
+	mkGroup := func(catID int64, title string, rows []feedRowVM) feedGroupVM {
+		g := feedGroupVM{CatID: catID, Title: title, Feeds: rows, FeedCount: len(rows)}
+		for _, rr := range rows {
+			g.Unread += rr.Unread
+		}
+		return g
+	}
 	for _, c := range cats {
 		if rows := byCat[c.ID]; len(rows) > 0 {
-			vm.Groups = append(vm.Groups, feedGroupVM{Title: c.Title, Feeds: rows})
+			vm.Groups = append(vm.Groups, mkGroup(int64(c.ID), c.Title, rows))
 		}
 	}
 	if len(uncat) > 0 {
-		vm.Groups = append(vm.Groups, feedGroupVM{Title: "Uncategorised", Feeds: uncat})
+		vm.Groups = append(vm.Groups, mkGroup(0, "Uncategorised", uncat))
 	}
 	vm.chrome = h.chromeFor(r, "feeds")
 	if err := h.tmpl["feeds"].ExecuteTemplate(w, "layout", vm); err != nil {
@@ -287,11 +349,28 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := r.FormValue("full_content") == "on"
-	if _, err := h.feeds.Subscribe(r.Context(), uid, r.FormValue("url"), catID, full); err != nil {
-		h.renderSubscribeError(w, "Couldn't subscribe: "+err.Error())
+	f, err := h.feeds.CreateSubscription(r.Context(), uid, r.FormValue("url"), catID, full)
+	if err != nil {
+		if errors.Is(err, core.ErrConflict) {
+			h.renderSubscribeError(w, "You're already subscribed to that feed.")
+		} else {
+			h.renderSubscribeError(w, "Couldn't add feed: "+err.Error())
+		}
 		return
 	}
-	// Stay on /feeds and show the new feed: htmx reloads the current page.
+	// Resolve + ingest in the background; the reloaded page shows a pending row
+	// that polls until the feed populates (or turns into an error row).
+	// context.Background() is intentional: the goroutine must outlive the request.
+	if h.busy.start(f.ID) {
+		go func() { //nolint:gosec // G118: background goroutine intentionally outlives request; context.Background() is correct here
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			defer h.busy.done(f.ID)
+			if err := h.feeds.ResolveAndIngest(ctx, f); err != nil {
+				h.log.Warn("background subscribe", "feed_id", int64(f.ID), "error", err)
+			}
+		}()
+	}
 	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -305,24 +384,51 @@ func (h *Handler) renderSubscribeError(w http.ResponseWriter, msg string) {
 	}
 }
 
-func (h *Handler) setFeedFullContent(w http.ResponseWriter, r *http.Request) {
+// catOptions builds the category dropdown items for the inline edit form,
+// marking the currently selected category.
+func (h *Handler) catOptions(ctx context.Context, selected *core.ID) []feedEditCatVM {
+	cats, err := h.cats.List(ctx, uid)
+	if err != nil {
+		return nil
+	}
+	out := make([]feedEditCatVM, 0, len(cats))
+	for _, c := range cats {
+		out = append(out, feedEditCatVM{
+			ID:       int64(c.ID),
+			Title:    c.Title,
+			Selected: selected != nil && *selected == c.ID,
+		})
+	}
+	return out
+}
+
+// feedEditForm handles GET /feeds/{id}/edit: renders the feed row with its
+// edit panel expanded so the user can modify title, URL, category, and full-content preference.
+func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	on := r.FormValue("full_content") == "on"
-	if err := h.feeds.SetFullContent(r.Context(), uid, id, on); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	ctx := r.Context()
+	f, err := h.feeds.Get(ctx, uid, id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	// The toggle's hx-vals is baked from the old state at render time, so reload
-	// the feeds page to re-render the button — otherwise it keeps posting the
-	// same value and the toggle is one-way.
-	w.Header().Set("HX-Refresh", "true")
-	w.WriteHeader(http.StatusNoContent)
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.Editing = true
+	row.Cats = h.catOptions(ctx, f.CategoryID)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow/edit", "error", err)
+	}
 }
 
-func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
+// editFeed handles POST /feeds/{id}: unified save for the inline edit panel.
+// On category change → HX-Refresh (row moves groups). On URL change →
+// background re-resolve then row swap. Otherwise → row swap.
+func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -332,11 +438,54 @@ func (h *Handler) setFeedCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad category id", http.StatusBadRequest)
 		return
 	}
-	if err := h.feeds.SetCategory(r.Context(), uid, id, catID); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	in := core.EditFeedInput{
+		Title:       r.FormValue("title"),
+		URL:         r.FormValue("url"),
+		CategoryID:  catID,
+		FullContent: r.FormValue("full_content") == "on",
+	}
+	res, err := h.feeds.EditFeed(r.Context(), uid, id, in)
+	if err != nil {
+		h.renderEditError(w, r, id, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// Re-resolve a changed URL regardless of whether the category also moved —
+	// otherwise a combined category+URL edit would skip the background fetch and
+	// leave the feed pointing at the new URL with stale (now-empty) poll metadata.
+	if res.URLChanged {
+		h.startRefresh(id)
+	}
+	if res.CategoryChanged {
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	h.renderFeedRow(w, r, id)
+}
+
+// renderEditError re-renders the edit panel with an inline error message and
+// returns status 422 so htmx swaps it in without treating it as a success.
+func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id core.ID, cause error) {
+	ctx := r.Context()
+	f, gerr := h.feeds.Get(ctx, uid, id)
+	if gerr != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.Editing = true
+	row.Cats = h.catOptions(ctx, f.CategoryID)
+	if errors.Is(cause, core.ErrConflict) {
+		row.EditError = "A feed with that URL already exists."
+	} else {
+		row.EditError = "Couldn't save: " + cause.Error()
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow/editerr", "error", err)
+	}
 }
 
 // parseCategoryID reads the optional category_id form field. Empty → (nil, true)
@@ -361,10 +510,89 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.feeds.Refresh(r.Context(), uid, id); err != nil {
-		h.log.Warn("refresh feed", "feed_id", int64(id), "error", err)
+	h.startRefresh(id)
+	h.renderFeedRow(w, r, id)
+}
+
+// startRefresh spawns a background poll if one is not already running for id.
+func (h *Handler) startRefresh(id core.ID) {
+	if !h.busy.start(id) {
+		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		defer h.busy.done(id)
+		if err := h.feeds.Refresh(ctx, uid, id); err != nil {
+			h.log.Warn("background refresh", "feed_id", int64(id), "error", err)
+		}
+	}()
+}
+
+// renderFeedRow renders the single-row fragment for id. When the feed is not in
+// flight it also emits an OOB group-head update so aggregate counts stay fresh
+// without a full reload.
+func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.ID) {
+	ctx := r.Context()
+	f, err := h.feeds.Get(ctx, uid, id)
+	if err != nil {
+		// The feed is gone (e.g. deleted out-of-band while a row was still
+		// polling). Reply 200 with an empty body so htmx's outerHTML swap removes
+		// the row — a 404 would not swap, leaving the row polling forever.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		return
+	}
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	now := time.Now()
+	row := h.buildFeedRow(f, stats[id], now)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow", "error", err)
+		return
+	}
+	if !row.Refreshing && !row.Pending {
+		h.writeGroupHeadOOB(ctx, w, f, stats)
+	}
+}
+
+// feedRow handles GET /feeds/{id}/row — the self-polling target used by the
+// refreshing row fragment.
+func (h *Handler) feedRow(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	h.renderFeedRow(w, r, id)
+}
+
+// writeGroupHeadOOB renders an out-of-band swap for the feed's category group
+// head with recomputed feed and unread counts.
+func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats) {
+	feeds, err := h.feeds.List(ctx, uid)
+	if err != nil {
+		return
+	}
+	var catID int64
+	if f.CategoryID != nil {
+		catID = int64(*f.CategoryID)
+	}
+	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised"}
+	if catID != 0 {
+		if c, err := h.cats.Get(ctx, uid, core.ID(catID)); err == nil {
+			head.Title = c.Title
+		}
+	}
+	for _, ff := range feeds {
+		var fc int64
+		if ff.CategoryID != nil {
+			fc = int64(*ff.CategoryID)
+		}
+		if fc == catID {
+			head.FeedCount++
+			head.Unread += stats[ff.ID].Unread
+		}
+	}
+	_ = h.tmpl["feedrow"].ExecuteTemplate(w, "feedgrouphead", head)
 }
 
 func (h *Handler) markFeedRead(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +737,7 @@ func (h *Handler) feedTitleMap(ctx context.Context) map[core.ID]string {
 	}
 	m := make(map[core.ID]string, len(feeds))
 	for _, f := range feeds {
-		m[f.ID] = f.Title
+		m[f.ID] = f.DisplayTitle()
 	}
 	return m
 }
@@ -521,7 +749,7 @@ func (h *Handler) singleFeedTitle(ctx context.Context, feedID core.ID) string {
 		h.log.Warn("get feed for title", "feed_id", int64(feedID), "error", err)
 		return ""
 	}
-	return f.Title
+	return f.DisplayTitle()
 }
 
 type categoryVM struct {

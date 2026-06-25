@@ -123,14 +123,28 @@ func (s *MemStore) WeeklyEntryCount(_ context.Context, feedID core.ID, now time.
 	return n, nil
 }
 
+// UpdateFeed updates only the poll-owned fields, matching the real SQLite
+// UpdateFeed query (which does not touch FetchFullContent, UserTitle, CategoryID,
+// or FeedURL — those are user-owned and updated by dedicated store methods).
 func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.feeds[f.ID]; !ok {
+	ex, ok := s.feeds[f.ID]
+	if !ok {
 		return core.ErrNotFound
 	}
-	cp := *f
-	s.feeds[f.ID] = &cp
+	ex.SiteURL = f.SiteURL
+	ex.Title = f.Title
+	ex.Description = f.Description
+	ex.ETag = f.ETag
+	ex.LastModified = f.LastModified
+	ex.Disabled = f.Disabled
+	ex.CheckedAt = f.CheckedAt
+	ex.NextCheckAt = f.NextCheckAt
+	ex.ErrorCount = f.ErrorCount
+	ex.LastError = f.LastError
+	ex.UpdatedAt = f.UpdatedAt
+	ex.TTL = f.TTL
 	return nil
 }
 
@@ -432,6 +446,34 @@ func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on b
 		return core.ErrNotFound
 	}
 	f.FetchFullContent = on
+	return nil
+}
+
+func (s *MemStore) SetFeedUserTitle(_ context.Context, u, feedID core.ID, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	cp := *f
+	cp.UserTitle = title
+	s.feeds[feedID] = &cp
+	return nil
+}
+
+func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	cp := *f
+	cp.FeedURL = url
+	cp.ETag = ""         // mirror the SQL: stale conditional-GET headers must not
+	cp.LastModified = "" // carry across a URL change (would risk a spurious 304).
+	s.feeds[feedID] = &cp
 	return nil
 }
 

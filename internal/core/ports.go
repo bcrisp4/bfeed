@@ -59,6 +59,8 @@ type FeedStore interface {
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
 	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
+	SetFeedUserTitle(ctx context.Context, userID, feedID ID, title string) error
+	SetFeedURL(ctx context.Context, userID, feedID ID, url string) error
 	EntryStatsByFeed(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error)
 	// WeeklyEntryCount counts entries for a feed in [now-week, now], using the
 	// entry's published_at when present and falling back to ingest time

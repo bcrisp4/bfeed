@@ -37,3 +37,12 @@ SELECT feed_id,
   COUNT(*)                                  AS total,
   COUNT(*) FILTER (WHERE status = 'unread') AS unread
 FROM entries WHERE user_id = ? GROUP BY feed_id;
+
+-- name: SetFeedUserTitle :execrows
+UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?;
+
+-- name: SetFeedURL :execrows
+-- Clears etag/last_modified too: they belong to the old URL, so reusing them as
+-- conditional-GET headers against the new URL risks a spurious 304 that skips
+-- the new feed's content. The next poll re-fetches in full and repopulates them.
+UPDATE feeds SET feed_url = ?, etag = '', last_modified = '' WHERE id = ? AND user_id = ?;

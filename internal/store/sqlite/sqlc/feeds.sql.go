@@ -117,7 +117,7 @@ func (q *Queries) EntryStatsByFeed(ctx context.Context, userID int64) ([]EntrySt
 }
 
 const getFeed = `-- name: GetFeed :one
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds WHERE id = ? AND user_id = ?
 `
 
 type GetFeedParams struct {
@@ -147,12 +147,13 @@ func (q *Queries) GetFeed(ctx context.Context, arg GetFeedParams) (Feed, error) 
 		&i.CategoryID,
 		&i.FetchFullContent,
 		&i.TtlSeconds,
+		&i.UserTitle,
 	)
 	return i, err
 }
 
 const listDueFeeds = `-- name: ListDueFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds
 WHERE disabled = 0 AND next_check_at <= ?
 ORDER BY next_check_at ASC LIMIT ?
 `
@@ -190,6 +191,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 			&i.CategoryID,
 			&i.FetchFullContent,
 			&i.TtlSeconds,
+			&i.UserTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +207,7 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 }
 
 const listFeeds = `-- name: ListFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
 `
 
 func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
@@ -236,6 +238,7 @@ func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 			&i.CategoryID,
 			&i.FetchFullContent,
 			&i.TtlSeconds,
+			&i.UserTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -280,6 +283,45 @@ type SetFeedFullContentParams struct {
 
 func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContentParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setFeedFullContent, arg.FetchFullContent, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setFeedURL = `-- name: SetFeedURL :execrows
+UPDATE feeds SET feed_url = ?, etag = '', last_modified = '' WHERE id = ? AND user_id = ?
+`
+
+type SetFeedURLParams struct {
+	FeedUrl string
+	ID      int64
+	UserID  int64
+}
+
+// Clears etag/last_modified too: they belong to the old URL, so reusing them as
+// conditional-GET headers against the new URL risks a spurious 304 that skips
+// the new feed's content. The next poll re-fetches in full and repopulates them.
+func (q *Queries) SetFeedURL(ctx context.Context, arg SetFeedURLParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setFeedURL, arg.FeedUrl, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setFeedUserTitle = `-- name: SetFeedUserTitle :execrows
+UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?
+`
+
+type SetFeedUserTitleParams struct {
+	UserTitle string
+	ID        int64
+	UserID    int64
+}
+
+func (q *Queries) SetFeedUserTitle(ctx context.Context, arg SetFeedUserTitleParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setFeedUserTitle, arg.UserTitle, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}

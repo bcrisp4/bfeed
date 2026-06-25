@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -269,5 +270,161 @@ func TestPollRefreshesTTL(t *testing.T) {
 	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
 	if got.TTL != 90*time.Minute {
 		t.Fatalf("TTL after poll = %v, want 90m", got.TTL)
+	}
+}
+
+func TestCreateSubscriptionPersistsWithoutFetch(t *testing.T) {
+	st := coretest.NewMemStore()
+	// Fetcher that fails if called — proves CreateSubscription does no network I/O.
+	fetcher := coretest.StubFetcher{Err: errors.New("must not fetch")}
+	svc := core.NewFeedService(st, fetcher, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1000, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+
+	f, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://example.com/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if f.ID == 0 {
+		t.Fatal("expected persisted feed with id")
+	}
+	if f.CheckedAt != nil {
+		t.Error("new subscription must have CheckedAt == nil (pending)")
+	}
+	if f.DisplayTitle() != "https://example.com/feed.xml" {
+		t.Errorf("pending title should fall back to URL, got %q", f.DisplayTitle())
+	}
+}
+
+func TestCreateSubscriptionRejectsBadURL(t *testing.T) {
+	st := coretest.NewMemStore()
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1000, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	if _, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "not-a-url", nil, false); !errors.Is(err, core.ErrValidation) {
+		t.Errorf("want ErrValidation, got %v", err)
+	}
+}
+
+// fixedFetcher always returns the same response, regardless of URL.
+type fixedFetcher struct{ resp *core.FetchResponse }
+
+func (f fixedFetcher) Fetch(_ context.Context, _ core.FetchRequest) (*core.FetchResponse, error) {
+	return f.resp, nil
+}
+
+// setFeedURLErrStore wraps MemStore and always returns an error from SetFeedURL.
+type setFeedURLErrStore struct {
+	*coretest.MemStore
+}
+
+func (s *setFeedURLErrStore) SetFeedURL(ctx context.Context, u, feedID core.ID, url string) error {
+	return errors.New("db locked")
+}
+
+// discoveryParser returns a parse error for the original URL so resolveFeed
+// falls into the Discover path, then succeeds for the discovered URL.
+type discoveryParser struct {
+	discoveredURL string
+	feed          *core.ParsedFeed
+}
+
+func (p discoveryParser) Parse(_ []byte, feedURL string) (*core.ParsedFeed, error) {
+	if feedURL == p.discoveredURL {
+		return p.feed, nil
+	}
+	return nil, errors.New("not a feed")
+}
+
+func (p discoveryParser) Discover(_ []byte, _ string) ([]string, error) {
+	return []string{p.discoveredURL}, nil
+}
+
+func TestResolveAndIngestSetFeedURLErrorRecordsError(t *testing.T) {
+	ctx := context.Background()
+	const originalURL = "https://example.com/page"
+	const discoveredURL = "https://example.com/feed.xml"
+
+	inner := coretest.NewMemStore()
+	store := &setFeedURLErrStore{inner}
+
+	// Both fetches (original URL → HTML, discovered URL → feed body) succeed.
+	fetcher := fixedFetcher{resp: &core.FetchResponse{Status: 200, Body: []byte("body")}}
+	parser := discoveryParser{
+		discoveredURL: discoveredURL,
+		feed:          &core.ParsedFeed{Title: "Blog"},
+	}
+
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	now := coretest.StubClock{T: time.Unix(1_700_000_000, 0)}.T
+	fid, err := inner.CreateFeed(ctx, &core.Feed{
+		UserID:      core.DefaultUserID,
+		FeedURL:     originalURL,
+		Title:       originalURL,
+		NextCheckAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := inner.GetFeed(ctx, core.DefaultUserID, fid)
+
+	_ = svc.ResolveAndIngest(ctx, f)
+
+	got, err := inner.GetFeed(ctx, core.DefaultUserID, fid)
+	if err != nil {
+		t.Fatalf("feed must still exist after SetFeedURL error: %v", err)
+	}
+	if got.ErrorCount == 0 {
+		t.Errorf("ErrorCount = 0, want > 0")
+	}
+	if got.LastError == "" {
+		t.Errorf("LastError is empty, want error message")
+	}
+}
+
+func TestResolveAndIngestRecordsErrorKeepsRow(t *testing.T) {
+	st := coretest.NewMemStore()
+	clk := coretest.StubClock{T: time.Unix(1000, 0)}
+	svc := core.NewFeedService(st, coretest.StubFetcher{Err: errors.New("dead host")}, coretest.StubParser{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://dead.example/feed", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.ResolveAndIngest(context.Background(), f)
+	got, err := st.GetFeed(context.Background(), core.DefaultUserID, f.ID)
+	if err != nil {
+		t.Fatalf("feed must still exist after failed resolve: %v", err)
+	}
+	if got.ErrorCount == 0 || got.LastError == "" {
+		t.Errorf("expected error recorded, got count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
+func TestEditFeedAppliesFields(t *testing.T) {
+	st := coretest.NewMemStore()
+	clk := coretest.StubClock{T: time.Unix(1000, 0)}
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, _ := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://e.com/old", nil, false)
+
+	res, err := svc.EditFeed(context.Background(), core.DefaultUserID, f.ID, core.EditFeedInput{
+		Title: "Renamed", URL: "https://e.com/new", CategoryID: nil, FullContent: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.URLChanged || res.CategoryChanged {
+		t.Errorf("got %+v, want URLChanged only", res)
+	}
+	got, _ := st.GetFeed(context.Background(), core.DefaultUserID, f.ID)
+	if got.UserTitle != "Renamed" || got.FeedURL != "https://e.com/new" {
+		t.Errorf("got title=%q url=%q", got.UserTitle, got.FeedURL)
+	}
+}
+
+func TestEditFeedRejectsBadURL(t *testing.T) {
+	st := coretest.NewMemStore()
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, _ := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://e.com/x", nil, false)
+	if _, err := svc.EditFeed(context.Background(), core.DefaultUserID, f.ID, core.EditFeedInput{URL: "javascript:alert(1)"}); !errors.Is(err, core.ErrValidation) {
+		t.Errorf("want ErrValidation, got %v", err)
 	}
 }

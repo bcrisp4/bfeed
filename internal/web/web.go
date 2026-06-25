@@ -45,11 +45,12 @@ type Handler struct {
 	tmpl       map[string]*template.Template
 	imgRewrite func(string) string // nil = image proxy disabled
 	errorLimit int                 // a feed with error_count >= this is flagged stalled in the UI
+	busy       *inflightSet
 }
 
 // New constructs a fully-routed http.Handler for the bfeed web UI.
 func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int) http.Handler {
-	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit}
+	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit, busy: newInflightSet()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
 	if imgHandler != nil {
@@ -59,6 +60,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
 	mux.HandleFunc("GET /feeds/{id}", h.feedEntries)
+	mux.HandleFunc("GET /feeds/{id}/row", h.feedRow)
 	mux.HandleFunc("GET /starred", h.starred)
 	mux.HandleFunc("GET /history", h.history)
 	mux.HandleFunc("GET /categories", h.categoriesIndex)
@@ -69,8 +71,8 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("POST /feeds/{id}/refresh", h.refresh)
 	mux.HandleFunc("POST /feeds/{id}/mark-read", h.markFeedRead)
 	mux.HandleFunc("POST /feeds/{id}/delete", h.deleteFeed)
-	mux.HandleFunc("POST /feeds/{id}/category", h.setFeedCategory)
-	mux.HandleFunc("POST /feeds/{id}/full-content", h.setFeedFullContent)
+	mux.HandleFunc("GET /feeds/{id}/edit", h.feedEditForm)
+	mux.HandleFunc("POST /feeds/{id}", h.editFeed)
 	mux.HandleFunc("POST /categories", h.createCategory)
 	mux.HandleFunc("POST /categories/{id}/rename", h.renameCategory)
 	mux.HandleFunc("POST /categories/{id}/delete", h.deleteCategory)
@@ -100,7 +102,7 @@ func parseTemplates() map[string]*template.Template {
 	pages := map[string][]string{
 		"entries":    {"templates/entries.gohtml", "templates/rows.gohtml"},
 		"entry":      {"templates/entry.gohtml"},
-		"feeds":      {"templates/feeds.gohtml"},
+		"feeds":      {"templates/feeds.gohtml", "templates/rows_feed.gohtml"},
 		"categories": {"templates/categories.gohtml"},
 		"search":     {"templates/search.gohtml", "templates/rows.gohtml"},
 		"settings":   {"templates/settings.gohtml"},
@@ -115,6 +117,8 @@ func parseTemplates() map[string]*template.Template {
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml", "templates/_icons.gohtml"))
+	// Fragment-only template for htmx feed row swaps (refresh, feedRow).
+	out["feedrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows_feed.gohtml", "templates/_icons.gohtml"))
 	return out
 }
 

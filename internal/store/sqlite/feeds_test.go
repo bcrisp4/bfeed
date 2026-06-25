@@ -41,6 +41,35 @@ func TestCreateAndGetFeed(t *testing.T) {
 	}
 }
 
+// SetFeedURL must clear etag/last_modified: those headers belong to the old URL
+// and would cause a spurious 304 against the new host, skipping its content.
+func TestSetFeedURLClearsConditionalHeaders(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	id, err := s.CreateFeed(ctx, &core.Feed{
+		UserID: core.DefaultUserID, FeedURL: "https://old.test/feed", Title: "T",
+		ETag: `"abc"`, LastModified: "Wed, 01 Jan 2025 00:00:00 GMT",
+		NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	if err := s.SetFeedURL(ctx, core.DefaultUserID, id, "https://new.test/feed"); err != nil {
+		t.Fatalf("SetFeedURL: %v", err)
+	}
+	got, err := s.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatalf("GetFeed: %v", err)
+	}
+	if got.FeedURL != "https://new.test/feed" {
+		t.Errorf("feed_url = %q, want the new URL", got.FeedURL)
+	}
+	if got.ETag != "" || got.LastModified != "" {
+		t.Errorf("conditional headers not cleared: etag=%q last_modified=%q", got.ETag, got.LastModified)
+	}
+}
+
 func TestCreateFeedDuplicateURLConflict(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -309,5 +338,27 @@ func TestFeedTTLRoundTrip(t *testing.T) {
 	got2, _ := s.GetFeed(ctx, core.DefaultUserID, fid)
 	if got2.TTL != 2*time.Hour {
 		t.Fatalf("TTL after update = %v, want 2h", got2.TTL)
+	}
+}
+
+func TestSetFeedUserTitle(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	id, err := st.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://e.com/f", Title: "Auto", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, id, "Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.GetFeed(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.UserTitle != "Renamed" || f.DisplayTitle() != "Renamed" {
+		t.Errorf("got UserTitle=%q display=%q", f.UserTitle, f.DisplayTitle())
+	}
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, 9999, "x"); !errors.Is(err, core.ErrNotFound) {
+		t.Errorf("want ErrNotFound for unknown feed, got %v", err)
 	}
 }

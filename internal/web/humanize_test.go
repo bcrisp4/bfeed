@@ -5,6 +5,26 @@ import (
 	"time"
 )
 
+func TestHumanizeUntil(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	cases := []struct {
+		t    time.Time
+		want string
+	}{
+		{now.Add(-time.Minute), ""}, // past → empty
+		{now, ""},                   // now → empty
+		{now.Add(30 * time.Second), "in <1m"},
+		{now.Add(5 * time.Minute), "in 5m"},
+		{now.Add(3 * time.Hour), "in 3h"},
+		{now.Add(48 * time.Hour), "on " + now.Add(48*time.Hour).Format("2 Jan 2006")},
+	}
+	for _, c := range cases {
+		if got := humanizeUntil(c.t, now); got != c.want {
+			t.Errorf("humanizeUntil(%v)=%q want %q", c.t.Sub(now), got, c.want)
+		}
+	}
+}
+
 func TestHumanizeSince(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	cases := []struct {

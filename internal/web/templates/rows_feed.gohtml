@@ -1,0 +1,63 @@
+{{define "feedrow"}}
+<article class="feed{{if .Editing}} editing{{end}}" id="feed-{{.ID}}"
+  {{- if and (or .Refreshing .Pending) (not .Editing)}} hx-get="/feeds/{{.ID}}/row" hx-trigger="every 1500ms" hx-swap="outerHTML"{{end}}>
+  <div class="feed-top">
+    <div class="feed-main">
+      <h3 class="feed-title">
+        {{- if .Pending}}<span class="feed-pending-title">Adding {{.FeedURL}}…</span>
+        {{- else}}<a href="/feeds/{{.ID}}">{{.Title}}</a>{{end}}
+      </h3>
+      <div class="feed-meta">
+        {{- if .Pending}}<span class="pending">resolving feed…</span>
+        {{- else}}
+          <span class="host">{{.Host}}</span>
+          <span class="dot">·</span><span><span class="unread">{{.Unread}} unread</span> / {{.Total}}</span>
+          {{- if .Stalled}}<span class="dot">·</span><span class="stalled">⚠ stalled — {{.LastError}}</span>
+          {{- else if .LastError}}<span class="dot">·</span><span class="err">error: {{.LastError}}</span>{{end}}
+          {{- if .Updated}}<span class="dot">·</span><span>updated {{.Updated}}</span>{{end}}
+          {{- if .Next}}<span class="dot">·</span><span>next {{.Next}}</span>{{end}}
+        {{- end}}
+      </div>
+    </div>
+    <div class="feed-acts">
+      {{- if .Pending}}
+        <button class="act spin" title="Adding" aria-label="Adding" disabled>{{template "ic-refresh"}}</button>
+        <button class="act del" title="Cancel" aria-label="Cancel" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete">{{template "ic-x"}}</button>
+      {{- else}}
+        <button class="act{{if .Refreshing}} spin{{end}}" title="Refresh" aria-label="Refresh"
+          hx-post="/feeds/{{.ID}}/refresh" hx-target="#feed-{{.ID}}" hx-swap="outerHTML"{{if .Refreshing}} disabled{{end}}>{{template "ic-refresh"}}</button>
+        <button class="act" title="Edit" aria-label="Edit" hx-get="/feeds/{{.ID}}/edit" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">{{template "ic-edit"}}</button>
+        <button class="act del" title="Delete" aria-label="Delete" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
+          hx-confirm="Delete feed and all its entries?">{{template "ic-trash"}}</button>
+      {{- end}}
+    </div>
+  </div>
+  {{if .Editing}}{{template "feededit" .}}{{end}}
+</article>
+{{end}}
+
+{{define "feedgrouphead"}}
+<div class="fm-group-head" id="feed-group-{{.CatID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Title}} <span class="g-count">· {{.FeedCount}} feeds · {{.Unread}} unread</span></div>
+{{end}}
+
+{{define "feededit"}}
+<form class="feed-edit" hx-post="/feeds/{{.ID}}" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">
+  <div class="fld"><label for="ft-{{.ID}}">Title</label>
+    <input id="ft-{{.ID}}" type="text" name="title" value="{{.UserTitle}}" placeholder="{{.Title}}"></div>
+  <div class="fld"><label for="fu-{{.ID}}">Feed URL</label>
+    <input id="fu-{{.ID}}" type="url" name="url" value="{{.FeedURL}}" required></div>
+  <div class="row2">
+    <div class="fld" style="flex:1"><label for="fc-{{.ID}}">Category</label>
+      <select id="fc-{{.ID}}" name="category_id">
+        <option value="">Uncategorised</option>
+        {{range .Cats}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Title}}</option>{{end}}
+      </select></div>
+    <label class="opt"><input type="checkbox" name="full_content"{{if .FullContent}} checked{{end}}> Fetch full content</label>
+  </div>
+  {{if .EditError}}<p class="form-error">{{.EditError}}</p>{{end}}
+  <div class="acts">
+    <button class="primary" type="submit">Save</button>
+    <button type="button" hx-get="/feeds/{{.ID}}/row" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">Cancel</button>
+  </div>
+</form>
+{{end}}

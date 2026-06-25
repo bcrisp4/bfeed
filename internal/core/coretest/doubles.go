@@ -2,8 +2,10 @@ package coretest
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -56,10 +58,34 @@ func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte) (string, e
 	return e.HTML, e.Err
 }
 
+// BlockingFetcher signals on started (once), blocks until release is closed,
+// then errors. The once guard keeps it safe for multi-fetch call paths (e.g.
+// HTML discovery, which fetches twice) — a bare close would panic on the second
+// Fetch.
+func BlockingFetcher(started chan<- struct{}, release <-chan struct{}) core.Fetcher {
+	return blockingFetcher{started: started, release: release, once: &sync.Once{}}
+}
+
+type blockingFetcher struct {
+	started chan<- struct{}
+	release <-chan struct{}
+	once    *sync.Once
+}
+
+func (f blockingFetcher) Fetch(ctx context.Context, _ core.FetchRequest) (*core.FetchResponse, error) {
+	f.once.Do(func() { close(f.started) })
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+	}
+	return nil, errors.New("released")
+}
+
 var (
 	_ core.Fetcher    = StubFetcher{}
 	_ core.FeedParser = StubParser{}
 	_ core.Sanitizer  = PassSanitizer{}
 	_ core.Clock      = StubClock{}
 	_ core.Extractor  = StubExtractor{}
+	_ core.Fetcher    = blockingFetcher{}
 )

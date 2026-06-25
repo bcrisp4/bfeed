@@ -169,9 +169,10 @@ func TestSetFeedCategoryAssignsAndClears(t *testing.T) {
 	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
 
-	assign := func(val string) int {
-		form := strings.NewReader("category_id=" + val)
-		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+	// POST /feeds/{id} is the unified edit save. Category change returns 204+HX-Refresh.
+	assign := func(catVal string) int {
+		body := strings.NewReader("title=&url=https://a/f&category_id=" + catVal)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10), body)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -205,11 +206,46 @@ func TestFeedsPageGroupsByCategory(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, `<h2 class="cat-heading">News</h2>`) || !strings.Contains(body, `<h2 class="cat-heading">Uncategorised</h2>`) {
-		t.Fatalf("feeds page missing category headings: code=%d\n%s", rec.Code, body)
+	if rec.Code != 200 {
+		t.Fatalf("feeds page status %d", rec.Code)
+	}
+	// Group heads are rendered by the feedgrouphead template using id="feed-group-{catID}".
+	if !strings.Contains(body, `id="feed-group-`) {
+		t.Fatalf("feeds page missing group head id: code=%d\n%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "News") || !strings.Contains(body, "Uncategorised") {
+		t.Fatalf("feeds page missing group titles:\n%s", body)
 	}
 	if !strings.Contains(body, "InCat") || !strings.Contains(body, "NoCat") {
 		t.Fatalf("feeds page missing feeds:\n%s", body)
+	}
+	// The new add form uses "Add feed", not "Subscribe".
+	if !strings.Contains(body, "Add feed") {
+		t.Fatalf("feeds page missing 'Add feed' button:\n%s", body)
+	}
+}
+
+func TestFeedsPageNoOOBInlineGroupHead(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
+	store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", Title: "A", CategoryID: &catID, NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("feeds page status %d\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// Inline group heads on the full page must NOT carry hx-swap-oob — that
+	// attribute belongs only on OOB fragment responses from GET /feeds/{id}/row.
+	if strings.Contains(body, "hx-swap-oob") {
+		t.Fatalf("feeds page must not contain hx-swap-oob (OOB only belongs on row fragments):\n%s", body)
+	}
+	// But the group head id must still be present.
+	if !strings.Contains(body, `id="feed-group-`) {
+		t.Fatalf("feeds page missing group head id:\n%s", body)
 	}
 }
 
@@ -245,9 +281,10 @@ func TestSetFeedCategoryRejectsMalformedID(t *testing.T) {
 	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://a/f", CategoryID: &catID, NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
 
+	// POST /feeds/{id} is the unified edit save; parseCategoryID still rejects bad values.
 	for _, bad := range []string{"abc", "0", "-5"} {
-		form := strings.NewReader("category_id=" + bad)
-		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/category", form)
+		form := strings.NewReader("title=&url=https://a/f&category_id=" + bad)
+		req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10), form)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -428,14 +465,16 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 		t.Fatalf("subscribe did not set FetchFullContent: %+v", feeds)
 	}
 
-	// Toggle off.
+	// Toggle off via the unified edit endpoint (full_content absent = off).
+	// Use the same URL to avoid URLChanged; category_id empty = uncategorised.
 	id := feeds[0].ID
-	off := url.Values{"full_content": {"off"}}
-	req = httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(id), 10)+"/full-content", strings.NewReader(off.Encode()))
+	off := url.Values{"title": {""}, "url": {"https://x.example/feed"}, "category_id": {""}}
+	req = httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(id), 10), strings.NewReader(off.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
+	// No category or URL change → row swap (200); full_content cleared.
+	if rec.Code != http.StatusOK {
 		t.Fatalf("toggle status %d, body: %s", rec.Code, rec.Body.String())
 	}
 
@@ -552,10 +591,13 @@ func TestFeedsPageShowsCounts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	for _, want := range []string{"2 unread", "2 total"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("feeds page missing count %q:\n%s", want, body)
-		}
+	// The feedrow template renders: <span class="unread">N unread</span> / N
+	// so "unread" appears as part of the meta line; total count follows the slash.
+	if !strings.Contains(body, "2 unread") {
+		t.Fatalf("feeds page missing unread count:\n%s", body)
+	}
+	if !strings.Contains(body, "/ 2") {
+		t.Fatalf("feeds page missing total count (shown as '/ N'):\n%s", body)
 	}
 }
 
@@ -653,13 +695,15 @@ func TestFeedsPageShowsStalledBadge(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "feed-stalled") || !strings.Contains(body, "⚠ stalled") {
+	// feedrow template emits <span class="stalled">⚠ stalled — ...</span>
+	if !strings.Contains(body, `class="stalled"`) || !strings.Contains(body, "⚠ stalled") {
 		t.Fatalf("stalled feed missing badge:\n%s", body)
 	}
-	// the healthy feed (error_count 1 < 3) shows the inline error, not the badge
-	if strings.Count(body, "feed-stalled") != 1 {
-		t.Fatalf("expected exactly one stalled badge, body:\n%s", body)
+	// the healthy feed (error_count 1 < 3) shows the inline error, not the stalled badge
+	if strings.Count(body, `class="stalled"`) != 1 {
+		t.Fatalf("expected exactly one stalled element, body:\n%s", body)
 	}
+	// feedrow emits <span class="err">error: ...</span> for non-stalled errors
 	if !strings.Contains(body, "error: blip") {
 		t.Fatalf("healthy feed should show inline error, not badge:\n%s", body)
 	}

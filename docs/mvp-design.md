@@ -226,6 +226,13 @@ enforcement lives here; web handlers are dumb translation.
 
 - **FeedService** — subscribe (discover + validate + dedupe + one immediate fetch + set first
   `NextCheckAt`), list, delete (cascade + tombstones), force-refresh-now.
+
+  > **As built (iter 7):** feed management is a redesigned grouped page with non-blocking
+  > subscribe/refresh (background goroutine on `context.Background()` + in-memory `inflightSet`),
+  > a self-polling row fragment (`GET /feeds/{id}/row`), `hx-swap-oob` group-head counts, and an
+  > inline edit panel (title/url/category/full-content via `EditFeed`). `subscribe` is split into
+  > `CreateSubscription` + background `ResolveAndIngest`. Rename via the `feeds.user_title`
+  > override column (`Feed.DisplayTitle()`).
 - **EntryService** — list/browse (by feed, status, starred), get one, mark read/unread, star,
   delete one (→ tombstone). Read/star state is per (single) user.
 - **Poller** — fixed-interval scheduler + one bounded worker pool. See §9.

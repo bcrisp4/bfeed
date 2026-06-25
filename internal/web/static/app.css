@@ -193,3 +193,46 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 /* lift the date above the stretched anchor so its hover tooltip stays reachable
    (the trade-off: the date itself isn't a click-to-open target, the rest of the row is) */
 #entries .entry .meta time{position:relative;z-index:1}
+
+/* feed manager */
+.fm-add{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin:var(--sp-4) 0 var(--sp-5)}
+.fm-add input[type=url]{flex:1;min-width:16rem}
+.fm-add .opt{font-family:var(--font-mono);font-size:.72rem;color:var(--muted);display:inline-flex;align-items:center;gap:.35rem}
+.fm-group{margin-top:var(--sp-5)}
+.fm-group-head{display:flex;align-items:baseline;gap:var(--sp-2);font-family:var(--font-mono);font-size:.7rem;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding-bottom:var(--sp-1);border-bottom:1px solid var(--rule)}
+.fm-group-head .g-count{color:var(--faint);font-size:.66rem;text-transform:none;letter-spacing:0}
+.feed{position:relative;padding:var(--sp-3) 0;border-bottom:1px solid var(--rule)}
+.feed-top{display:flex;align-items:flex-start;gap:var(--sp-3)}
+.feed-main{flex:1;min-width:0}
+.feed-title{font-family:var(--font-serif);font-size:1rem;font-weight:600;line-height:1.3;margin:0}
+.feed-title a{color:var(--ink);text-decoration:none}
+.feed-title a:hover{text-decoration:underline}
+.feed-pending-title{color:var(--muted)}
+.feed-meta{font-family:var(--font-mono);font-size:.6875rem;color:var(--faint);margin-top:3px;
+  display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.feed-meta .dot{color:var(--rule)}
+.feed-meta .host{color:var(--muted)}
+.feed-meta .unread{color:var(--accent);font-weight:600}
+.feed-meta .err,.feed-meta .stalled{color:#c0392b;font-weight:600}
+.feed-meta .pending{color:var(--star);font-weight:600}
+.feed-acts{display:flex;align-items:center;gap:.15rem;flex-shrink:0}
+.feed-acts .act{display:inline-flex;align-items:center;justify-content:center;width:2.1rem;height:2.1rem;
+  border:0;border-radius:var(--radius);background:none;color:var(--faint);cursor:pointer;
+  transition:color var(--ease),background var(--ease)}
+.feed-acts .act svg{width:1.15rem;height:1.15rem;display:block}
+.feed-acts .act:hover{color:var(--ink);background:var(--surface-2)}
+.feed-acts .act.del:hover{color:var(--accent)}
+.feed-acts .act.spin{color:var(--accent)}
+.feed-acts .act.spin svg{animation:fmspin 1s linear infinite}
+@keyframes fmspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.feed-acts .act.spin svg{animation:none}}
+.feed-edit{margin:var(--sp-3) 0 var(--sp-1);padding:var(--sp-3);background:var(--surface-2);
+  border:1px solid var(--rule);border-radius:var(--radius);display:grid;gap:var(--sp-3);max-width:34rem}
+.feed-edit .fld{display:grid;gap:.3rem}
+.feed-edit .fld label{font-family:var(--font-mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.feed-edit .row2{display:flex;gap:var(--sp-3);align-items:flex-end;flex-wrap:wrap}
+.feed-edit .opt{font-family:var(--font-mono);font-size:.74rem;color:var(--ink-soft);display:inline-flex;align-items:center;gap:.4rem;min-height:var(--tap)}
+.feed-edit .acts{display:flex;gap:var(--sp-2)}
+@media (hover:none){.feed-acts .act{width:var(--tap);height:var(--tap)}}
+@media (max-width:639px){.feed-acts .act{width:var(--tap);height:var(--tap)}}
