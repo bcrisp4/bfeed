@@ -26,7 +26,7 @@ func newWeb(t *testing.T) (http.Handler, *coretest.MemStore) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil), store
+	return web.New(fs, es, cs, ss, log, nil, nil, 20), store
 }
 
 func TestUnreadListRenders(t *testing.T) {
@@ -408,7 +408,7 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	srv := web.New(fs, es, cs, ss, log, nil, nil)
+	srv := web.New(fs, es, cs, ss, log, nil, nil, 20)
 
 	// Subscribe with full_content checkbox checked.
 	form := url.Values{"url": {"https://x.example/feed"}, "full_content": {"on"}}
@@ -597,7 +597,7 @@ func TestReaderRewritesImagesWhenProxyOn(t *testing.T) {
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
 	rewrite := func(u string) string { return "/img?u=" + u }
-	h := web.New(fs, es, cs, ss, log, nil, rewrite)
+	h := web.New(fs, es, cs, ss, log, nil, rewrite, 20)
 
 	ctx := context.Background()
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
@@ -626,5 +626,41 @@ func TestReaderKeepsOriginWhenProxyOff(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), "https://o.test/p.jpg") {
 		t.Fatalf("origin src should be untouched when proxy off:\n%s", rec.Body.String())
+	}
+}
+
+func TestFeedsPageShowsStalledBadge(t *testing.T) {
+	store := coretest.NewMemStore()
+	log := coretest.DiscardLogger()
+	fs := core.NewFeedService(store, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{}, log,
+		core.FeedServiceConfig{Reschedule: core.RescheduleConfig{Interval: time.Minute, MaxBackoff: time.Hour}, Jitter: func(time.Duration) time.Duration { return 0 }})
+	es := core.NewEntryService(store, log)
+	cs := core.NewCategoryService(store, log)
+	ss := core.NewSearchService(store, log)
+	h := web.New(fs, es, cs, ss, log, nil, nil, 3) // error limit = 3
+
+	ctx := context.Background()
+	now := time.Unix(1, 0)
+	// stalled: error_count >= limit
+	store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/dead", Title: "Dead", ErrorCount: 5, LastError: "boom", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	// healthy: under the limit
+	store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/ok", Title: "OK", ErrorCount: 1, LastError: "blip", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "feed-stalled") || !strings.Contains(body, "⚠ stalled") {
+		t.Fatalf("stalled feed missing badge:\n%s", body)
+	}
+	// the healthy feed (error_count 1 < 3) shows the inline error, not the badge
+	if strings.Count(body, "feed-stalled") != 1 {
+		t.Fatalf("expected exactly one stalled badge, body:\n%s", body)
+	}
+	if !strings.Contains(body, "error: blip") {
+		t.Fatalf("healthy feed should show inline error, not badge:\n%s", body)
 	}
 }
