@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 	"github.com/bcrisp4/bfeed/internal/core/coretest"
@@ -93,6 +94,50 @@ func TestEditSaveBadURLReturns422WithPanel(t *testing.T) {
 	if !strings.Contains(body, `class="form-error"`) {
 		t.Errorf("422 response should show form-error, body=%s", body)
 	}
+}
+
+// TestEditFormOnRefreshingFeedHasNoPollTrigger verifies that GET /feeds/{id}/edit
+// for a feed that is currently in-flight (Refreshing=true) renders the edit panel
+// but does NOT carry the self-polling hx-trigger. Without this guard the poll
+// would fire ~1.5s later and silently discard the open edit form.
+func TestEditFormOnRefreshingFeedHasNoPollTrigger(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	fetcher := coretest.BlockingFetcher(started, release)
+	h, st := newTestHandler(t, fetcher)
+	id := seedFeed(t, st)
+
+	// Kick off a background refresh so the feed is in-flight.
+	refreshReq := httptest.NewRequest("POST", "/feeds/"+itoa(id)+"/refresh", nil)
+	refreshRec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { h.ServeHTTP(refreshRec, refreshReq); close(done) }()
+
+	// Wait for the background goroutine to reach the fetcher before opening edit.
+	select {
+	case <-done:
+		// handler returned already — check that refresh is in-flight (started)
+	case <-started:
+		// goroutine is blocking inside Fetch — feed is definitely in-flight
+	case <-time.After(2 * time.Second):
+		t.Fatal("refresh did not start within timeout")
+	}
+	<-done // handler itself is non-blocking; drain it
+
+	// Feed is now in-flight (Refreshing=true). Open the edit panel.
+	rec := do(t, h, "GET", "/feeds/"+itoa(id)+"/edit")
+	body := rec.Body.String()
+
+	// Edit panel must be present.
+	if !strings.Contains(body, `class="feed-edit"`) {
+		t.Errorf("edit panel missing from refreshing feed, body=%s", body)
+	}
+	// Poll trigger must be suppressed while editing to prevent form discard.
+	if strings.Contains(body, `hx-trigger="every 1500ms"`) {
+		t.Errorf("edit panel for refreshing feed must not carry hx-trigger, body=%s", body)
+	}
+
+	close(release) // let the background goroutine finish
 }
 
 // TestEditSaveURLChangedSwapsRefreshingRow verifies that when the feed URL is

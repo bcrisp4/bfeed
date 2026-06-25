@@ -451,7 +451,7 @@ func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 	if res.URLChanged {
 		h.startRefresh(id)
 	}
-	h.renderFeedRow(w, r, id, false)
+	h.renderFeedRow(w, r, id)
 }
 
 // renderEditError re-renders the edit panel with an inline error message and
@@ -498,7 +498,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.startRefresh(id)
-	h.renderFeedRow(w, r, id, false)
+	h.renderFeedRow(w, r, id)
 }
 
 // startRefresh spawns a background poll if one is not already running for id.
@@ -518,9 +518,8 @@ func (h *Handler) startRefresh(id core.ID) {
 
 // renderFeedRow renders the single-row fragment for id. When the feed is not in
 // flight it also emits an OOB group-head update so aggregate counts stay fresh
-// without a full reload. withOOB parameter is reserved for future use by the
-// inline list render (Task 7) to suppress the OOB block.
-func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.ID, _ bool) {
+// without a full reload.
+func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.ID) {
 	ctx := r.Context()
 	f, err := h.feeds.Get(ctx, uid, id)
 	if err != nil {
@@ -547,7 +546,7 @@ func (h *Handler) feedRow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.renderFeedRow(w, r, id, true)
+	h.renderFeedRow(w, r, id)
 }
 
 // writeGroupHeadOOB renders an out-of-band swap for the feed's category group

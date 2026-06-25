@@ -1,6 +1,6 @@
 {{define "feedrow"}}
 <article class="feed{{if .Editing}} editing{{end}}" id="feed-{{.ID}}"
-  {{- if or .Refreshing .Pending}} hx-get="/feeds/{{.ID}}/row" hx-trigger="every 1500ms" hx-swap="outerHTML"{{end}}>
+  {{- if and (or .Refreshing .Pending) (not .Editing)}} hx-get="/feeds/{{.ID}}/row" hx-trigger="every 1500ms" hx-swap="outerHTML"{{end}}>
   <div class="feed-top">
     <div class="feed-main">
       <h3 class="feed-title">
