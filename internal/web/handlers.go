@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -54,14 +55,19 @@ type feedsCatVM struct {
 
 type feedRowVM struct {
 	ID          core.ID
-	Title       string
+	Title       string // display title (user override or poll-owned)
 	FeedURL     string
+	Host        string
 	LastError   string
 	CategoryID  int64 // 0 = uncategorised
 	FullContent bool
 	Unread      int
 	Total       int
-	Stalled     bool // error_count >= configured error limit
+	Stalled     bool   // error_count >= configured error limit
+	Updated     string // "2h ago"; "" if never checked
+	Next        string // "in 1h"; "" if past/unknown
+	Refreshing  bool   // background refresh in flight (has CheckedAt)
+	Pending     bool   // background subscribe in flight (no CheckedAt yet)
 }
 
 type feedGroupVM struct {
@@ -189,6 +195,38 @@ func emptyFor(f core.EntryFilter) (msg, sub string) {
 	}
 }
 
+func feedHost(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return rawURL
+}
+
+func (h *Handler) buildFeedRow(f *core.Feed, st core.FeedEntryStats, now time.Time) feedRowVM {
+	var cid int64
+	if f.CategoryID != nil {
+		cid = int64(*f.CategoryID)
+	}
+	inFlight := h.busy.has(f.ID)
+	row := feedRowVM{
+		ID: f.ID, Title: f.DisplayTitle(), FeedURL: f.FeedURL, Host: feedHost(f.FeedURL),
+		LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent,
+		Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit,
+		Next: humanizeUntil(f.NextCheckAt, now),
+	}
+	if f.CheckedAt != nil {
+		row.Updated = humanizeSince(*f.CheckedAt, now)
+	}
+	if inFlight {
+		if f.CheckedAt == nil {
+			row.Pending = true
+		} else {
+			row.Refreshing = true
+		}
+	}
+	return row
+}
+
 func toCatVMs(cats []*core.Category) []feedsCatVM {
 	out := make([]feedsCatVM, 0, len(cats))
 	for _, c := range cats {
@@ -246,14 +284,8 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	if statsErr != nil {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
-	row := func(f *core.Feed) feedRowVM {
-		var cid int64
-		if f.CategoryID != nil {
-			cid = int64(*f.CategoryID)
-		}
-		st := stats[f.ID]
-		return feedRowVM{ID: f.ID, Title: f.Title, FeedURL: f.FeedURL, LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent, Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit}
-	}
+	now := time.Now()
+	row := func(f *core.Feed) feedRowVM { return h.buildFeedRow(f, stats[f.ID], now) }
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM
 	for _, f := range feeds {
