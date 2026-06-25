@@ -2,6 +2,7 @@ package coretest
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"time"
@@ -56,10 +57,30 @@ func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte) (string, e
 	return e.HTML, e.Err
 }
 
+// BlockingFetcher signals on started, blocks until release is closed, then errors.
+func BlockingFetcher(started chan<- struct{}, release <-chan struct{}) core.Fetcher {
+	return blockingFetcher{started, release}
+}
+
+type blockingFetcher struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (f blockingFetcher) Fetch(ctx context.Context, _ core.FetchRequest) (*core.FetchResponse, error) {
+	close(f.started)
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+	}
+	return nil, errors.New("released")
+}
+
 var (
 	_ core.Fetcher    = StubFetcher{}
 	_ core.FeedParser = StubParser{}
 	_ core.Sanitizer  = PassSanitizer{}
 	_ core.Clock      = StubClock{}
 	_ core.Extractor  = StubExtractor{}
+	_ core.Fetcher    = blockingFetcher{}
 )

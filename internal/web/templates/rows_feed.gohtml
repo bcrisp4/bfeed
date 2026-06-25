@@ -1,0 +1,44 @@
+{{define "feedrow"}}
+<article class="feed{{if .Editing}} editing{{end}}" id="feed-{{.ID}}"
+  {{- if or .Refreshing .Pending}} hx-get="/feeds/{{.ID}}/row" hx-trigger="every 1500ms" hx-swap="outerHTML"{{end}}>
+  <div class="feed-top">
+    <div class="feed-main">
+      <h3 class="feed-title">
+        {{- if .Pending}}<span class="feed-pending-title">Adding {{.FeedURL}}…</span>
+        {{- else}}<a href="/feeds/{{.ID}}">{{.Title}}</a>{{end}}
+      </h3>
+      <div class="feed-meta">
+        {{- if .Pending}}<span class="pending">resolving feed…</span>
+        {{- else}}
+          <span class="host">{{.Host}}</span>
+          {{- if .Refreshing}}<span class="dot">·</span><span class="pending">refreshing…</span>{{end}}
+          <span class="dot">·</span><span><span class="unread">{{.Unread}} unread</span> / {{.Total}}</span>
+          {{- if .Stalled}}<span class="dot">·</span><span class="stalled">⚠ stalled — {{.LastError}}</span>
+          {{- else if .LastError}}<span class="dot">·</span><span class="err">error: {{.LastError}}</span>{{end}}
+          {{- if .Updated}}<span class="dot">·</span><span>updated {{.Updated}}</span>{{end}}
+          {{- if and .Next (not .Refreshing)}}<span class="dot">·</span><span>next {{.Next}}</span>{{end}}
+        {{- end}}
+      </div>
+    </div>
+    <div class="feed-acts">
+      {{- if .Pending}}
+        <button class="act spin" title="Adding" disabled>{{template "ic-refresh"}}</button>
+        <button class="act del" title="Cancel" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete">{{template "ic-x"}}</button>
+      {{- else}}
+        <button class="act{{if .Refreshing}} spin{{end}}" title="Refresh"
+          hx-post="/feeds/{{.ID}}/refresh" hx-target="#feed-{{.ID}}" hx-swap="outerHTML"{{if .Refreshing}} disabled{{end}}>{{template "ic-refresh"}}</button>
+        <button class="act" title="Edit" hx-get="/feeds/{{.ID}}/edit" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">{{template "ic-edit"}}</button>
+        <button class="act del" title="Delete" hx-post="/feeds/{{.ID}}/delete" hx-target="#feed-{{.ID}}" hx-swap="delete"
+          hx-confirm="Delete feed and all its entries?">{{template "ic-trash"}}</button>
+      {{- end}}
+    </div>
+  </div>
+  {{if .Editing}}{{template "feededit" .}}{{end}}
+</article>
+{{end}}
+
+{{define "feedgrouphead"}}
+<div class="fm-group-head" id="feed-group-{{.CatID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Title}} <span class="g-count">· {{.FeedCount}} feeds · {{.Unread}} unread</span></div>
+{{end}}
+
+{{define "feededit"}}{{end}}

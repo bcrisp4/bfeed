@@ -68,11 +68,20 @@ type feedRowVM struct {
 	Next        string // "in 1h"; "" if past/unknown
 	Refreshing  bool   // background refresh in flight (has CheckedAt)
 	Pending     bool   // background subscribe in flight (no CheckedAt yet)
+	Editing     bool   // edit form is open (Task 8); always false until then
 }
 
 type feedGroupVM struct {
 	Title string
 	Feeds []feedRowVM
+}
+
+type feedGroupHeadVM struct {
+	CatID     int64
+	Title     string
+	FeedCount int
+	Unread    int
+	OOB       bool
 }
 
 type feedsPageVM struct {
@@ -393,10 +402,87 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.feeds.Refresh(r.Context(), uid, id); err != nil {
-		h.log.Warn("refresh feed", "feed_id", int64(id), "error", err)
+	h.startRefresh(id)
+	h.renderFeedRow(w, r, id, false)
+}
+
+// startRefresh spawns a background poll if one is not already running for id.
+func (h *Handler) startRefresh(id core.ID) {
+	if !h.busy.start(id) {
+		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		defer h.busy.done(id)
+		if err := h.feeds.Refresh(ctx, uid, id); err != nil {
+			h.log.Warn("background refresh", "feed_id", int64(id), "error", err)
+		}
+	}()
+}
+
+// renderFeedRow renders the single-row fragment for id. When the feed is not in
+// flight it also emits an OOB group-head update so aggregate counts stay fresh
+// without a full reload. withOOB parameter is reserved for future use by the
+// inline list render (Task 7) to suppress the OOB block.
+func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.ID, _ bool) {
+	ctx := r.Context()
+	f, err := h.feeds.Get(ctx, uid, id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	stats, _ := h.feeds.EntryStats(ctx, uid)
+	now := time.Now()
+	row := h.buildFeedRow(f, stats[id], now)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
+		h.log.Error("template execute", "template", "feedrow", "error", err)
+		return
+	}
+	if !row.Refreshing && !row.Pending {
+		h.writeGroupHeadOOB(ctx, w, f, stats, now)
+	}
+}
+
+// feedRow handles GET /feeds/{id}/row — the self-polling target used by the
+// refreshing row fragment.
+func (h *Handler) feedRow(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	h.renderFeedRow(w, r, id, true)
+}
+
+// writeGroupHeadOOB renders an out-of-band swap for the feed's category group
+// head with recomputed feed and unread counts.
+func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats, _ time.Time) {
+	feeds, err := h.feeds.List(ctx, uid)
+	if err != nil {
+		return
+	}
+	var catID int64
+	if f.CategoryID != nil {
+		catID = int64(*f.CategoryID)
+	}
+	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised"}
+	if catID != 0 {
+		if c, err := h.cats.Get(ctx, uid, core.ID(catID)); err == nil {
+			head.Title = c.Title
+		}
+	}
+	for _, ff := range feeds {
+		var fc int64
+		if ff.CategoryID != nil {
+			fc = int64(*ff.CategoryID)
+		}
+		if fc == catID {
+			head.FeedCount++
+			head.Unread += stats[ff.ID].Unread
+		}
+	}
+	_ = h.tmpl["feedrow"].ExecuteTemplate(w, "feedgrouphead", head)
 }
 
 func (h *Handler) markFeedRead(w http.ResponseWriter, r *http.Request) {

@@ -60,6 +60,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
 	mux.HandleFunc("GET /feeds/{id}", h.feedEntries)
+	mux.HandleFunc("GET /feeds/{id}/row", h.feedRow)
 	mux.HandleFunc("GET /starred", h.starred)
 	mux.HandleFunc("GET /history", h.history)
 	mux.HandleFunc("GET /categories", h.categoriesIndex)
@@ -101,7 +102,7 @@ func parseTemplates() map[string]*template.Template {
 	pages := map[string][]string{
 		"entries":    {"templates/entries.gohtml", "templates/rows.gohtml"},
 		"entry":      {"templates/entry.gohtml"},
-		"feeds":      {"templates/feeds.gohtml"},
+		"feeds":      {"templates/feeds.gohtml", "templates/rows_feed.gohtml"},
 		"categories": {"templates/categories.gohtml"},
 		"search":     {"templates/search.gohtml", "templates/rows.gohtml"},
 		"settings":   {"templates/settings.gohtml"},
@@ -116,6 +117,8 @@ func parseTemplates() map[string]*template.Template {
 	}
 	// Fragment-only template for htmx row swaps (toggleRead, toggleStar).
 	out["entryrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows.gohtml", "templates/_icons.gohtml"))
+	// Fragment-only template for htmx feed row swaps (refresh, feedRow).
+	out["feedrow"] = template.Must(template.ParseFS(templatesFS, "templates/rows_feed.gohtml", "templates/_icons.gohtml"))
 	return out
 }
 
