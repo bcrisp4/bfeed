@@ -40,3 +40,6 @@ FROM entries WHERE user_id = ? GROUP BY feed_id;
 
 -- name: SetFeedUserTitle :execrows
 UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?;
+
+-- name: SetFeedURL :execrows
+UPDATE feeds SET feed_url = ? WHERE id = ? AND user_id = ?;

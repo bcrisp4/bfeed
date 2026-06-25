@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -269,5 +270,52 @@ func TestPollRefreshesTTL(t *testing.T) {
 	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
 	if got.TTL != 90*time.Minute {
 		t.Fatalf("TTL after poll = %v, want 90m", got.TTL)
+	}
+}
+
+func TestCreateSubscriptionPersistsWithoutFetch(t *testing.T) {
+	st := coretest.NewMemStore()
+	// Fetcher that fails if called — proves CreateSubscription does no network I/O.
+	fetcher := coretest.StubFetcher{Err: errors.New("must not fetch")}
+	svc := core.NewFeedService(st, fetcher, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1000, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+
+	f, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://example.com/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if f.ID == 0 {
+		t.Fatal("expected persisted feed with id")
+	}
+	if f.CheckedAt != nil {
+		t.Error("new subscription must have CheckedAt == nil (pending)")
+	}
+	if f.DisplayTitle() != "https://example.com/feed.xml" {
+		t.Errorf("pending title should fall back to URL, got %q", f.DisplayTitle())
+	}
+}
+
+func TestCreateSubscriptionRejectsBadURL(t *testing.T) {
+	st := coretest.NewMemStore()
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1000, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	if _, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "not-a-url", nil, false); !errors.Is(err, core.ErrValidation) {
+		t.Errorf("want ErrValidation, got %v", err)
+	}
+}
+
+func TestResolveAndIngestRecordsErrorKeepsRow(t *testing.T) {
+	st := coretest.NewMemStore()
+	clk := coretest.StubClock{T: time.Unix(1000, 0)}
+	svc := core.NewFeedService(st, coretest.StubFetcher{Err: errors.New("dead host")}, coretest.StubParser{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, err := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://dead.example/feed", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.ResolveAndIngest(context.Background(), f)
+	got, err := st.GetFeed(context.Background(), core.DefaultUserID, f.ID)
+	if err != nil {
+		t.Fatalf("feed must still exist after failed resolve: %v", err)
+	}
+	if got.ErrorCount == 0 || got.LastError == "" {
+		t.Errorf("expected error recorded, got count=%d err=%q", got.ErrorCount, got.LastError)
 	}
 }

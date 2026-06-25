@@ -195,3 +195,14 @@ func (s *Store) SetFeedUserTitle(ctx context.Context, userID, feedID core.ID, ti
 	}
 	return nil
 }
+
+func (s *Store) SetFeedURL(ctx context.Context, userID, feedID core.ID, url string) error {
+	n, err := s.q.SetFeedURL(ctx, sqlc.SetFeedURLParams{FeedUrl: url, ID: int64(feedID), UserID: int64(userID)})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return core.ErrNotFound
+	}
+	return nil
+}

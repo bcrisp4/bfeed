@@ -289,6 +289,24 @@ func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContent
 	return result.RowsAffected()
 }
 
+const setFeedURL = `-- name: SetFeedURL :execrows
+UPDATE feeds SET feed_url = ? WHERE id = ? AND user_id = ?
+`
+
+type SetFeedURLParams struct {
+	FeedUrl string
+	ID      int64
+	UserID  int64
+}
+
+func (q *Queries) SetFeedURL(ctx context.Context, arg SetFeedURLParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setFeedURL, arg.FeedUrl, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setFeedUserTitle = `-- name: SetFeedUserTitle :execrows
 UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?
 `

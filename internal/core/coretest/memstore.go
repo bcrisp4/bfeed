@@ -448,6 +448,19 @@ func (s *MemStore) SetFeedUserTitle(_ context.Context, u, feedID core.ID, title 
 	return nil
 }
 
+func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.feeds[feedID]
+	if !ok || f.UserID != u {
+		return core.ErrNotFound
+	}
+	cp := *f
+	cp.FeedURL = url
+	s.feeds[feedID] = &cp
+	return nil
+}
+
 func (s *MemStore) SetFeedCategory(_ context.Context, u, feedID core.ID, categoryID *core.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

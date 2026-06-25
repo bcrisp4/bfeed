@@ -97,9 +97,10 @@ func (s *FeedService) ensureCategoryOwned(ctx context.Context, userID ID, catego
 	return nil
 }
 
-// Subscribe validates the URL, fetches it (discovering the feed if HTML), parses,
-// creates the feed, runs an initial poll to populate entries, and sets NextCheckAt.
-func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
+// CreateSubscription validates the URL and category and persists a pending feed
+// row (no network I/O). The feed has CheckedAt == nil and a URL-fallback Title
+// until ResolveAndIngest runs. Returns the feed with ID set.
+func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
@@ -107,14 +108,9 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 	if err := s.ensureCategoryOwned(ctx, userID, categoryID); err != nil {
 		return nil, err
 	}
-	feedURL, pf, resp, err := s.resolveFeed(ctx, rawURL)
-	if err != nil {
-		return nil, err
-	}
 	now := s.clk.Now()
 	f := &Feed{
-		UserID: userID, CategoryID: categoryID, FeedURL: feedURL, SiteURL: pf.SiteURL, Title: feedTitle(pf.Title, feedURL),
-		Description: pf.Description, ETag: resp.ETag, LastModified: resp.LastModified, TTL: pf.TTL,
+		UserID: userID, CategoryID: categoryID, FeedURL: rawURL, Title: feedTitle("", rawURL),
 		NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: fetchFullContent,
 	}
 	id, err := s.store.CreateFeed(ctx, f)
@@ -122,15 +118,38 @@ func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, c
 		return nil, err
 	}
 	f.ID = id
-	if err := s.ingest(ctx, f, pf); err != nil {
-		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
+	return f, nil
+}
+
+// ResolveAndIngest fetches and parses the feed (with HTML discovery), persists a
+// discovered/changed URL, ingests entries, and reschedules. On any failure it
+// records the error on the feed (so a pending row becomes an error row) and
+// returns it. Intended to run in a background goroutine.
+func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
+	feedURL, pf, resp, err := s.resolveFeed(ctx, f.FeedURL)
+	if err != nil {
+		return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
+	}
+	if feedURL != f.FeedURL {
+		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL); err != nil {
+			return err
+		}
+		f.FeedURL = feedURL
+	}
+	return s.recordSuccess(ctx, f, s.clk.Now(), resp, pf)
+}
+
+// Subscribe is the synchronous convenience used by non-web callers and tests:
+// create the row, then resolve+ingest inline. On resolve failure it rolls the
+// partial subscribe back (the web layer instead keeps the failed row for the
+// user to dismiss, so it calls CreateSubscription + ResolveAndIngest directly).
+func (s *FeedService) Subscribe(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
+	f, err := s.CreateSubscription(ctx, userID, rawURL, categoryID, fetchFullContent)
+	if err != nil {
 		return nil, err
 	}
-	f.CheckedAt = &now
-	f.NextCheckAt = s.nextCheck(ctx, f, now)
-	f.ErrorCount = 0
-	if err := s.store.UpdateFeed(ctx, f); err != nil {
-		_ = s.store.DeleteFeed(ctx, userID, f.ID) // roll back the partial subscribe
+	if err := s.ResolveAndIngest(ctx, f); err != nil {
+		_ = s.store.DeleteFeed(ctx, userID, f.ID)
 		return nil, err
 	}
 	return f, nil
