@@ -301,6 +301,73 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 	return s.store.UpdateFeed(ctx, f)
 }
 
+// EditFeedInput carries the four user-editable feed fields. An empty URL leaves
+// the URL unchanged; an empty Title clears the user-rename override.
+type EditFeedInput struct {
+	Title       string
+	URL         string
+	CategoryID  *ID
+	FullContent bool
+}
+
+// EditFeedResult reports which grouping/identity fields changed so the web
+// layer can decide between a row swap and a full refresh.
+type EditFeedResult struct {
+	URLChanged      bool
+	CategoryChanged bool
+}
+
+// EditFeed applies the four user-editable fields to an owned feed. Title writes
+// the user_title override; URL (when changed and well-formed) updates feed_url;
+// category and full-content reuse their dedicated setters (full-content only on
+// an actual change, to avoid needless extract re-queueing). Returns which
+// grouping/identity-affecting fields changed so the caller can decide between a
+// row swap and a full refresh.
+func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFeedInput) (EditFeedResult, error) {
+	var res EditFeedResult
+	f, err := s.store.GetFeed(ctx, userID, feedID)
+	if err != nil {
+		return res, err
+	}
+	newURL := strings.TrimSpace(in.URL)
+	if newURL != "" {
+		if u, perr := url.Parse(newURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return res, fmt.Errorf("%w: invalid feed URL", ErrValidation)
+		}
+	}
+	if err := s.ensureCategoryOwned(ctx, userID, in.CategoryID); err != nil {
+		return res, err
+	}
+	if err := s.store.SetFeedUserTitle(ctx, userID, feedID, strings.TrimSpace(in.Title)); err != nil {
+		return res, err
+	}
+	if !sameID(f.CategoryID, in.CategoryID) {
+		if err := s.store.SetFeedCategory(ctx, userID, feedID, in.CategoryID); err != nil {
+			return res, err
+		}
+		res.CategoryChanged = true
+	}
+	if in.FullContent != f.FetchFullContent {
+		if err := s.SetFullContent(ctx, userID, feedID, in.FullContent); err != nil {
+			return res, err
+		}
+	}
+	if newURL != "" && newURL != f.FeedURL {
+		if err := s.store.SetFeedURL(ctx, userID, feedID, newURL); err != nil {
+			return res, err
+		}
+		res.URLChanged = true
+	}
+	return res, nil
+}
+
+func sameID(a, b *ID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // EntryStats returns per-feed total and unread counts for the user.
 func (s *FeedService) EntryStats(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error) {
 	return s.store.EntryStatsByFeed(ctx, userID)

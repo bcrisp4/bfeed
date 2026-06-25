@@ -398,3 +398,33 @@ func TestResolveAndIngestRecordsErrorKeepsRow(t *testing.T) {
 		t.Errorf("expected error recorded, got count=%d err=%q", got.ErrorCount, got.LastError)
 	}
 }
+
+func TestEditFeedAppliesFields(t *testing.T) {
+	st := coretest.NewMemStore()
+	clk := coretest.StubClock{T: time.Unix(1000, 0)}
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, _ := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://e.com/old", nil, false)
+
+	res, err := svc.EditFeed(context.Background(), core.DefaultUserID, f.ID, core.EditFeedInput{
+		Title: "Renamed", URL: "https://e.com/new", CategoryID: nil, FullContent: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.URLChanged || res.CategoryChanged {
+		t.Errorf("got %+v, want URLChanged only", res)
+	}
+	got, _ := st.GetFeed(context.Background(), core.DefaultUserID, f.ID)
+	if got.UserTitle != "Renamed" || got.FeedURL != "https://e.com/new" {
+		t.Errorf("got title=%q url=%q", got.UserTitle, got.FeedURL)
+	}
+}
+
+func TestEditFeedRejectsBadURL(t *testing.T) {
+	st := coretest.NewMemStore()
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	f, _ := svc.CreateSubscription(context.Background(), core.DefaultUserID, "https://e.com/x", nil, false)
+	if _, err := svc.EditFeed(context.Background(), core.DefaultUserID, f.ID, core.EditFeedInput{URL: "javascript:alert(1)"}); !errors.Is(err, core.ErrValidation) {
+		t.Errorf("want ErrValidation, got %v", err)
+	}
+}
