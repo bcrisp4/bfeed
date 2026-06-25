@@ -60,7 +60,8 @@ func runServe() int {
 	san := sanitize.New()
 	feedSvc := core.NewFeedService(store, fetcher, parse.New(), san, clock.Real{}, log,
 		core.FeedServiceConfig{
-			Reschedule: core.RescheduleConfig{Interval: cfg.PollInterval, MaxBackoff: cfg.MaxBackoff},
+			Schedule:   core.ScheduleConfig{MinInterval: cfg.SchedMinInterval, MaxInterval: cfg.SchedMaxInterval, Factor: cfg.SchedFactor},
+			Reschedule: core.RescheduleConfig{Interval: cfg.SchedMinInterval, MaxBackoff: cfg.MaxBackoff},
 			Jitter:     jitter,
 		})
 	entrySvc := core.NewEntryService(store, log)
@@ -101,7 +102,7 @@ func runServe() int {
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite),
+		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
