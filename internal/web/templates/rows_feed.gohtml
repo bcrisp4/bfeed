@@ -11,12 +11,12 @@
         {{- if .Pending}}<span class="pending">resolving feed…</span>
         {{- else}}
           <span class="host">{{.Host}}</span>
-          {{- if .Refreshing}}<span class="dot">·</span><span class="pending">refreshing…</span>{{end}}
           <span class="dot">·</span><span><span class="unread">{{.Unread}} unread</span> / {{.Total}}</span>
           {{- if .Stalled}}<span class="dot">·</span><span class="stalled">⚠ stalled — {{.LastError}}</span>
           {{- else if .LastError}}<span class="dot">·</span><span class="err">error: {{.LastError}}</span>{{end}}
           {{- if .Updated}}<span class="dot">·</span><span>updated {{.Updated}}</span>{{end}}
           {{- if and .Next (not .Refreshing)}}<span class="dot">·</span><span>next {{.Next}}</span>{{end}}
+          {{- if .Refreshing}}<span class="pending refreshing">refreshing…</span>{{end}}
         {{- end}}
       </div>
     </div>

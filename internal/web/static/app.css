@@ -216,6 +216,9 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .feed-meta .unread{color:var(--accent);font-weight:600}
 .feed-meta .err,.feed-meta .stalled{color:#c0392b;font-weight:600}
 .feed-meta .pending{color:var(--star);font-weight:600}
+/* refreshing label sits at the meta's right edge so it never shifts the other
+   fields when it appears/disappears */
+.feed-meta .refreshing{margin-left:auto}
 .feed-acts{display:flex;align-items:center;gap:.15rem;flex-shrink:0}
 .feed-acts .act{display:inline-flex;align-items:center;justify-content:center;width:2.1rem;height:2.1rem;
   border:0;border-radius:var(--radius);background:none;color:var(--faint);cursor:pointer;
