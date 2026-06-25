@@ -86,7 +86,38 @@ func TestEditSaveBadURLReturns422WithPanel(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `class="feed-edit"`) {
-		t.Errorf("422 response should re-render the edit panel, body=%s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="feed-edit"`) {
+		t.Errorf("422 response should re-render the edit panel, body=%s", body)
+	}
+	if !strings.Contains(body, `class="form-error"`) {
+		t.Errorf("422 response should show form-error, body=%s", body)
+	}
+}
+
+// TestEditSaveURLChangedSwapsRefreshingRow verifies that when the feed URL is
+// changed, editFeed starts a background refresh and returns the self-polling
+// refreshing row fragment (not an HX-Refresh full reload).
+func TestEditSaveURLChangedSwapsRefreshingRow(t *testing.T) {
+	// Use a fetcher that returns a non-nil NotModified response so the background
+	// goroutine (startRefresh → feeds.Refresh) doesn't nil-deref on a zero resp.
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 304, NotModified: true}}
+	h, st := newTestHandler(t, fetcher)
+	id := seedFeed(t, st)
+	// Post a URL different from the seeded "https://example.com/feed.xml".
+	form := strings.NewReader("title=&url=https%3A%2F%2Fother.example.com%2Ffeed.xml&category_id=")
+	req := httptest.NewRequest("POST", "/feeds/"+itoa(id), form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	// URL change must swap the row, not trigger a full reload.
+	if hdr := rec.Header().Get("HX-Refresh"); hdr != "" {
+		t.Errorf("URL change should swap the row, not HX-Refresh; got HX-Refresh=%q", hdr)
+	}
+	// The handler calls startRefresh before renderFeedRow; busy tracker marks the
+	// feed in-flight so the rendered row is in the "refreshing" state.
+	body := rec.Body.String()
+	if !strings.Contains(body, `hx-trigger="every 1500ms"`) {
+		t.Errorf("URLChanged row should be in refreshing state (self-polling), body=%s", body)
 	}
 }

@@ -55,6 +55,7 @@
       </select></div>
     <label class="opt"><input type="checkbox" name="full_content"{{if .FullContent}} checked{{end}}> Fetch full content</label>
   </div>
+  {{if .EditError}}<p class="form-error">{{.EditError}}</p>{{end}}
   <div class="acts">
     <button class="primary" type="submit">Save</button>
     <button type="button" hx-get="/feeds/{{.ID}}/row" hx-target="#feed-{{.ID}}" hx-swap="outerHTML">Cancel</button>

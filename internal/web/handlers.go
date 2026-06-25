@@ -65,7 +65,8 @@ type feedRowVM struct {
 	FeedURL     string
 	Host        string
 	LastError   string
-	CategoryID  int64 // 0 = uncategorised
+	EditError   string // validation/save error from the inline edit form
+	CategoryID  int64  // 0 = uncategorised
 	FullContent bool
 	Unread      int
 	Total       int
@@ -395,8 +396,7 @@ func (h *Handler) catOptions(ctx context.Context, selected *core.ID) []feedEditC
 }
 
 // feedEditForm handles GET /feeds/{id}/edit: renders the feed row with its
-// edit panel expanded so the user can modify title, URL, category, and
-// full-content preference inline.
+// edit panel expanded so the user can modify title, URL, category, and full-content preference.
 func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
@@ -466,7 +466,7 @@ func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id cor
 	row := h.buildFeedRow(f, stats[id], time.Now())
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
-	row.LastError = "Couldn't save: " + cause.Error()
+	row.EditError = "Couldn't save: " + cause.Error()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
