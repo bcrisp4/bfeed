@@ -15,8 +15,7 @@
           {{- if .Stalled}}<span class="dot">·</span><span class="stalled">⚠ stalled — {{.LastError}}</span>
           {{- else if .LastError}}<span class="dot">·</span><span class="err">error: {{.LastError}}</span>{{end}}
           {{- if .Updated}}<span class="dot">·</span><span>updated {{.Updated}}</span>{{end}}
-          {{- if and .Next (not .Refreshing)}}<span class="dot">·</span><span>next {{.Next}}</span>{{end}}
-          {{- if .Refreshing}}<span class="pending refreshing">refreshing…</span>{{end}}
+          {{- if .Next}}<span class="dot">·</span><span>next {{.Next}}</span>{{end}}
         {{- end}}
       </div>
     </div>
