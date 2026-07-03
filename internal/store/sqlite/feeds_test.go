@@ -55,7 +55,8 @@ func TestSetFeedURLClearsConditionalHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFeed: %v", err)
 	}
-	if err := s.SetFeedURL(ctx, core.DefaultUserID, id, "https://new.test/feed"); err != nil {
+	urlChangeAt := now.Add(3 * time.Hour)
+	if err := s.SetFeedURL(ctx, core.DefaultUserID, id, "https://new.test/feed", urlChangeAt); err != nil {
 		t.Fatalf("SetFeedURL: %v", err)
 	}
 	got, err := s.GetFeed(ctx, core.DefaultUserID, id)
@@ -67,6 +68,10 @@ func TestSetFeedURLClearsConditionalHeaders(t *testing.T) {
 	}
 	if got.ETag != "" || got.LastModified != "" {
 		t.Errorf("conditional headers not cleared: etag=%q last_modified=%q", got.ETag, got.LastModified)
+	}
+	// SetFeedURL also makes the new URL promptly poll-due (audit B7).
+	if !got.NextCheckAt.Equal(urlChangeAt) {
+		t.Errorf("next_check_at = %v, want %v (URL change should reset it)", got.NextCheckAt, urlChangeAt)
 	}
 }
 

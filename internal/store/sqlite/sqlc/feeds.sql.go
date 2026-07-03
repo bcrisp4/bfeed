@@ -290,20 +290,31 @@ func (q *Queries) SetFeedFullContent(ctx context.Context, arg SetFeedFullContent
 }
 
 const setFeedURL = `-- name: SetFeedURL :execrows
-UPDATE feeds SET feed_url = ?, etag = '', last_modified = '' WHERE id = ? AND user_id = ?
+UPDATE feeds SET feed_url = ?, etag = '', last_modified = '', next_check_at = ? WHERE id = ? AND user_id = ?
 `
 
 type SetFeedURLParams struct {
-	FeedUrl string
-	ID      int64
-	UserID  int64
+	FeedUrl     string
+	NextCheckAt int64
+	ID          int64
+	UserID      int64
 }
 
 // Clears etag/last_modified too: they belong to the old URL, so reusing them as
 // conditional-GET headers against the new URL risks a spurious 304 that skips
 // the new feed's content. The next poll re-fetches in full and repopulates them.
+// Also moves next_check_at to now so the Poller re-fetches the new URL promptly:
+// a URL edit's startRefresh silently no-ops when a refresh of the OLD URL is still
+// in flight, and without this the new URL would wait for the old poll's far-future
+// adaptive next_check_at (audit B7). Poll-path callers (redirect adoption, discovery)
+// overwrite next_check_at via recordSuccess immediately after, so this is harmless there.
 func (q *Queries) SetFeedURL(ctx context.Context, arg SetFeedURLParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setFeedURL, arg.FeedUrl, arg.ID, arg.UserID)
+	result, err := q.db.ExecContext(ctx, setFeedURL,
+		arg.FeedUrl,
+		arg.NextCheckAt,
+		arg.ID,
+		arg.UserID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -333,7 +344,7 @@ UPDATE feeds SET
   site_url = ?, title = ?, description = ?, etag = ?, last_modified = ?,
   disabled = ?, checked_at = ?, next_check_at = ?, error_count = ?, last_error = ?,
   updated_at = ?, ttl_seconds = ?
-WHERE id = ? AND user_id = ?
+WHERE id = ? AND user_id = ? AND feed_url = ?
 `
 
 type UpdateFeedParams struct {
@@ -351,8 +362,15 @@ type UpdateFeedParams struct {
 	TtlSeconds   sql.NullInt64
 	ID           int64
 	UserID       int64
+	FeedUrl      string
 }
 
+// feed_url in the WHERE is a compare-and-swap guard: a poll operates on a *Feed
+// snapshot captured at dispatch, so if the user edits the feed's URL mid-poll the
+// row's feed_url no longer matches and this blind full-row write becomes a no-op,
+// instead of resurrecting the old URL's etag/last_modified/metadata that SetFeedURL
+// deliberately cleared (audit B7). recordSuccess adopts a permanent-redirect URL via
+// SetFeedURL before this runs, so the guard uses the poll's current f.FeedURL.
 func (q *Queries) UpdateFeed(ctx context.Context, arg UpdateFeedParams) error {
 	_, err := q.db.ExecContext(ctx, updateFeed,
 		arg.SiteUrl,
@@ -369,6 +387,7 @@ func (q *Queries) UpdateFeed(ctx context.Context, arg UpdateFeedParams) error {
 		arg.TtlSeconds,
 		arg.ID,
 		arg.UserID,
+		arg.FeedUrl,
 	)
 	return err
 }
