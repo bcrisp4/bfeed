@@ -59,7 +59,7 @@ func runHealthcheck() int {
 		// Fall back: treat ListenAddr as ":port" style or bare addr.
 		port = cfg.ListenAddr
 	}
-	resp, err := http.Get("http://127.0.0.1:" + port + "/healthz") //nolint:gosec
+	resp, err := http.Get("http://127.0.0.1:" + port + "/healthz") //nolint:gosec // G107: fixed loopback host, port from validated config
 	if err != nil {
 		return 1
 	}

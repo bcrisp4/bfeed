@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,7 +56,7 @@ type Handler struct {
 // New constructs a fully-routed *Handler for the bfeed web UI. The returned
 // value implements http.Handler; callers that need to drain in-flight
 // background feed ops on shutdown hold onto the concrete type to call Drain.
-func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int) *Handler {
+func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int, expectedHost string) *Handler {
 	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit, busy: newInflightSet()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
@@ -96,7 +97,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 		// Only static, valid options are passed, so this can never fail at runtime.
 		panic("web: compression adapter: " + err.Error())
 	}
-	h.router = compress(logging(log, noStore(mux)))
+	h.router = compress(logging(log, hostGuard(expectedHost, securityHeaders(noStore(mux)))))
 	return h
 }
 
@@ -192,4 +193,62 @@ func logging(log *slog.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		log.Info("http", "method", r.Method, "path", r.URL.Path)
 	})
+}
+
+// contentSecurityPolicy locks the app pages down so a bluemonday bypass (parser
+// differential, future policy regression, or an entry sanitised under an older
+// policy and trusted forever) can't execute script on the bfeed origin. Feed
+// images may be remote when the image proxy is disabled, hence img-src https:
+// data:; everything else is self-only. The one inline script is externalised to
+// /static/app.js so no 'unsafe-inline' is needed; htmx 2.0.4 needs no eval.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"img-src 'self' https: data:; " +
+	"script-src 'self'; " +
+	"style-src 'self'; " +
+	"object-src 'none'; " +
+	"base-uri 'none'; " +
+	"frame-ancestors 'none'; " +
+	"form-action 'self'"
+
+// securityHeaders adds defence-in-depth headers to every response. The image
+// proxy sets its own stricter CSP on /img afterwards (same override pattern
+// noStore relies on), so proxied images keep default-src 'none'; sandbox.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		// no-referrer also covers entries persisted before rel=noreferrer sanitising.
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostGuard rejects requests whose Host header doesn't match the app's own
+// origin, defeating DNS-rebinding: an attacker page that re-resolves its name to
+// the bfeed tailnet IP still sends its own name in Host, so its same-origin
+// fetches are refused. Loopback Hosts are always allowed so the container
+// HEALTHCHECK (GET 127.0.0.1/healthz) still works. An empty expectedHost
+// disables the check (used by tests).
+func hostGuard(expectedHost string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if expectedHost != "" && r.Host != expectedHost && !isLoopbackHost(r.Host) {
+			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1", "[::1]":
+		return true
+	}
+	return false
 }

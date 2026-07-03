@@ -40,6 +40,14 @@ func TestSanitizeDropsTrackingPixel(t *testing.T) {
 	}
 }
 
+func TestSanitizeAddsNoReferrerToLinks(t *testing.T) {
+	in := `<a href="https://e.test/p">go</a>`
+	out := New().Sanitize(in, "https://b.test/")
+	if !strings.Contains(out, "noreferrer") {
+		t.Fatalf("link missing rel=noreferrer: %s", out)
+	}
+}
+
 // Regression guards: active-URL schemes must be neutralised by the bluemonday allowlist.
 
 func TestSanitizeNeutralisesJavascriptLinks(t *testing.T) {

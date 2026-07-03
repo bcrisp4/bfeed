@@ -19,6 +19,13 @@ import (
 // Reuse the shared coretest doubles — no per-package fake duplication.
 func newWeb(t *testing.T) (http.Handler, *coretest.MemStore) {
 	t.Helper()
+	return newWebHost(t, "")
+}
+
+// newWebHost is newWeb with an explicit expectedHost so the DNS-rebinding Host
+// guard can be exercised ("" disables it).
+func newWebHost(t *testing.T, expectedHost string) (http.Handler, *coretest.MemStore) {
+	t.Helper()
 	store := coretest.NewMemStore()
 	log := coretest.DiscardLogger()
 	fs := core.NewFeedService(store, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{}, log,
@@ -26,7 +33,7 @@ func newWeb(t *testing.T) (http.Handler, *coretest.MemStore) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil, 20), store
+	return web.New(fs, es, cs, ss, log, nil, nil, 20, expectedHost), store
 }
 
 func TestUnreadListRenders(t *testing.T) {
@@ -528,7 +535,7 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	srv := web.New(fs, es, cs, ss, log, nil, nil, 20)
+	srv := web.New(fs, es, cs, ss, log, nil, nil, 20, "")
 
 	// Subscribe with full_content checkbox checked.
 	form := url.Values{"url": {"https://x.example/feed"}, "full_content": {"on"}}
@@ -722,7 +729,7 @@ func TestReaderRewritesImagesWhenProxyOn(t *testing.T) {
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
 	rewrite := func(u string) string { return "/img?u=" + u }
-	h := web.New(fs, es, cs, ss, log, nil, rewrite, 20)
+	h := web.New(fs, es, cs, ss, log, nil, rewrite, 20, "")
 
 	ctx := context.Background()
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
@@ -762,7 +769,7 @@ func TestFeedsPageShowsStalledBadge(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	h := web.New(fs, es, cs, ss, log, nil, nil, 3) // error limit = 3
+	h := web.New(fs, es, cs, ss, log, nil, nil, 3, "") // error limit = 3
 
 	ctx := context.Background()
 	now := time.Unix(1, 0)

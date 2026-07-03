@@ -22,6 +22,11 @@ func TestIsBlockedIP(t *testing.T) {
 		"240.0.0.1",        // reserved Class E
 		"2002:7f00:1::1",   // 6to4 encoding 127.0.0.1
 		"64:ff9b::7f00:1",  // NAT64 encoding 127.0.0.1
+		"198.18.0.1",       // RFC 2544 benchmarking
+		"192.0.0.1",        // IETF protocol assignments / DS-Lite AFTR
+		"192.88.99.1",      // deprecated 6to4 relay anycast
+		"fec0::1",          // deprecated IPv6 site-local
+		"2001::1",          // Teredo
 	}
 	for _, s := range blocked {
 		if !isBlockedIP(netip.MustParseAddr(s)) {

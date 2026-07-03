@@ -17,6 +17,10 @@ func New() *Sanitizer {
 	p := bluemonday.UGCPolicy() // allows semantic content; strips script/style/handlers
 	p.AllowAttrs("src", "alt", "width", "height").OnElements("img")
 	p.RequireNoFollowOnLinks(true)
+	// noreferrer stops a clicked feed link leaking the private tailnet origin
+	// (Referer header) to the destination. A Referrer-Policy response header on
+	// dynamic pages covers already-persisted entries sanitized before this.
+	p.RequireNoReferrerOnLinks(true)
 	return &Sanitizer{policy: p}
 }
 

@@ -10,7 +10,8 @@ type RescheduleConfig struct {
 // PollReschedule returns the next check time.
 //   - errorCount == 0: now + Interval (honoring a larger Retry-After).
 //   - errorCount > 0: exponential backoff Interval*2^errorCount capped at MaxBackoff, + jitter.
-//   - retryAfter (if larger than the computed delay) always wins.
+//   - retryAfter (if larger than the computed delay) wins, but is itself clamped
+//     to MaxBackoff so a hostile server can't park a feed arbitrarily far out.
 func PollReschedule(now time.Time, cfg RescheduleConfig, errorCount int, retryAfter time.Duration, jitter func(time.Duration) time.Duration) time.Time {
 	delay := cfg.Interval
 	if errorCount > 0 {
@@ -28,6 +29,9 @@ func PollReschedule(now time.Time, cfg RescheduleConfig, errorCount int, retryAf
 	}
 	if retryAfter > delay {
 		delay = retryAfter
+		if delay > cfg.MaxBackoff {
+			delay = cfg.MaxBackoff
+		}
 	}
 	return now.Add(delay)
 }

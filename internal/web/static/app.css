@@ -237,3 +237,6 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .feed-edit .acts{display:flex;gap:var(--sp-2)}
 @media (hover:none){.feed-acts .act{width:var(--tap);height:var(--tap)}}
 @media (max-width:639px){.feed-acts .act{width:var(--tap);height:var(--tap)}}
+/* Utility classes replacing inline style= attributes (page CSP style-src 'self'). */
+.inline-form{display:inline}
+.feed-edit .fld.grow{flex:1}

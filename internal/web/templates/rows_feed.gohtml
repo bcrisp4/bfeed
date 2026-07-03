@@ -47,7 +47,7 @@
   <div class="fld"><label for="fu-{{.ID}}">Feed URL</label>
     <input id="fu-{{.ID}}" type="url" name="url" value="{{.FeedURL}}" required></div>
   <div class="row2">
-    <div class="fld" style="flex:1"><label for="fc-{{.ID}}">Category</label>
+    <div class="fld grow"><label for="fc-{{.ID}}">Category</label>
       <select id="fc-{{.ID}}" name="category_id">
         <option value="">Uncategorised</option>
         {{range .Cats}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Title}}</option>{{end}}

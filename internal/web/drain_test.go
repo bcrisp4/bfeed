@@ -21,7 +21,7 @@ func newDrainHandler(t *testing.T, fetcher core.Fetcher) (*web.Handler, *coretes
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil, 20), store
+	return web.New(fs, es, cs, ss, log, nil, nil, 20, ""), store
 }
 
 // Drain must block until an in-flight background feed op (subscribe/refresh

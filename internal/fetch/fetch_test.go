@@ -148,6 +148,77 @@ func TestHostKeyNormalization(t *testing.T) {
 	}
 }
 
+func TestParseRetryAfterCapsAndGuards(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"", 0},
+		{"120", 120 * time.Second},
+		{"-5", 0},                    // negative rejected
+		{"315360000", maxRetryAfter}, // 10 years -> capped
+		{"99999999999999999999", 0},  // overflows Atoi -> not a date -> 0
+		{"86400", 24 * time.Hour},    // exactly the cap
+	}
+	for _, c := range cases {
+		if got := parseRetryAfter(c.in); got != c.want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFetchRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(make([]byte, 2000)) // > MaxBytes below
+	}))
+	defer srv.Close()
+	c := New(Config{UserAgent: "t", HostConcurrency: 2, Timeout: 5 * time.Second, MaxBytes: 1000})
+	if _, err := c.Fetch(context.Background(), core.FetchRequest{URL: srv.URL}); err == nil {
+		t.Fatal("expected error for body exceeding MaxBytes, got nil")
+	}
+}
+
+func TestFetchAcceptsBodyAtCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(make([]byte, 1000)) // == MaxBytes
+	}))
+	defer srv.Close()
+	c := New(Config{UserAgent: "t", HostConcurrency: 2, Timeout: 5 * time.Second, MaxBytes: 1000})
+	resp, err := c.Fetch(context.Background(), core.FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Fetch at exactly MaxBytes: %v", err)
+	}
+	if len(resp.Body) != 1000 {
+		t.Fatalf("body len = %d, want 1000", len(resp.Body))
+	}
+}
+
+func TestNewDefaultsTimeout(t *testing.T) {
+	c := New(Config{UserAgent: "t"})
+	if c.http.Timeout != 30*time.Second {
+		t.Fatalf("default Timeout = %v, want 30s", c.http.Timeout)
+	}
+}
+
+func TestSemsMapEvictedWhenIdle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	c := testClient()
+	for i := 0; i < 5; i++ {
+		if _, err := c.Fetch(context.Background(), core.FetchRequest{URL: srv.URL}); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+	}
+	c.mu.Lock()
+	n := len(c.sems)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("sems map not evicted: %d entries remain", n)
+	}
+}
+
 func TestPerHostConcurrencyCap(t *testing.T) {
 	var inflight, max int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

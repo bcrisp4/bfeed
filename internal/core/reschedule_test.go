@@ -52,3 +52,14 @@ func TestRescheduleRetryAfterBeatsBackoff(t *testing.T) {
 		t.Fatalf("retry-after should beat backoff: got %v", d)
 	}
 }
+
+func TestRescheduleRetryAfterClampedToMaxBackoff(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	cfg := RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour}
+	// A hostile server returns Retry-After of 10 years; it must not park the
+	// feed past MaxBackoff.
+	d := PollReschedule(now, cfg, 0, 10*365*24*time.Hour, noJitter).Sub(now)
+	if d != 24*time.Hour {
+		t.Fatalf("retry-after not clamped to MaxBackoff: got %v", d)
+	}
+}
