@@ -207,9 +207,14 @@ func (q *Queries) ListDueFeeds(ctx context.Context, arg ListDueFeedsParams) ([]F
 }
 
 const listFeeds = `-- name: ListFeeds :many
-SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC
+SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds WHERE user_id = ?
+ORDER BY (CASE WHEN user_title <> '' THEN user_title ELSE title END) COLLATE NOCASE ASC
 `
 
+// Order by the DISPLAY title (user_title override when set, else the poll-owned
+// title), matching Feed.DisplayTitle() so a renamed feed sorts under its new
+// name. A pending feed's title is pre-populated with its URL, so it sorts by its
+// displayed name too (audit B8).
 func (q *Queries) ListFeeds(ctx context.Context, userID int64) ([]Feed, error) {
 	rows, err := q.db.QueryContext(ctx, listFeeds, userID)
 	if err != nil {

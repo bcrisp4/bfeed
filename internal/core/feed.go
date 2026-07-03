@@ -102,7 +102,7 @@ func (s *FeedService) ensureCategoryOwned(ctx context.Context, userID ID, catego
 // row (no network I/O). The feed has CheckedAt == nil and a URL-fallback Title
 // until ResolveAndIngest runs. Returns the feed with ID set.
 func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
-	rawURL = strings.TrimSpace(rawURL)
+	rawURL = normalizeFeedURL(rawURL)
 	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
 	}
@@ -145,11 +145,24 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error)
 	}
 	if feedURL != f.FeedURL {
 		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL, s.clk.Now()); err != nil {
-			msg := err.Error()
-			if errors.Is(err, ErrConflict) { // discovered a feed already subscribed under another row
-				msg = "already subscribed to this feed"
+			if errors.Is(err, ErrConflict) {
+				// The resolved URL is already subscribed under another row, so this
+				// just-created row is a definitional duplicate: delete it rather than
+				// keep an error row that re-polls the (non-feed) subscribe URL forever
+				// with no discovery step to ever self-heal (audit B8). No tombstones
+				// are written — a re-subscribe gets a fresh feed_id.
+				if derr := s.store.DeleteFeed(ctx, f.UserID, f.ID); derr != nil {
+					// Deletion failed, so the row still exists: degrade to the
+					// error-row behaviour (informative message + backoff) rather
+					// than return nil and leave it silently due, re-polling the
+					// non-feed URL forever.
+					s.log.Warn("deleting duplicate feed row after URL conflict failed",
+						"feed_id", int64(f.ID), "url", feedURL, "error", derr)
+					return s.recordError(ctx, f, s.clk.Now(), "already subscribed to this feed", 0)
+				}
+				return nil
 			}
-			return s.recordError(ctx, f, s.clk.Now(), msg, 0)
+			return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
 		}
 		f.FeedURL = feedURL
 	}
@@ -194,7 +207,7 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	// redirect chain was entirely permanent — see canonicalURL.
 	base := orURL(resp.FinalURL, rawURL)
 	if pf, perr := s.parser.Parse(resp.Body, resp.ContentType, base); perr == nil && pf != nil {
-		return canonicalURL(rawURL, resp), pf, resp, nil
+		return normalizeFeedURL(canonicalURL(rawURL, resp)), pf, resp, nil
 	}
 	urls, derr := s.parser.Discover(resp.Body, base)
 	if derr != nil || len(urls) == 0 {
@@ -209,7 +222,7 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	if perr != nil {
 		return "", nil, nil, fmt.Errorf("%w: discovered feed unparseable", ErrValidation)
 	}
-	return canonicalURL(urls[0], resp2), pf, resp2, nil
+	return normalizeFeedURL(canonicalURL(urls[0], resp2)), pf, resp2, nil
 }
 
 // orURL returns final when non-empty, else fallback. Used to pick the base for
@@ -230,6 +243,28 @@ func canonicalURL(current string, resp *FetchResponse) string {
 		return resp.FinalURL
 	}
 	return current
+}
+
+// normalizeFeedURL canonicalises a feed URL for dedupe: it lowercases the scheme
+// and host, strips the scheme's default port, and drops any fragment. It is
+// deliberately conservative — it does NOT touch the path/query, merge http↔https,
+// or strip tracker params — because false-merging two genuinely distinct feeds
+// silently drops content, whereas a missed dedup only duplicates entries (audit
+// B8). Idempotent; returns the trimmed input unchanged if it doesn't parse (URL
+// validity is checked separately by the callers).
+func normalizeFeedURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	if (u.Scheme == "http" && u.Port() == "80") || (u.Scheme == "https" && u.Port() == "443") {
+		u.Host = u.Hostname() // drop the default port
+	}
+	u.Fragment = ""
+	return u.String()
 }
 
 func (s *FeedService) Refresh(ctx context.Context, userID, feedID ID) error {
@@ -442,6 +477,7 @@ func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFe
 	}
 	newURL := strings.TrimSpace(in.URL)
 	if newURL != "" {
+		newURL = normalizeFeedURL(newURL)
 		if u, perr := url.Parse(newURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			return res, fmt.Errorf("%w: invalid feed URL", ErrValidation)
 		}

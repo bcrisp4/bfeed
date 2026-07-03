@@ -48,6 +48,7 @@ CI (`.github/workflows/ci.yml`) also runs `govulncheck` + sqlc-sync check.
 Releases tag-driven via goreleaser — see `docs/releasing.md`.
 
 CI/tooling gotchas:
+- **Piping a `make`/command target masks its exit code** — `make sqlc-check 2>&1 | tail` returns `tail`'s exit (0), so a following `&& …` runs even when the target failed. Run the target unpiped (or check `${PIPESTATUS[0]}`) whenever you gate on its result.
 - CI triggers on **PRs and pushes to `main`** — feature-branch push alone won't run; open PR.
 - `skip-changelog` label only takes effect if present **when CI run starts** — CI's `pull_request` trigger has no `labeled` type, so labelling *after* PR-open leaves first run evaluating label-less payload and `changelog` gate fails. Fix: label at/before PR-open, or push commit (empty `synchronize` fine — `git commit --allow-empty`) to re-fire CI with label. Note: `git push -f` blocked here, so re-trigger with empty commit, not amend+force-push.
 - Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
@@ -67,7 +68,7 @@ make sqlc                                     # = sqlc generate
 make sqlc-check                               # fail if committed sqlc code is stale (CI-enforced)
 # install pinned tools (sqlc v1.31.1 + golangci-lint v2.12.2): make tools
 ```
-Generated code in `internal/store/sqlite/sqlc/` committed and **never hand-edited**. CI runs `make sqlc-check` equivalent, so regenerate + commit after touching `queries/` or `migrations/`. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
+Generated code in `internal/store/sqlite/sqlc/` committed and **never hand-edited**. CI runs `make sqlc-check` equivalent, so regenerate + commit after touching `queries/` or `migrations/`. `make sqlc-check` = `sqlc generate && git diff --exit-code <sqlc dir>`, so it **fails on an uncommitted regen** (working-tree diff) and passes only once the regen is committed — expected mid-work, not a real staleness bug. `sqlc.yaml` sets `emit_pointers_for_null_types: false`, so nullable columns map to `sql.NullInt64` — mapping helpers (`nullUnix`/`ptrUnix`) depend on this.
 
 **sqlc param-inference gotcha:** `BETWEEN sqlc.arg(lo) AND sqlc.arg(hi)` *inside `CASE` expression* drops bound args — generated func ends up with too few params (silent; fails only at call/compile). Use explicit `>= sqlc.arg(lo) AND … <= sqlc.arg(hi)` instead, and **always eyeball generated signature after `make sqlc`**.
 

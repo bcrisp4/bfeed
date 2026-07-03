@@ -99,6 +99,56 @@ func TestMigration0010PreservesData(t *testing.T) {
 	}
 }
 
+// B8/F5: migration 0011 must fold away pre-existing case-variant categories (the
+// state it fixes) before building the NOCASE unique index, re-pointing feeds to
+// the surviving canonical row — otherwise the index can't build and the whole
+// upgrade bricks.
+func TestMigration0011MergesCaseVariantCategories(t *testing.T) {
+	ctx := context.Background()
+	dsn := "file:" + filepath.Join(t.TempDir(), "u.db") + "?_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	goose.SetBaseFS(MigrationsFS)
+	goose.SetLogger(goose.NopLogger())
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed at the pre-NOCASE schema (version 10) with two case-variant categories
+	// and a feed pointing at the non-canonical (higher-id) one.
+	if err := goose.UpTo(db, "migrations", 10); err != nil {
+		t.Fatalf("up to 10: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO categories (id,user_id,title) VALUES (3,1,'News'),(7,1,'news')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO feeds (user_id,feed_url,title,category_id,next_check_at,created_at,updated_at) VALUES (1,'https://x/f','X',7,0,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	// Apply 0011.
+	if err := goose.UpTo(db, "migrations", 11); err != nil {
+		t.Fatalf("up to 11: %v", err)
+	}
+	// The duplicate collapsed to the lowest id (3); the feed was re-pointed to it.
+	var nc int
+	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM categories`).Scan(&nc)
+	if nc != 1 {
+		t.Fatalf("categories = %d, want 1 after merge", nc)
+	}
+	var catID int64
+	_ = db.QueryRowContext(ctx, `SELECT category_id FROM feeds WHERE feed_url='https://x/f'`).Scan(&catID)
+	if catID != 3 {
+		t.Fatalf("feed re-pointed to %d, want canonical 3", catID)
+	}
+	// The index now enforces case-insensitive uniqueness.
+	if _, err := db.ExecContext(ctx, `INSERT INTO categories (user_id,title) VALUES (1,'NEWS')`); err == nil {
+		t.Fatal("NOCASE unique index did not reject a case-variant insert")
+	}
+}
+
 // B7 #4/#5: UpdateFeed carries a feed_url CAS guard, so a poll that completes after
 // a concurrent URL edit is a no-op instead of resurrecting the old URL's cleared
 // etag/last_modified.

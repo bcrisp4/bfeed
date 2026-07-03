@@ -521,6 +521,92 @@ func TestResolveAndIngestSetFeedURLErrorRecordsError(t *testing.T) {
 	}
 }
 
+// B8/F1: when ResolveAndIngest discovers (here via permanent redirect) a feed
+// already subscribed under another row, SetFeedURL conflicts and the just-created
+// duplicate row must be deleted — not kept as an error row that re-polls the
+// non-feed URL forever.
+func TestResolveAndIngestConflictDeletesDuplicateRow(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const canonical = "https://example.com/feed.xml"
+	const orig = "https://example.com/site"
+	// The user already subscribes to the canonical feed.
+	existing := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: canonical, Title: "Existing"})
+	// A second subscribe to the site URL resolves (permanent redirect) to canonical.
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: canonical, PermanentRedirect: true,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	dupID := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: orig, Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, dupID)
+	if err := svc.ResolveAndIngest(ctx, f); err != nil {
+		t.Fatalf("ResolveAndIngest returned hard error: %v", err)
+	}
+
+	if _, err := store.GetFeed(ctx, core.DefaultUserID, dupID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("duplicate row must be deleted on conflict, got err=%v", err)
+	}
+	if _, err := store.GetFeed(ctx, core.DefaultUserID, existing); err != nil {
+		t.Fatalf("original subscription must survive: %v", err)
+	}
+}
+
+// deleteFeedErrStore wraps MemStore and always fails DeleteFeed.
+type deleteFeedErrStore struct {
+	*coretest.MemStore
+}
+
+func (s *deleteFeedErrStore) DeleteFeed(context.Context, core.ID, core.ID) error {
+	return errors.New("db locked")
+}
+
+// B8/F1: if deleting the conflicted duplicate row fails, ResolveAndIngest must
+// not silently return nil (leaving the row due, re-polling the non-feed URL) —
+// it degrades to recording an error so the row backs off.
+func TestResolveAndIngestConflictDeleteFailureRecordsError(t *testing.T) {
+	ctx := context.Background()
+	inner := coretest.NewMemStore()
+	store := &deleteFeedErrStore{inner}
+	const canonical = "https://example.com/feed.xml"
+	seedFeed(t, inner, &core.Feed{UserID: core.DefaultUserID, FeedURL: canonical, Title: "Existing"})
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: canonical, PermanentRedirect: true,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	dupID := seedFeed(t, inner, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://example.com/site", Title: "B"})
+
+	f, _ := inner.GetFeed(ctx, core.DefaultUserID, dupID)
+	if err := svc.ResolveAndIngest(ctx, f); err != nil {
+		t.Fatalf("ResolveAndIngest returned hard error: %v", err)
+	}
+	got, err := inner.GetFeed(ctx, core.DefaultUserID, dupID)
+	if err != nil {
+		t.Fatalf("row must still exist after failed delete: %v", err)
+	}
+	if got.ErrorCount == 0 || got.LastError == "" {
+		t.Fatalf("delete failure must record an error: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
+// B8/F2: trivially different spellings of the same feed URL (case, default port,
+// fragment) must normalize to one canonical form so the UNIQUE(user_id, feed_url)
+// constraint dedupes them instead of creating a duplicate subscription.
+func TestCreateSubscriptionNormalizesForDedupe(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+
+	if _, err := svc.CreateSubscription(ctx, core.DefaultUserID, "https://Example.COM/feed.xml", nil, false); err != nil {
+		t.Fatalf("first CreateSubscription: %v", err)
+	}
+	_, err := svc.CreateSubscription(ctx, core.DefaultUserID, "https://example.com:443/feed.xml#top", nil, false)
+	if !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("second (equivalent) subscription must conflict, got %v", err)
+	}
+}
+
 func TestResolveAndIngestRecordsErrorKeepsRow(t *testing.T) {
 	st := coretest.NewMemStore()
 	clk := coretest.StubClock{T: time.Unix(1000, 0)}
