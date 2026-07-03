@@ -240,3 +240,8 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 /* Utility classes replacing inline style= attributes (page CSP style-src 'self'). */
 .inline-form{display:inline}
 .feed-edit .fld.grow{flex:1}
+/* htmx indicator styles: served from here instead of htmx's inline <style>
+   injection, which the page CSP (style-src 'self') would otherwise block. */
+.htmx-indicator{opacity:0;transition:opacity 200ms ease-in}
+.htmx-request .htmx-indicator{opacity:1}
+.htmx-request.htmx-indicator{opacity:1}

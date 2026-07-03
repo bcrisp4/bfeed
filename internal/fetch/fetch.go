@@ -113,29 +113,25 @@ func (c *Client) acquire(ctx context.Context, key string) (func(), error) {
 	s.refs++
 	c.mu.Unlock()
 
-	release := func() {
-		<-s.ch
-		c.mu.Lock()
-		s.refs--
-		if s.refs == 0 {
-			delete(c.sems, key)
-		}
-		c.mu.Unlock()
-	}
-
 	select {
 	case s.ch <- struct{}{}:
-		return release, nil
+		return func() { <-s.ch; c.unref(key, s) }, nil
 	case <-ctx.Done():
 		// Never took a token; undo the ref without draining the channel.
-		c.mu.Lock()
-		s.refs--
-		if s.refs == 0 {
-			delete(c.sems, key)
-		}
-		c.mu.Unlock()
+		c.unref(key, s)
 		return nil, ctx.Err()
 	}
+}
+
+// unref drops a reference to the per-host sem and evicts the map entry once no
+// fetch holds or waits on it. Callers that took a token must drain it first.
+func (c *Client) unref(key string, s *hostSem) {
+	c.mu.Lock()
+	s.refs--
+	if s.refs == 0 {
+		delete(c.sems, key)
+	}
+	c.mu.Unlock()
 }
 
 func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchResponse, error) {
@@ -230,10 +226,7 @@ func parseRetryAfter(v string) time.Duration {
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		if d := time.Until(t); d > 0 {
-			if d > maxRetryAfter {
-				return maxRetryAfter
-			}
-			return d
+			return min(d, maxRetryAfter)
 		}
 	}
 	return 0

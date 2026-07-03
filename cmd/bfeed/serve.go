@@ -103,10 +103,15 @@ func runServe() int {
 	}
 
 	// The app's own origin host, used to reject cross-origin (DNS-rebinding)
-	// requests. BaseURL is validated non-empty and parseable by config.Load.
+	// requests. config.Load only checks BaseURL is non-empty, so a scheme-less
+	// value (e.g. "host:8080") parses to an empty Host — surface that rather than
+	// let the guard silently disable itself.
 	var expectedHost string
 	if u, err := url.Parse(cfg.BaseURL); err == nil {
 		expectedHost = u.Host
+	}
+	if expectedHost == "" {
+		log.Warn("host guard disabled: BFEED_BASE_URL has no host (is the scheme missing?)", "base_url", cfg.BaseURL)
 	}
 	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost)
 	srv := &http.Server{

@@ -83,31 +83,36 @@ func TestSecurityHeadersOnDynamicHTML(t *testing.T) {
 func TestHostGuardRejectsForeignHost(t *testing.T) {
 	h, _ := newWebHost(t, "bfeed.example:8080")
 
-	// Matching host passes.
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Host = "bfeed.example:8080"
+	// Matching host passes; case-insensitively (hostnames are case-insensitive).
+	for _, host := range []string{"bfeed.example:8080", "BFEED.example:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Host %q: status %d, want 200", host, rec.Code)
+		}
+	}
+
+	// Foreign host (DNS-rebinding attacker) is rejected — and so is a spoofed
+	// loopback Host on a non-healthz endpoint (same-machine attacker).
+	for _, host := range []string{"evil.example", "127.0.0.1:9999", "localhost:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMisdirectedRequest {
+			t.Fatalf("foreign Host %q: status %d, want 421", host, rec.Code)
+		}
+	}
+
+	// The /healthz path is exempt so the container HEALTHCHECK survives.
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Host = "127.0.0.1:9999"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("matching Host: status %d, want 200", rec.Code)
-	}
-
-	// Foreign host (DNS-rebinding attacker) is rejected.
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Host = "evil.example"
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMisdirectedRequest {
-		t.Fatalf("foreign Host: status %d, want 421", rec.Code)
-	}
-
-	// Loopback is always allowed so the container HEALTHCHECK survives.
-	req = httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	req.Host = "127.0.0.1:9999"
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("loopback Host: status %d, want 200", rec.Code)
+		t.Fatalf("/healthz via loopback: status %d, want 200", rec.Code)
 	}
 }
 

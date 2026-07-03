@@ -28,10 +28,7 @@ func PollReschedule(now time.Time, cfg RescheduleConfig, errorCount int, retryAf
 		}
 	}
 	if retryAfter > delay {
-		delay = retryAfter
-		if delay > cfg.MaxBackoff {
-			delay = cfg.MaxBackoff
-		}
+		delay = min(retryAfter, cfg.MaxBackoff)
 	}
 	return now.Add(delay)
 }

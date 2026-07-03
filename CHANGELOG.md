@@ -54,7 +54,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Security
 
-- bfeed now rejects requests whose `Host` header doesn't match its configured address (loopback is always allowed for health checks), blocking DNS-rebinding attacks that could let a malicious website you visit read your feeds and drive bfeed from your browser.
+- bfeed now rejects requests whose `Host` header doesn't match its configured address (the `/healthz` endpoint is exempt so container health checks keep working), blocking DNS-rebinding attacks that could let a malicious website you visit read your feeds and drive bfeed from your browser.
 - App pages now send a strict `Content-Security-Policy` (plus `X-Frame-Options`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`), so a flaw in HTML sanitising can no longer be escalated to running scripts on the bfeed origin, and the page can't be framed by another site.
 - Links inside feed articles now carry `rel="noreferrer"`, so clicking one no longer leaks your private bfeed address to the destination site.
 - A malicious or misconfigured feed server can no longer park a feed arbitrarily far in the future via an oversized `Retry-After`; the delay is now capped at bfeed's maximum backoff.

@@ -5,7 +5,6 @@ import (
 	"embed"
 	"html/template"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -198,11 +197,13 @@ func logging(log *slog.Logger, next http.Handler) http.Handler {
 // contentSecurityPolicy locks the app pages down so a bluemonday bypass (parser
 // differential, future policy regression, or an entry sanitised under an older
 // policy and trusted forever) can't execute script on the bfeed origin. Feed
-// images may be remote when the image proxy is disabled, hence img-src https:
-// data:; everything else is self-only. The one inline script is externalised to
-// /static/app.js so no 'unsafe-inline' is needed; htmx 2.0.4 needs no eval.
+// images may be remote when the image proxy is disabled (over http on a
+// plain-http tailnet deploy or https), hence img-src http: https: data:;
+// everything else is self-only. The one inline script is externalised to
+// /static/app.js so no 'unsafe-inline' is needed; htmx 2.0.4 needs no eval and
+// its inline indicator <style> is disabled via the htmx-config meta in layout.
 const contentSecurityPolicy = "default-src 'self'; " +
-	"img-src 'self' https: data:; " +
+	"img-src 'self' http: https: data:; " +
 	"script-src 'self'; " +
 	"style-src 'self'; " +
 	"object-src 'none'; " +
@@ -228,27 +229,17 @@ func securityHeaders(next http.Handler) http.Handler {
 // hostGuard rejects requests whose Host header doesn't match the app's own
 // origin, defeating DNS-rebinding: an attacker page that re-resolves its name to
 // the bfeed tailnet IP still sends its own name in Host, so its same-origin
-// fetches are refused. Loopback Hosts are always allowed so the container
-// HEALTHCHECK (GET 127.0.0.1/healthz) still works. An empty expectedHost
-// disables the check (used by tests).
+// fetches (and cross-origin mutating POSTs) are refused. The comparison is
+// case-insensitive because hostnames are. Only the /healthz path is exempt — so
+// the container HEALTHCHECK (GET 127.0.0.1/healthz) works without opening the
+// rest of the app to a same-machine attacker who can spoof a loopback Host on a
+// mutating endpoint. An empty expectedHost disables the check (used by tests).
 func hostGuard(expectedHost string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if expectedHost != "" && r.Host != expectedHost && !isLoopbackHost(r.Host) {
+		if expectedHost != "" && r.URL.Path != "/healthz" && !strings.EqualFold(r.Host, expectedHost) {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func isLoopbackHost(hostport string) bool {
-	host := hostport
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
-		host = h
-	}
-	switch strings.ToLower(host) {
-	case "localhost", "127.0.0.1", "::1", "[::1]":
-		return true
-	}
-	return false
 }
