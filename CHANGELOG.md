@@ -13,6 +13,16 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Full-text article extraction no longer permanently gives up on a feed's articles when the source is temporarily rate-limiting (HTTP 429) or briefly unavailable (5xx): those responses are now retried later, honouring the server's `Retry-After`, instead of counting against the give-up limit — so turning on full-text extraction for a whole feed at once can't burn out its backlog against a momentary rate limit.
+- Re-enabling full-text extraction for a feed now gives previously failed articles a fresh set of retry attempts, instead of immediately re-failing them after a single new try.
+- When full-text extraction ultimately fails for an article, the reader view now shows a brief note (including the reason) explaining it is showing the feed's own content, and the failure reason is recorded for troubleshooting.
+- A feed subscribed by its site homepage whose initial feed auto-discovery failed (for example, a network blip or timeout during setup) now recovers automatically on a later poll or manual refresh, instead of staying stuck re-fetching the site page and failing forever.
+- Changing a feed's address to one you already follow while also editing its other details now reports the conflict without partially applying the title/category changes, so the edit form's error message accurately reflects that nothing was saved.
+- Enabling full-text extraction now switches the setting on and queues the existing backlog for extraction as a single atomic operation, so a transient database error can't leave extraction turned on with the existing articles never queued.
+- A feed subscription that fails during its initial setup — including when it times out — now reliably shows the error on the feed, instead of appearing to have no status until a later scheduled poll happens to record one.
+- Feed rows refreshed in place (during a background refresh or inline edit) no longer briefly flash a misleading "0 unread / 0" when the entry-count lookup momentarily fails; the counts are omitted instead, matching the Feeds page.
+- Deleting an entry, or marking one unread, that fails to save is now reported as an error instead of looking like it succeeded — previously the row vanished (or you were redirected) as if it worked, and the entry reappeared later with no explanation.
+- A momentary database error while opening an entry, category, or feed now returns a proper server error instead of a misleading "not found".
 - Editing a feed's details with an invalid or already-subscribed address now shows the error inline in the edit form instead of the Save button silently doing nothing.
 - "Load more" on a long entry list no longer leaves a stale button mid-list or re-appends the same page as duplicate entries; the button now advances cleanly to the next page.
 - Opening a link to a feed that has since been deleted now returns a proper "not found" page instead of an empty untitled "Feed" page, and a single feed's page now shows the feed's name in its heading.

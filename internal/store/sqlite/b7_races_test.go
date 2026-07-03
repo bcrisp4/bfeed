@@ -149,6 +149,45 @@ func TestMigration0011MergesCaseVariantCategories(t *testing.T) {
 	}
 }
 
+// B10 #7: migration 0012 adds entries.extract_error, defaulting existing rows to
+// an empty string without dropping data.
+func TestMigration0012AddsExtractError(t *testing.T) {
+	ctx := context.Background()
+	dsn := "file:" + filepath.Join(t.TempDir(), "u.db") + "?_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+	goose.SetBaseFS(MigrationsFS)
+	goose.SetLogger(goose.NopLogger())
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed an entry at the pre-column schema (version 11).
+	if err := goose.UpTo(db, "migrations", 11); err != nil {
+		t.Fatalf("up to 11: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO feeds (id,user_id,feed_url,next_check_at,created_at,updated_at) VALUES (1,1,'https://x/f',0,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO entries (user_id,feed_id,guid,published_at,created_at) VALUES (1,1,'g',0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	// Apply 0012.
+	if err := goose.UpTo(db, "migrations", 12); err != nil {
+		t.Fatalf("up to 12: %v", err)
+	}
+	var reason string
+	if err := db.QueryRowContext(ctx, `SELECT extract_error FROM entries WHERE guid='g'`).Scan(&reason); err != nil {
+		t.Fatalf("extract_error column missing after 0012: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("existing row default = %q, want empty", reason)
+	}
+}
+
 // B7 #4/#5: UpdateFeed carries a feed_url CAS guard, so a poll that completes after
 // a concurrent URL edit is a no-op instead of resurrecting the old URL's cleared
 // etag/last_modified.

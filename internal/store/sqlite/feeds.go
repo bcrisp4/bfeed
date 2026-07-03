@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
@@ -155,8 +156,19 @@ func (s *Store) EntryStatsByFeed(ctx context.Context, userID core.ID) (map[core.
 	return out, nil
 }
 
-func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool) error {
-	n, err := s.q.SetFeedFullContent(ctx, sqlc.SetFeedFullContentParams{
+// SetFeedFullContent flips the flag and reconciles the backlog in one transaction
+// so the two can never diverge (flag on with an unqueued backlog, or vice versa —
+// audit B10). On enable it marks existing entries pending (due at `at`); on disable
+// it cancels queued extractions.
+func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, on bool, at time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return mapErr(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := s.q.WithTx(tx)
+
+	n, err := q.SetFeedFullContent(ctx, sqlc.SetFeedFullContentParams{
 		FetchFullContent: b2i(on),
 		ID:               int64(feedID),
 		UserID:           int64(userID),
@@ -165,9 +177,19 @@ func (s *Store) SetFeedFullContent(ctx context.Context, userID, feedID core.ID, 
 		return mapErr(err)
 	}
 	if n == 0 {
-		return core.ErrNotFound
+		return core.ErrNotFound // not owned — checked before touching entries
 	}
-	return nil
+	if on {
+		if err := q.MarkFeedEntriesPending(ctx, sqlc.MarkFeedEntriesPendingParams{
+			NextExtractAt: sql.NullInt64{Int64: toUnix(at), Valid: true},
+			FeedID:        int64(feedID),
+		}); err != nil {
+			return mapErr(err)
+		}
+	} else if err := q.CancelFeedExtractions(ctx, int64(feedID)); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(tx.Commit())
 }
 
 func (s *Store) WeeklyEntryCount(ctx context.Context, feedID core.ID, now time.Time) (int, error) {

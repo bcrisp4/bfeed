@@ -348,7 +348,7 @@ func TestExtractionStateLifecycle(t *testing.T) {
 
 	// UpdateExtractState retry: future next_extract_at hides it from the due list.
 	future := now.Add(time.Hour)
-	if err := st.UpdateExtractState(ctx, pend[1].ID, core.ExtractPending, 1, &future); err != nil {
+	if err := st.UpdateExtractState(ctx, pend[1].ID, core.ExtractPending, 1, &future, ""); err != nil {
 		t.Fatalf("UpdateExtractState: %v", err)
 	}
 	// Verify attempts persisted.
@@ -364,6 +364,43 @@ func TestExtractionStateLifecycle(t *testing.T) {
 	}
 	if p, _ := st.ListPendingExtractions(ctx, future, 10); len(p) != 1 {
 		t.Fatalf("want 1 due after backoff, got %d", len(p))
+	}
+}
+
+// B10 #7: the extraction-failure reason round-trips through UpdateExtractState →
+// GetEntry, and B10 #6: enabling full content re-queues a terminally-'failed'
+// entry with a fresh attempt budget (attempts reset, reason cleared) in one atomic
+// SetFeedFullContent call.
+func TestFullContentReenableResetsFailedEntry(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	feedID := mustFeed(t, st, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x.example/feed", NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: true})
+	e := &core.Entry{UserID: core.DefaultUserID, FeedID: feedID, GUID: "a", URL: "https://x.example/a", PublishedAt: now, CreatedAt: now, Hash: "h", ExtractState: core.ExtractPending}
+	if _, err := st.UpsertEntries(ctx, feedID, []*core.Entry{e}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, _ := st.GetEntry(ctx, core.DefaultUserID, e.ID)
+
+	// Drive it to terminal failure with a persisted reason.
+	if err := st.UpdateExtractState(ctx, got.ID, core.ExtractFailed, 3, nil, "status 503 content-type \"text/html\""); err != nil {
+		t.Fatalf("UpdateExtractState: %v", err)
+	}
+	got, _ = st.GetEntry(ctx, core.DefaultUserID, got.ID)
+	if got.ExtractError == "" || got.ExtractAttempts != 3 {
+		t.Fatalf("failure not persisted: err=%q attempts=%d", got.ExtractError, got.ExtractAttempts)
+	}
+
+	// Toggle full content off then on: the atomic re-enable re-queues the failed
+	// entry with attempts=0 and no lingering reason.
+	if err := st.SetFeedFullContent(ctx, core.DefaultUserID, feedID, false, now); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if err := st.SetFeedFullContent(ctx, core.DefaultUserID, feedID, true, now); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	got, _ = st.GetEntry(ctx, core.DefaultUserID, got.ID)
+	if got.ExtractState != core.ExtractPending || got.ExtractAttempts != 0 || got.ExtractError != "" {
+		t.Fatalf("re-queue not reset: state=%q attempts=%d err=%q", got.ExtractState, got.ExtractAttempts, got.ExtractError)
 	}
 }
 

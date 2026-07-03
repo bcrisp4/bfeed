@@ -37,7 +37,7 @@ ORDER BY published_at DESC, id DESC LIMIT ?;
 -- 'pending' makes that write a no-op whenever the recycled row isn't itself
 -- awaiting extraction (the common case). The normal scrape path leaves the row
 -- 'pending' until this write, so it is unaffected. (audit B7)
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
 WHERE id = ? AND extract_state = 'pending';
 
 -- name: GetFeedFullContent :one
@@ -49,15 +49,23 @@ WHERE id = ? AND extract_state = 'pending';
 SELECT fetch_full_content FROM feeds WHERE id = ?;
 
 -- name: UpdateExtractState :exec
-UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ? WHERE id = ?;
+UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ?, extract_error = ? WHERE id = ?;
 
 -- name: MarkFeedEntriesPending :exec
-UPDATE entries SET extract_state = 'pending', next_extract_at = ?
+-- Re-queueing a previously-'failed' entry also resets extract_attempts to 0 so a
+-- re-enabled full-content feed gets a fresh MaxAttempts budget rather than going
+-- terminal after a single new failure (audit B10). extract_error is cleared too so
+-- a stale reason doesn't linger on a now-pending entry.
+UPDATE entries SET extract_state = 'pending', next_extract_at = ?, extract_attempts = 0, extract_error = ''
 WHERE feed_id = ? AND extract_state IN ('none','failed');
 
 -- name: CancelFeedExtractions :exec
-UPDATE entries SET extract_state = 'none', next_extract_at = NULL
-WHERE feed_id = ? AND extract_state = 'pending';
+-- Disabling full-content clears the feed's extraction artifacts: queued ('pending')
+-- entries are un-queued, and terminally-'failed' ones reset to 'none' with the
+-- failure reason cleared. Otherwise the reader keeps showing an extraction-failed
+-- note for a feed the user has turned extraction off for (audit B10).
+UPDATE entries SET extract_state = 'none', next_extract_at = NULL, extract_error = ''
+WHERE feed_id = ? AND extract_state IN ('pending','failed');
 
 -- name: WeeklyEntryCount :one
 SELECT COUNT(*) FROM entries

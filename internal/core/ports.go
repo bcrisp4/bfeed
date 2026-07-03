@@ -67,7 +67,12 @@ type FeedStore interface {
 	UpdateFeed(ctx context.Context, f *Feed) error
 	DeleteFeed(ctx context.Context, userID, feedID ID) error
 	SetFeedCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error
-	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool) error
+	// SetFeedFullContent toggles per-feed full-content extraction and reconciles the
+	// existing backlog atomically (one transaction): enabling backfills all entries
+	// to pending (at schedules the first extraction), disabling cancels queued ones.
+	// Doing both in one write means a failure can never leave the flag on with an
+	// unqueued backlog, or vice versa (audit B10).
+	SetFeedFullContent(ctx context.Context, userID, feedID ID, on bool, at time.Time) error
 	SetFeedUserTitle(ctx context.Context, userID, feedID ID, title string) error
 	// SetFeedURL changes feed_url, clears the old URL's conditional-GET validators,
 	// and moves next_check_at to now so the Poller re-fetches the new URL promptly.
@@ -89,9 +94,7 @@ type EntryStore interface {
 	DeleteEntry(ctx context.Context, userID, entryID ID) error
 	ListPendingExtractions(ctx context.Context, now time.Time, limit int) ([]*Entry, error)
 	SetEntryContent(ctx context.Context, entryID ID, content string) error
-	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
-	MarkFeedEntriesPending(ctx context.Context, feedID ID, at time.Time) error
-	CancelFeedExtractions(ctx context.Context, feedID ID) error
+	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time, reason string) error
 	MarkReadByFilter(ctx context.Context, userID ID, f EntryFilter) (int, error)
 }
 

@@ -78,7 +78,9 @@ func TestScrapeEntryUsesFinalURLAsBase(t *testing.T) {
 }
 
 func TestScrapeEntryRetriesThenFails(t *testing.T) {
-	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 500}}
+	// A genuine content failure (404: page gone / non-feed) burns attempts and goes
+	// terminal at the cap. Contrast the transient 429/5xx path below (audit B10 #1).
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 404, ContentType: "text/html"}}
 	svc, store, _ := newScrapeFixture(t, fetch, coretest.StubExtractor{})
 	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
 	e := &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending, ExtractAttempts: 0}
@@ -94,6 +96,54 @@ func TestScrapeEntryRetriesThenFails(t *testing.T) {
 	got, _ = store.GetEntry(context.Background(), core.DefaultUserID, id)
 	if got.ExtractState != core.ExtractFailed {
 		t.Fatalf("want failed at cap, got %q attempts=%d", got.ExtractState, got.ExtractAttempts)
+	}
+	// The terminal failure reason is persisted (status + content-type), not discarded.
+	if got.ExtractError == "" {
+		t.Fatalf("want persisted extract_error, got empty")
+	}
+}
+
+// B10 #1: a transient 429/5xx must NOT burn an attempt — otherwise a full-content
+// backfill burst that trips a rate limit converts a whole feed's backlog to
+// terminal failures. It reschedules honouring Retry-After instead.
+func TestScrapeTransientStatusDoesNotBurnAttempts(t *testing.T) {
+	ctx := context.Background()
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 429, ContentType: "text/html", RetryAfter: 2 * time.Hour}}
+	svc, store, clk := newScrapeFixture(t, fetch, coretest.StubExtractor{})
+	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
+
+	// Even many attempts against a rate-limited host never go terminal.
+	for i := 0; i < 5; i++ {
+		if err := svc.ScrapeEntry(ctx, &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending, ExtractAttempts: 0}); err != nil {
+			t.Fatalf("ScrapeEntry: %v", err)
+		}
+	}
+	got, _ := store.GetEntry(ctx, core.DefaultUserID, id)
+	if got.ExtractState != core.ExtractPending || got.ExtractAttempts != 0 {
+		t.Fatalf("transient 429: want pending attempts=0, got %q attempts=%d", got.ExtractState, got.ExtractAttempts)
+	}
+	// Retry-After (2h) beats BaseBackoff (10m): not due at +1h, due at +3h.
+	if due, _ := store.ListPendingExtractions(ctx, clk.T.Add(time.Hour), 10); len(due) != 0 {
+		t.Fatalf("entry due before Retry-After elapsed: %d", len(due))
+	}
+	if due, _ := store.ListPendingExtractions(ctx, clk.T.Add(3*time.Hour), 10); len(due) != 1 {
+		t.Fatalf("entry not due after Retry-After: %d", len(due))
+	}
+}
+
+// B10 review: a hostile/misconfigured Retry-After must be clamped to MaxBackoff so
+// a transient failure can't park an entry for years.
+func TestScrapeRetryAfterClampedToMaxBackoff(t *testing.T) {
+	ctx := context.Background()
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 503, ContentType: "text/html", RetryAfter: 100 * 24 * time.Hour}}
+	svc, store, clk := newScrapeFixture(t, fetch, coretest.StubExtractor{}) // MaxBackoff 24h
+	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
+	if err := svc.ScrapeEntry(ctx, &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending}); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+	// Clamped to MaxBackoff (24h): due just after 24h, not 100 days out.
+	if due, _ := store.ListPendingExtractions(ctx, clk.T.Add(25*time.Hour), 10); len(due) != 1 {
+		t.Fatalf("entry not due after MaxBackoff clamp: %d", len(due))
 	}
 }
 
