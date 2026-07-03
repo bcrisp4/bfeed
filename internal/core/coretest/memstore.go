@@ -80,6 +80,11 @@ func (s *MemStore) ListFeeds(_ context.Context, u core.ID) ([]*core.Feed, error)
 			out = append(out, &cp)
 		}
 	}
+	// Mirror the real query's `ORDER BY title COLLATE NOCASE ASC` so web tests that
+	// range ListFeeds into group rows get deterministic order (same as ListCategories).
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title)
+	})
 	return out, nil
 }
 
@@ -130,8 +135,11 @@ func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ex, ok := s.feeds[f.ID]
-	if !ok {
-		return core.ErrNotFound
+	if !ok || ex.UserID != f.UserID {
+		// The real UpdateFeed is an unchecked `:exec ... WHERE id = ? AND user_id = ?`,
+		// so a missing or other-user feed (the poll-races-a-delete case) is a silent
+		// no-op in production, not an error.
+		return nil
 	}
 	ex.SiteURL = f.SiteURL
 	ex.Title = f.Title
@@ -161,6 +169,14 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 			delete(s.nextExtract, eid) // mirror the cascade; don't leak schedule state
 		}
 	}
+	// Mirror the FK ON DELETE CASCADE on tombstones.feed_id: dropping the feed drops
+	// its tombstones too (a re-subscribe gets a fresh feed_id and a clean slate).
+	prefix := fmt.Sprintf("%d|", id)
+	for k := range s.tombstones {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.tombstones, k)
+		}
+	}
 	delete(s.feeds, id)
 	return nil
 }
@@ -173,14 +189,26 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 		if s.tombstones[tkey(feedID, e.GUID)] {
 			continue
 		}
-		dup := false
+		var existing *core.Entry
 		for _, ex := range s.entries {
 			if ex.FeedID == feedID && ex.GUID == e.GUID {
-				dup = true
+				existing = ex
 				break
 			}
 		}
-		if dup {
+		if existing != nil {
+			// Mirror store/sqlite: re-fetched entries upsert by content hash — when
+			// the hash changed, overwrite the poll-owned content fields in place and
+			// leave user state (Status/Starred/ReadAt) untouched. Not an "insert".
+			if existing.Hash != e.Hash {
+				existing.Title = e.Title
+				existing.Author = e.Author
+				existing.Content = e.Content
+				existing.Summary = e.Summary
+				existing.PublishedAt = e.PublishedAt
+				existing.URL = e.URL
+				existing.Hash = e.Hash
+			}
 			continue
 		}
 		id := s.nextID
@@ -264,7 +292,7 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		out = after
 	}
 	limit := f.Limit
-	if limit <= 0 {
+	if limit <= 0 || limit > 200 { // mirror store/sqlite ListEntries clamp
 		limit = 50
 	}
 	var next *core.Cursor
