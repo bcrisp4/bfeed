@@ -1,9 +1,17 @@
 # Used by goreleaser's `dockers_v2` build. goreleaser places prebuilt `bfeed`
-# binaries in the build context under $TARGETPLATFORM/ — no build stage here.
+# binaries in the build context under $TARGETPLATFORM/ — the binary needs no
+# build stage. The prep stage exists only to stage a /data dir: the distroless
+# base has neither the directory nor a shell to create it, so without this the
+# engine creates the VOLUME mountpoint root:root and the nonroot process (uid
+# 65532) cannot open the SQLite database.
 # For local dev image builds use the multi-stage ./Dockerfile via `make image`.
+FROM busybox:stable AS prep
+RUN mkdir -p /data
+
 FROM gcr.io/distroless/static:nonroot
 ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/bfeed /bfeed
+COPY --from=prep --chown=nonroot:nonroot /data /data
 ENV BFEED_DATABASE_PATH=/data/bfeed.db
 VOLUME ["/data"]
 EXPOSE 8080
