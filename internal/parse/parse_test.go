@@ -42,18 +42,30 @@ func TestParseHonorsHTTPCharsetWhenNoEncodingDecl(t *testing.T) {
 	}
 }
 
-// B4/F2 guard: a feed that declares its encoding in-band (gofeed already
-// transcodes it) must not be double-transcoded when the HTTP header repeats the
-// same charset — the raw bytes must reach gofeed untouched.
+// B4/F2 guard: an in-band encoding declaration plus a matching HTTP charset must
+// still decode correctly — not double-transcode into mojibake. "no space" is the
+// spelling gofeed honors (so our decoder leaves the raw bytes for gofeed to
+// transcode); "space around eq" is a spelling gofeed does NOT honor (verified: it
+// fails "invalid UTF-8" raw), so our decoder must pre-transcode it instead. Both
+// paths must yield the same correct text.
 func TestParseNoDoubleTranscodeWhenEncodingDeclared(t *testing.T) {
-	body := []byte(`<?xml version="1.0" encoding="windows-1251"?><rss version="2.0"><channel><title>` +
-		"\xd2\xe5\xf1\xf2" + `</title><item><title>i</title></item></channel></rss>`)
-	pf, err := New().Parse(body, "application/rss+xml; charset=windows-1251", "https://e.com/f")
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
+	title := "\xd2\xe5\xf1\xf2" // windows-1251 "Тест"
+	cases := []struct{ name, decl string }{
+		{"no space", `<?xml version="1.0" encoding="windows-1251"?>`},
+		{"space around eq", `<?xml version="1.0" encoding = "windows-1251"?>`},
 	}
-	if pf.Title != "Тест" {
-		t.Fatalf("title = %q, want %q (double-transcode corruption?)", pf.Title, "Тест")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(tc.decl + `<rss version="2.0"><channel><title>` +
+				title + `</title><item><title>i</title></item></channel></rss>`)
+			pf, err := New().Parse(body, "application/rss+xml; charset=windows-1251", "https://e.com/f")
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if pf.Title != "Тест" {
+				t.Fatalf("title = %q, want %q (double-transcode corruption?)", pf.Title, "Тест")
+			}
+		})
 	}
 }
 

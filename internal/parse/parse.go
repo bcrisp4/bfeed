@@ -101,6 +101,13 @@ func hasXMLEncodingDecl(data []byte) bool {
 	if end < 0 {
 		return false
 	}
+	// Match exactly the spelling gofeed/goxpp honors: a lowercase, adjacent
+	// "encoding=" (it does NOT recognize a case-variant or whitespace-around-'='
+	// form \u2014 verified: those raw-byte feeds fail "invalid UTF-8"). The check is
+	// deliberately congruent with the parser: it returns true only when gofeed
+	// itself will transcode, so we skip pre-wrapping only then and never
+	// double-transcode. Any spelling gofeed ignores falls through to charset
+	// pre-transcoding, which is exactly what such a feed needs.
 	return strings.Contains(s[:end], "encoding=")
 }
 
