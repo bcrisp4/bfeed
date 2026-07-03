@@ -13,6 +13,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Feeds that permanently move to a new address (a `301`/`308` redirect) are now followed to the new URL and remembered, so bfeed stops re-fetching the old redirecting address on every poll and a later re-subscribe to the new address no longer creates a duplicate feed. Temporary redirects are left as-is.
+- Images and links now resolve correctly when a fetch redirects (for example, via a link-tracking hop or a moved site): relative URLs in full-text (reader-view) articles and in feed entry content are resolved against the address the content was actually served from instead of the original link, so they no longer break. Feed auto-discovery resolves relative feed links the same way.
 - Feeds served in a non-UTF-8 character set (declared only via the HTTP `Content-Type` header, as many older feeds are) now ingest correctly instead of failing every poll and getting permanently stuck; their text is decoded to the right characters. Feeds that declare their encoding in the document itself continue to work unchanged.
 - Entries published without a date are now ordered by when bfeed first saw them, so they appear at the top of the list with everything else instead of being buried at the very bottom (and no longer show a nonsensical year-0001 timestamp).
 - A newly created feed that has no entries yet (and no title) can now be subscribed to, instead of being rejected with "no feed found at URL" until it publishes its first item.

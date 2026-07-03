@@ -497,6 +497,11 @@ func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) 
 	if !ok || f.UserID != u {
 		return core.ErrNotFound
 	}
+	for _, other := range s.feeds { // mirror UNIQUE(user_id, feed_url) in the real store
+		if other.UserID == u && other.FeedURL == url && other.ID != feedID {
+			return core.ErrConflict
+		}
+	}
 	cp := *f
 	cp.FeedURL = url
 	cp.ETag = ""         // mirror the SQL: stale conditional-GET headers must not

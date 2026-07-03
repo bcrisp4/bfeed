@@ -182,10 +182,14 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	// feed" — do NOT also require a title or entries, or a valid but freshly
 	// created (untitled, item-less) feed is wrongly rejected and falls through to
 	// HTML discovery of its own non-HTML body.
-	if pf, perr := s.parser.Parse(resp.Body, resp.ContentType, rawURL); perr == nil && pf != nil {
-		return rawURL, pf, resp, nil
+	// Resolve relative links against the URL the bytes actually came from (after
+	// any redirect), but only adopt the final URL as the feed's identity when the
+	// redirect chain was entirely permanent — see canonicalURL.
+	base := orURL(resp.FinalURL, rawURL)
+	if pf, perr := s.parser.Parse(resp.Body, resp.ContentType, base); perr == nil && pf != nil {
+		return canonicalURL(rawURL, resp), pf, resp, nil
 	}
-	urls, derr := s.parser.Discover(resp.Body, rawURL)
+	urls, derr := s.parser.Discover(resp.Body, base)
 	if derr != nil || len(urls) == 0 {
 		return "", nil, nil, fmt.Errorf("%w: no feed found at URL", ErrValidation)
 	}
@@ -193,11 +197,32 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	if err != nil || resp2.Status != 200 {
 		return "", nil, nil, fmt.Errorf("%w: discovered feed unreachable", ErrValidation)
 	}
-	pf, perr := s.parser.Parse(resp2.Body, resp2.ContentType, urls[0])
+	base2 := orURL(resp2.FinalURL, urls[0])
+	pf, perr := s.parser.Parse(resp2.Body, resp2.ContentType, base2)
 	if perr != nil {
 		return "", nil, nil, fmt.Errorf("%w: discovered feed unparseable", ErrValidation)
 	}
-	return urls[0], pf, resp2, nil
+	return canonicalURL(urls[0], resp2), pf, resp2, nil
+}
+
+// orURL returns final when non-empty, else fallback. Used to pick the base for
+// resolving relative links: always prefer the post-redirect URL the bytes came
+// from, regardless of whether the redirect was permanent.
+func orURL(final, fallback string) string {
+	if final != "" {
+		return final
+	}
+	return fallback
+}
+
+// canonicalURL upgrades a feed's identity to the post-redirect URL only when the
+// redirect chain was entirely permanent (301/308). A temporary (302/307) redirect
+// must not rewrite the stored feed_url.
+func canonicalURL(current string, resp *FetchResponse) string {
+	if resp.PermanentRedirect && resp.FinalURL != "" {
+		return resp.FinalURL
+	}
+	return current
 }
 
 func (s *FeedService) Refresh(ctx context.Context, userID, feedID ID) error {
@@ -222,6 +247,7 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 		return s.recordError(ctx, f, now, err.Error(), 0)
 	}
 	if resp.NotModified {
+		s.adoptPermanentRedirect(ctx, f, resp)
 		return s.recordSuccess(ctx, f, now, resp, nil)
 	}
 	if resp.Status == 429 || resp.Status >= 500 {
@@ -230,14 +256,49 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 	if resp.Status != 200 {
 		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), 0)
 	}
-	pf, err := s.parser.Parse(resp.Body, resp.ContentType, f.FeedURL)
+	s.adoptPermanentRedirect(ctx, f, resp)
+	// Resolve relative entry links / SiteURL against the post-redirect URL.
+	pf, err := s.parser.Parse(resp.Body, resp.ContentType, orURL(resp.FinalURL, f.FeedURL))
 	if err != nil {
 		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0)
 	}
 	return s.recordSuccess(ctx, f, now, resp, pf)
 }
 
-func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error {
+// adoptPermanentRedirect migrates a feed's stored URL when a poll followed an
+// entirely-permanent (301/308) redirect chain to a new canonical URL, so the feed
+// stops paying the redirect hop on every poll and a later re-subscribe to the new
+// URL is correctly deduplicated. Unlike the subscribe path, a poll must never fail
+// on conflict: if the canonical URL is already subscribed under another row (or any
+// other store error occurs), keep the current URL and log — the poll still succeeds
+// against the fetched body. Clears the stale conditional-GET validators on adoption
+// (they belonged to the old URL); recordSuccess repopulates them from this response.
+func (s *FeedService) adoptPermanentRedirect(ctx context.Context, f *Feed, resp *FetchResponse) {
+	if !resp.PermanentRedirect || resp.FinalURL == "" || resp.FinalURL == f.FeedURL {
+		return
+	}
+	if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, resp.FinalURL); err != nil {
+		if errors.Is(err, ErrConflict) {
+			s.log.Warn("feed permanently redirected to an already-subscribed URL; keeping current URL",
+				"feed_id", int64(f.ID), "from", f.FeedURL, "to", resp.FinalURL)
+		} else {
+			s.log.Warn("persisting permanent-redirect URL failed; keeping current URL",
+				"feed_id", int64(f.ID), "from", f.FeedURL, "to", resp.FinalURL, "error", err)
+		}
+		return
+	}
+	s.log.Info("feed permanently moved; adopted canonical URL",
+		"feed_id", int64(f.ID), "from", f.FeedURL, "to", resp.FinalURL)
+	f.FeedURL = resp.FinalURL
+	f.ETag = ""
+	f.LastModified = ""
+}
+
+// ingest sanitises and upserts a parsed feed's entries. baseURL is the URL the
+// feed bytes were actually read from (post-redirect); relative href/img in entry
+// content resolve against it — never the pre-redirect feed URL, which for a
+// temporary redirect (not adopted as identity) would bake in broken links.
+func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseURL string) error {
 	if pf == nil {
 		return nil
 	}
@@ -257,8 +318,8 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 		}
 		entries = append(entries, &Entry{
 			UserID: f.UserID, FeedID: f.ID, GUID: pe.GUID, URL: pe.URL, Title: pe.Title,
-			Author: pe.Author, Content: s.san.Sanitize(pe.Content, f.FeedURL),
-			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: published,
+			Author: pe.Author, Content: s.san.Sanitize(pe.Content, baseURL),
+			Summary: s.san.Sanitize(pe.Summary, baseURL), PublishedAt: published,
 			Status: StatusUnread, CreatedAt: now,
 			Hash: pe.Hash, ExtractState: state,
 		})
@@ -296,7 +357,7 @@ func (s *FeedService) minCheck(now time.Time) time.Time {
 
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
 	if pf != nil {
-		if err := s.ingest(ctx, f, pf); err != nil {
+		if err := s.ingest(ctx, f, pf, orURL(resp.FinalURL, f.FeedURL)); err != nil {
 			// A store-layer ingest failure (disk full, I/O error, lock timeout)
 			// must not skip rescheduling: returning early here leaves next_check_at
 			// in the past, so the feed is re-dispatched (full-body, no conditional

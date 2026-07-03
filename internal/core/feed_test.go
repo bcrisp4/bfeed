@@ -21,6 +21,146 @@ func newFeedSvc(store core.Store, fetcher core.Fetcher, parser core.FeedParser) 
 	return core.NewFeedService(store, fetcher, parser, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(), cfg), clk
 }
 
+// recordingParser captures the base URL passed to Parse so a test can assert the
+// post-redirect FinalURL (not the pre-redirect request URL) is used for resolution.
+type recordingParser struct {
+	pf       *core.ParsedFeed
+	baseSeen string
+}
+
+func (p *recordingParser) Parse(_ []byte, _, base string) (*core.ParsedFeed, error) {
+	p.baseSeen = base
+	return p.pf, nil
+}
+func (p *recordingParser) Discover([]byte, string) ([]string, error) { return nil, nil }
+
+func TestIngestSanitizesContentAgainstFinalURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const orig = "https://old.test/feed.xml"
+	const finalURL = "https://mirror.test/feed.xml"
+	// A temporary redirect: identity is NOT adopted, but relative links in entry
+	// content must still resolve against where the bytes came from (finalURL).
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: finalURL, PermanentRedirect: false,
+	}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "B", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: finalURL + "/1", Content: `<img src="/x.png">`},
+	}}}
+	san := &recordingSanitizer{}
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	cfg := core.FeedServiceConfig{
+		Schedule:   core.ScheduleConfig{MinInterval: 15 * time.Minute, MaxInterval: 24 * time.Hour, Factor: 1},
+		Reschedule: core.RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour},
+		Jitter:     func(time.Duration) time.Duration { return 0 },
+	}
+	svc := core.NewFeedService(store, fetcher, parser, san, clk, coretest.DiscardLogger(), cfg)
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: orig, Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	if san.baseURL != finalURL {
+		t.Fatalf("Sanitize base = %q, want final URL %q (not pre-redirect %q)", san.baseURL, finalURL, orig)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != orig {
+		t.Fatalf("temporary redirect wrongly adopted: feed_url = %q, want %q", got.FeedURL, orig)
+	}
+}
+
+func seedFeed(t *testing.T, store *coretest.MemStore, f *core.Feed) core.ID {
+	t.Helper()
+	id, err := store.CreateFeed(context.Background(), f)
+	if err != nil {
+		t.Fatalf("CreateFeed: %v", err)
+	}
+	return id
+}
+
+func TestResolveFeedUsesFinalURLBase(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const finalURL = "https://canonical.test/feed.xml"
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>"), FinalURL: finalURL}}
+	parser := &recordingParser{pf: &core.ParsedFeed{Title: "B"}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://old.test/feed.xml", nil, false); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if parser.baseSeen != finalURL {
+		t.Fatalf("Parse base = %q, want final URL %q", parser.baseSeen, finalURL)
+	}
+}
+
+func TestPollAdoptsPermanentRedirect(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const canonical = "https://new.test/feed.xml"
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: canonical, PermanentRedirect: true,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://old.test/feed.xml", Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != canonical {
+		t.Fatalf("feed_url = %q, want adopted canonical %q", got.FeedURL, canonical)
+	}
+}
+
+func TestPollTemporaryRedirectKeepsURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: "https://mirror.test/feed.xml", PermanentRedirect: false,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	const orig = "https://old.test/feed.xml"
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: orig, Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != orig {
+		t.Fatalf("feed_url = %q, want unchanged %q (temporary redirect)", got.FeedURL, orig)
+	}
+}
+
+func TestPollRedirectConflictKeepsOldURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const canonical = "https://new.test/feed.xml"
+	const orig = "https://old.test/feed.xml"
+	// A feed already exists at the canonical URL, so adopting it must conflict.
+	seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: canonical, Title: "Other"})
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: canonical, PermanentRedirect: true,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: orig, Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != orig {
+		t.Fatalf("feed_url = %q, want kept %q on conflict", got.FeedURL, orig)
+	}
+	if got.ErrorCount != 0 || got.LastError != "" {
+		t.Fatalf("poll recorded an error on redirect conflict: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
 func TestSubscribeCreatesFeedAndEntries(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()

@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -65,10 +66,20 @@ func New(cfg Config) *Client {
 	}
 	return &Client{
 		cfg:  cfg,
-		http: &http.Client{Timeout: cfg.Timeout, CheckRedirect: capRedirects(5), Transport: tr},
+		http: &http.Client{Timeout: cfg.Timeout, CheckRedirect: checkRedirect(5), Transport: tr},
 		sems: make(map[string]chan struct{}),
 	}
 }
+
+// redirectTracker accumulates redirect-chain facts for a single Fetch. It lives
+// in the request context because http.Client's CheckRedirect closure is shared
+// across all requests on the Client, so per-request state can't live on Client.
+type redirectTracker struct {
+	hops      int
+	permanent bool // starts true; cleared if any hop is not 301/308
+}
+
+type redirectKey struct{}
 
 var _ core.Fetcher = (*Client)(nil)
 
@@ -88,7 +99,13 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 	if err != nil {
 		return nil, fmt.Errorf("bad url: %w", err)
 	}
-	sem := c.sem(u.Host)
+	// The token is acquired once, before Do, for the ORIGIN host. A fetch that
+	// redirects to another host therefore still counts against the origin host's
+	// budget rather than the target's — a known residual (LOW, single-user MVP);
+	// swapping tokens mid-redirect in CheckRedirect would add deadlock surface for
+	// little gain. Normalizing the key (hostKey) at least stops case/default-port
+	// variants of the SAME host getting independent budgets.
+	sem := c.sem(hostKey(u))
 	select {
 	case sem <- struct{}{}:
 		defer func() { <-sem }()
@@ -96,6 +113,8 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 		return nil, ctx.Err()
 	}
 
+	rt := &redirectTracker{permanent: true}
+	ctx = context.WithValue(ctx, redirectKey{}, rt)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
 	if err != nil {
 		return nil, err
@@ -120,7 +139,9 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
 		RetryAfter:   parseRetryAfter(resp.Header.Get("Retry-After")),
+		FinalURL:     resp.Request.URL.String(), // last request in the redirect chain
 	}
+	out.PermanentRedirect = rt.hops > 0 && rt.permanent
 	if resp.StatusCode == http.StatusNotModified {
 		out.NotModified = true
 		return out, nil
@@ -153,13 +174,42 @@ func parseRetryAfter(v string) time.Duration {
 	return 0
 }
 
-func capRedirects(n int) func(*http.Request, []*http.Request) error {
-	return func(_ *http.Request, via []*http.Request) error {
+// checkRedirect caps the chain at n hops and records, in the request-scoped
+// redirectTracker, whether every hop so far was a permanent (301/308) redirect —
+// so the caller can tell a moved feed (adopt the new URL) from a temporary one.
+func checkRedirect(n int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= n {
 			return fmt.Errorf("stopped after %d redirects", n)
 		}
+		if rt, ok := req.Context().Value(redirectKey{}).(*redirectTracker); ok {
+			rt.hops++
+			// req.Response is the redirect response that produced this request.
+			if req.Response == nil ||
+				(req.Response.StatusCode != http.StatusMovedPermanently &&
+					req.Response.StatusCode != http.StatusPermanentRedirect) {
+				rt.permanent = false
+			}
+		}
 		return nil
 	}
+}
+
+// hostKey normalizes a URL's host for the per-host politeness semaphore:
+// lower-cased hostname with the port dropped when it's the scheme default
+// (:80 for http, :443 for https). Without this, "Example.com", "example.com",
+// and "example.com:80" would each get an independent concurrency budget.
+func hostKey(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port == "" || isDefaultPort(u.Scheme, port) {
+		return host
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func isDefaultPort(scheme, port string) bool {
+	return (scheme == "http" && port == "80") || (scheme == "https" && port == "443")
 }
 
 // blockedPrefixes are non-public ranges netip's Is* predicates miss: CGNAT

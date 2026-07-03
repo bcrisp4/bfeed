@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,6 +65,86 @@ func TestRetryAfterParsed(t *testing.T) {
 	}
 	if resp.RetryAfter != 120*time.Second {
 		t.Fatalf("RetryAfter = %v", resp.RetryAfter)
+	}
+}
+
+func TestFetchFinalURLNoRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("body"))
+	}))
+	defer srv.Close()
+	resp, err := testClient().Fetch(context.Background(), core.FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.FinalURL != srv.URL {
+		t.Fatalf("FinalURL = %q, want %q", resp.FinalURL, srv.URL)
+	}
+	if resp.PermanentRedirect {
+		t.Fatal("PermanentRedirect = true with no redirect")
+	}
+}
+
+func TestFetchPermanentRedirectFinalURL(t *testing.T) {
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("moved"))
+	}))
+	defer dest.Close()
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", dest.URL)
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+	defer src.Close()
+	resp, err := testClient().Fetch(context.Background(), core.FetchRequest{URL: src.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.FinalURL != dest.URL {
+		t.Fatalf("FinalURL = %q, want %q", resp.FinalURL, dest.URL)
+	}
+	if !resp.PermanentRedirect {
+		t.Fatal("PermanentRedirect = false after a 301 chain")
+	}
+}
+
+func TestFetchTemporaryRedirectNotPermanent(t *testing.T) {
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("moved"))
+	}))
+	defer dest.Close()
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", dest.URL)
+		w.WriteHeader(http.StatusFound) // 302
+	}))
+	defer src.Close()
+	resp, err := testClient().Fetch(context.Background(), core.FetchRequest{URL: src.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.FinalURL != dest.URL {
+		t.Fatalf("FinalURL = %q, want %q", resp.FinalURL, dest.URL)
+	}
+	if resp.PermanentRedirect {
+		t.Fatal("PermanentRedirect = true after a 302 (temporary) redirect")
+	}
+}
+
+func TestHostKeyNormalization(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"http://Example.com/feed", "example.com"},
+		{"http://example.com:80/feed", "example.com"},
+		{"https://example.com:443/feed", "example.com"},
+		{"http://example.com:8080/feed", "example.com:8080"},
+		{"https://EXAMPLE.com/feed", "example.com"},
+	}
+	for _, c := range cases {
+		u, err := url.Parse(c.in)
+		if err != nil {
+			t.Fatalf("parse %q: %v", c.in, err)
+		}
+		if got := hostKey(u); got != c.want {
+			t.Errorf("hostKey(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

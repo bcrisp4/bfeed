@@ -95,14 +95,21 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 	if resp.Status != 200 || !isHTML(resp.ContentType) {
 		return s.fail(ctx, e, "non-html or non-200 status")
 	}
-	html, err := s.ext.Extract(ctx, e.URL, resp.Body)
+	// Resolve relative links against the post-redirect URL: fetching e.URL may
+	// have followed redirects (feedproxy, tracking, a moved domain), and the page
+	// body's relative img/href are relative to where it was actually served.
+	pageURL := resp.FinalURL
+	if pageURL == "" {
+		pageURL = e.URL
+	}
+	html, err := s.ext.Extract(ctx, pageURL, resp.Body)
 	if err != nil {
 		return s.fail(ctx, e, "extract: "+err.Error())
 	}
 	if strings.TrimSpace(html) == "" {
 		return s.fail(ctx, e, "extract: empty content")
 	}
-	safe := s.san.Sanitize(html, e.URL) // sanitise-before-persist invariant
+	safe := s.san.Sanitize(html, pageURL) // sanitise-before-persist invariant
 	if strings.TrimSpace(safe) == "" {
 		// Extraction yielded only content the sanitiser stripped; treat as a
 		// failure rather than overwriting the feed-provided content with nothing.
