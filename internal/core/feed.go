@@ -62,16 +62,12 @@ func (s *FeedService) Delete(ctx context.Context, userID, feedID ID) error {
 	return s.store.DeleteFeed(ctx, userID, feedID)
 }
 
-// SetFullContent toggles per-feed full-content extraction for an owned feed.
-// Enabling backfills ALL existing entries to pending; disabling cancels queued ones.
+// SetFullContent toggles per-feed full-content extraction for an owned feed. The
+// flag flip and backlog reconciliation (enable → backfill to pending; disable →
+// cancel queued) happen atomically in the store, so a partial failure can never
+// leave the flag on with an unqueued backlog (audit B10).
 func (s *FeedService) SetFullContent(ctx context.Context, userID, feedID ID, on bool) error {
-	if err := s.store.SetFeedFullContent(ctx, userID, feedID, on); err != nil {
-		return err // ErrNotFound if not owned — checked before touching entries
-	}
-	if on {
-		return s.store.MarkFeedEntriesPending(ctx, feedID, s.clk.Now())
-	}
-	return s.store.CancelFeedExtractions(ctx, feedID)
+	return s.store.SetFeedFullContent(ctx, userID, feedID, on, s.clk.Now())
 }
 
 func (s *FeedService) SetCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error {
@@ -302,6 +298,15 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 	// Resolve relative entry links / SiteURL against the post-redirect URL.
 	pf, err := s.parser.Parse(resp.Body, resp.ContentType, orURL(resp.FinalURL, f.FeedURL))
 	if err != nil {
+		// The stored URL served HTML, not a feed — typically a site-page subscribe
+		// whose initial discovery died (network blip, the 60s subscribe-budget
+		// timeout, or a restart mid-goroutine), leaving the feed pointing at the page.
+		// Plain PollFeed would fail parse here forever with no re-discovery. Route it
+		// back through the full resolve+discover path so a scheduled poll or manual
+		// refresh self-heals and persists the discovered feed URL (audit B10).
+		if isHTML(resp.ContentType) {
+			return s.ResolveAndIngest(ctx, f)
+		}
 		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0)
 	}
 	return s.recordSuccess(ctx, f, now, resp, pf)
@@ -435,7 +440,13 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 	f.UpdatedAt = now
 	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, f.ErrorCount, retryAfter, s.cfg.Jitter)
 	s.log.Warn("feed poll error", "feed_id", int64(f.ID), "url", f.FeedURL, "error", msg)
-	return s.store.UpdateFeed(ctx, f)
+	// Persist with a detached context: when the poll failed *because* ctx was
+	// cancelled/expired (the 60s subscribe budget, or shutdown), reusing it here
+	// would fail the write too and the error row would never be recorded — the
+	// pending-row-becomes-error-row UX silently never happens (audit B10).
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return s.store.UpdateFeed(pctx, f)
 }
 
 // recordPanic records a recovered pipeline panic as a feed error (with backoff
@@ -485,6 +496,18 @@ func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFe
 	if err := s.ensureCategoryOwned(ctx, userID, in.CategoryID); err != nil {
 		return res, err
 	}
+	// Apply the URL change FIRST. It is the only step with a realistic failure — an
+	// ErrConflict when the new URL duplicates another subscribed feed — so doing it
+	// before the other writes means a conflict leaves nothing else persisted and the
+	// "already exists" error the web layer shows is truthful (audit B10). The store
+	// writes are not one transaction, but the remaining steps only fail on hard DB
+	// errors, not user input.
+	if newURL != "" && newURL != f.FeedURL {
+		if err := s.store.SetFeedURL(ctx, userID, feedID, newURL, s.clk.Now()); err != nil {
+			return res, err
+		}
+		res.URLChanged = true
+	}
 	if err := s.store.SetFeedUserTitle(ctx, userID, feedID, strings.TrimSpace(in.Title)); err != nil {
 		return res, err
 	}
@@ -498,12 +521,6 @@ func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFe
 		if err := s.SetFullContent(ctx, userID, feedID, in.FullContent); err != nil {
 			return res, err
 		}
-	}
-	if newURL != "" && newURL != f.FeedURL {
-		if err := s.store.SetFeedURL(ctx, userID, feedID, newURL, s.clk.Now()); err != nil {
-			return res, err
-		}
-		res.URLChanged = true
 	}
 	return res, nil
 }

@@ -44,6 +44,7 @@ type Entry struct {
 	ExtractState    string
 	ExtractAttempts int64
 	NextExtractAt   sql.NullInt64
+	ExtractError    string
 }
 
 type Feed struct {

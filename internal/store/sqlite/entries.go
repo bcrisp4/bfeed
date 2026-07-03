@@ -122,6 +122,7 @@ func entryFromRow(r sqlc.Entry) *core.Entry {
 		Hash:            r.Hash,
 		ExtractState:    core.ExtractState(r.ExtractState),
 		ExtractAttempts: int(r.ExtractAttempts),
+		ExtractError:    r.ExtractError,
 	}
 }
 
@@ -337,24 +338,14 @@ func (s *Store) SetEntryContent(ctx context.Context, entryID core.ID, content st
 	return mapErr(s.q.SetEntryContent(ctx, sqlc.SetEntryContentParams{Content: content, ID: int64(entryID)}))
 }
 
-func (s *Store) UpdateExtractState(ctx context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time) error {
+func (s *Store) UpdateExtractState(ctx context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time, reason string) error {
 	return mapErr(s.q.UpdateExtractState(ctx, sqlc.UpdateExtractStateParams{
 		ExtractState:    string(state),
 		ExtractAttempts: int64(attempts),
 		NextExtractAt:   nullUnix(nextAt),
+		ExtractError:    reason,
 		ID:              int64(entryID),
 	}))
-}
-
-func (s *Store) MarkFeedEntriesPending(ctx context.Context, feedID core.ID, at time.Time) error {
-	return mapErr(s.q.MarkFeedEntriesPending(ctx, sqlc.MarkFeedEntriesPendingParams{
-		NextExtractAt: sql.NullInt64{Int64: toUnix(at), Valid: true},
-		FeedID:        int64(feedID),
-	}))
-}
-
-func (s *Store) CancelFeedExtractions(ctx context.Context, feedID core.ID) error {
-	return mapErr(s.q.CancelFeedExtractions(ctx, int64(feedID)))
 }
 
 func placeholders(ids []core.ID) (string, []any) {

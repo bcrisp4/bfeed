@@ -20,7 +20,7 @@ type ScrapeConfig struct {
 type scrapeStore interface {
 	// SetEntryContent stores the sanitised HTML and transitions extract_state to 'done'.
 	SetEntryContent(ctx context.Context, entryID ID, content string) error
-	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time) error
+	UpdateExtractState(ctx context.Context, entryID ID, state ExtractState, attempts int, nextAt *time.Time, reason string) error
 }
 
 // ScrapeService fetches, extracts, sanitises, and persists full article content
@@ -92,8 +92,15 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 	if err != nil {
 		return s.fail(ctx, e, "fetch: "+err.Error())
 	}
+	if resp.Status == 429 || resp.Status >= 500 {
+		// Transient host trouble (rate limit / outage). Reschedule without burning
+		// an attempt and honour Retry-After, mirroring PollFeed's 429/5xx branch — a
+		// full-content backfill burst that trips a rate limit must not convert a
+		// whole feed's backlog to terminal extraction failures (audit B10).
+		return s.retryLater(ctx, e, fmt.Sprintf("status %d content-type %q", resp.Status, resp.ContentType), resp.RetryAfter)
+	}
 	if resp.Status != 200 || !isHTML(resp.ContentType) {
-		return s.fail(ctx, e, "non-html or non-200 status")
+		return s.fail(ctx, e, fmt.Sprintf("status %d content-type %q", resp.Status, resp.ContentType))
 	}
 	// Resolve relative links against the post-redirect URL: fetching e.URL may
 	// have followed redirects (feedproxy, tracking, a moved domain), and the page
@@ -131,11 +138,27 @@ func (s *ScrapeService) fail(ctx context.Context, e *Entry, reason string) error
 	attempts := e.ExtractAttempts + 1
 	if attempts >= s.cfg.MaxAttempts {
 		s.log.Warn("extraction failed (terminal)", "entry_id", int64(e.ID), "url", e.URL, "reason", reason)
-		return s.store.UpdateExtractState(ctx, e.ID, ExtractFailed, attempts, nil)
+		return s.store.UpdateExtractState(ctx, e.ID, ExtractFailed, attempts, nil, reason)
 	}
 	next := s.clk.Now().Add(ExtractBackoff(s.cfg, attempts, s.jitter))
 	s.log.Info("extraction retry scheduled", "entry_id", int64(e.ID), "attempt", attempts, "reason", reason)
-	return s.store.UpdateExtractState(ctx, e.ID, ExtractPending, attempts, &next)
+	return s.store.UpdateExtractState(ctx, e.ID, ExtractPending, attempts, &next, reason)
+}
+
+// retryLater reschedules a transient failure (429/5xx) WITHOUT incrementing the
+// attempt count, so a temporarily rate-limited or down host never exhausts the
+// attempt cap. Backs off at least BaseBackoff, honouring a longer Retry-After.
+func (s *ScrapeService) retryLater(ctx context.Context, e *Entry, reason string, retryAfter time.Duration) error {
+	next := s.clk.Now().Add(maxDur(s.cfg.BaseBackoff, retryAfter))
+	s.log.Info("extraction deferred (transient)", "entry_id", int64(e.ID), "reason", reason, "retry_after", retryAfter)
+	return s.store.UpdateExtractState(ctx, e.ID, ExtractPending, e.ExtractAttempts, &next, reason)
+}
+
+func maxDur(a, b time.Duration) time.Duration {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 // ExtractBackoff returns BaseBackoff*2^(attempt-1), capped at MaxBackoff, plus

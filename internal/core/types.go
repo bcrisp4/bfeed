@@ -80,6 +80,7 @@ type Entry struct {
 	Hash            string
 	ExtractState    ExtractState
 	ExtractAttempts int
+	ExtractError    string // last extraction-failure reason ("" once done/never-failed)
 }
 
 // FeedEntryStats holds per-feed entry counts for the feed list and headers.

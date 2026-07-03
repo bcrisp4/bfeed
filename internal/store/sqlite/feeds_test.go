@@ -213,14 +213,14 @@ func TestFeedFullContentRoundTripAndToggle(t *testing.T) {
 	if err != nil || !got.FetchFullContent {
 		t.Fatalf("want FetchFullContent=true, got %+v err=%v", got, err)
 	}
-	if err := st.SetFeedFullContent(ctx, core.DefaultUserID, id, false); err != nil {
+	if err := st.SetFeedFullContent(ctx, core.DefaultUserID, id, false, now); err != nil {
 		t.Fatalf("SetFeedFullContent: %v", err)
 	}
 	got, _ = st.GetFeed(ctx, core.DefaultUserID, id)
 	if got.FetchFullContent {
 		t.Fatalf("want FetchFullContent=false after toggle")
 	}
-	if err := st.SetFeedFullContent(ctx, 999, id, true); !errors.Is(err, core.ErrNotFound) {
+	if err := st.SetFeedFullContent(ctx, 999, id, true, now); !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("wrong-user toggle: want ErrNotFound, got %v", err)
 	}
 }

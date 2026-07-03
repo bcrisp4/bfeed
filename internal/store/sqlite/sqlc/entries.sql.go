@@ -38,7 +38,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, arg DeleteEntryParams) (int64
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error FROM entries WHERE id = ? AND user_id = ?
 `
 
 type GetEntryParams struct {
@@ -68,6 +68,7 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 		&i.ExtractState,
 		&i.ExtractAttempts,
 		&i.NextExtractAt,
+		&i.ExtractError,
 	)
 	return i, err
 }
@@ -170,7 +171,7 @@ func (q *Queries) InsertTombstone(ctx context.Context, arg InsertTombstoneParams
 }
 
 const listPendingExtractions = `-- name: ListPendingExtractions :many
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at FROM entries
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
 ORDER BY published_at DESC, id DESC LIMIT ?
 `
@@ -208,6 +209,7 @@ func (q *Queries) ListPendingExtractions(ctx context.Context, arg ListPendingExt
 			&i.ExtractState,
 			&i.ExtractAttempts,
 			&i.NextExtractAt,
+			&i.ExtractError,
 		); err != nil {
 			return nil, err
 		}
@@ -223,7 +225,7 @@ func (q *Queries) ListPendingExtractions(ctx context.Context, arg ListPendingExt
 }
 
 const markFeedEntriesPending = `-- name: MarkFeedEntriesPending :exec
-UPDATE entries SET extract_state = 'pending', next_extract_at = ?
+UPDATE entries SET extract_state = 'pending', next_extract_at = ?, extract_attempts = 0, extract_error = ''
 WHERE feed_id = ? AND extract_state IN ('none','failed')
 `
 
@@ -232,13 +234,17 @@ type MarkFeedEntriesPendingParams struct {
 	FeedID        int64
 }
 
+// Re-queueing a previously-'failed' entry also resets extract_attempts to 0 so a
+// re-enabled full-content feed gets a fresh MaxAttempts budget rather than going
+// terminal after a single new failure (audit B10). extract_error is cleared too so
+// a stale reason doesn't linger on a now-pending entry.
 func (q *Queries) MarkFeedEntriesPending(ctx context.Context, arg MarkFeedEntriesPendingParams) error {
 	_, err := q.db.ExecContext(ctx, markFeedEntriesPending, arg.NextExtractAt, arg.FeedID)
 	return err
 }
 
 const setEntryContent = `-- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
 WHERE id = ? AND extract_state = 'pending'
 `
 
@@ -308,13 +314,14 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 }
 
 const updateExtractState = `-- name: UpdateExtractState :exec
-UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ? WHERE id = ?
+UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ?, extract_error = ? WHERE id = ?
 `
 
 type UpdateExtractStateParams struct {
 	ExtractState    string
 	ExtractAttempts int64
 	NextExtractAt   sql.NullInt64
+	ExtractError    string
 	ID              int64
 }
 
@@ -323,6 +330,7 @@ func (q *Queries) UpdateExtractState(ctx context.Context, arg UpdateExtractState
 		arg.ExtractState,
 		arg.ExtractAttempts,
 		arg.NextExtractAt,
+		arg.ExtractError,
 		arg.ID,
 	)
 	return err

@@ -498,7 +498,11 @@ func (s *MemStore) DeleteCategory(_ context.Context, u, id core.ID) error {
 	return nil
 }
 
-func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on bool) error {
+// SetFeedFullContent flips the flag and reconciles the backlog atomically (one
+// lock hold), mirroring the sqlite transaction: enable backfills none/failed
+// entries to pending (resetting attempts + clearing the reason, per #6), disable
+// cancels queued ones.
+func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on bool, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.feeds[feedID]
@@ -506,6 +510,22 @@ func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on b
 		return core.ErrNotFound
 	}
 	f.FetchFullContent = on
+	for _, e := range s.entries {
+		if e.FeedID != feedID {
+			continue
+		}
+		if on {
+			if e.ExtractState == core.ExtractNone || e.ExtractState == core.ExtractFailed {
+				e.ExtractState = core.ExtractPending
+				e.ExtractAttempts = 0
+				e.ExtractError = ""
+				s.nextExtract[e.ID] = at
+			}
+		} else if e.ExtractState == core.ExtractPending {
+			e.ExtractState = core.ExtractNone
+			delete(s.nextExtract, e.ID)
+		}
+	}
 	return nil
 }
 
@@ -641,11 +661,12 @@ func (s *MemStore) SetEntryContent(_ context.Context, entryID core.ID, content s
 	}
 	e.Content = content
 	e.ExtractState = core.ExtractDone
+	e.ExtractError = "" // mirror SQL: a successful extract clears the failure reason
 	delete(s.nextExtract, entryID)
 	return nil
 }
 
-func (s *MemStore) UpdateExtractState(_ context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time) error {
+func (s *MemStore) UpdateExtractState(_ context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.entries[entryID]
@@ -654,34 +675,11 @@ func (s *MemStore) UpdateExtractState(_ context.Context, entryID core.ID, state 
 	}
 	e.ExtractState = state
 	e.ExtractAttempts = attempts
+	e.ExtractError = reason
 	if nextAt != nil {
 		s.nextExtract[entryID] = *nextAt
 	} else {
 		delete(s.nextExtract, entryID)
-	}
-	return nil
-}
-
-func (s *MemStore) MarkFeedEntriesPending(_ context.Context, feedID core.ID, at time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, e := range s.entries {
-		if e.FeedID == feedID && (e.ExtractState == core.ExtractNone || e.ExtractState == core.ExtractFailed) {
-			e.ExtractState = core.ExtractPending
-			s.nextExtract[e.ID] = at
-		}
-	}
-	return nil
-}
-
-func (s *MemStore) CancelFeedExtractions(_ context.Context, feedID core.ID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, e := range s.entries {
-		if e.FeedID == feedID && e.ExtractState == core.ExtractPending {
-			e.ExtractState = core.ExtractNone
-			delete(s.nextExtract, e.ID)
-		}
 	}
 	return nil
 }

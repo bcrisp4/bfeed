@@ -29,6 +29,8 @@ type entryVM struct {
 	PublishedFull string // full date+time, shown as the hover tooltip
 	PublishedAttr string // RFC3339, the machine-readable <time datetime>
 	Summary       string
+	ExtractFailed bool   // full-content extraction gave up; show a reader note
+	ExtractError  string // the last failure reason (only meaningful when ExtractFailed)
 }
 
 type listVM struct {
@@ -323,7 +325,7 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.entries.Get(r.Context(), uid, id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.notFoundOr500(w, r, err, "get entry")
 		return
 	}
 	// Mark read on open.
@@ -478,11 +480,15 @@ func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f, err := h.feeds.Get(ctx, uid, id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		h.notFoundOr500(w, r, err, "get feed for edit")
 		return
 	}
-	stats, _ := h.feeds.EntryStats(ctx, uid)
+	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	if statsErr != nil {
+		h.log.Warn("feed entry stats", "error", statsErr)
+	}
 	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror listFeeds)
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -612,9 +618,13 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return
 	}
-	stats, _ := h.feeds.EntryStats(ctx, uid)
+	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	if statsErr != nil {
+		h.log.Warn("feed entry stats", "error", statsErr)
+	}
 	now := time.Now()
 	row := h.buildFeedRow(f, stats[id], now)
+	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror listFeeds)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
 		h.log.Error("template execute", "template", "feedrow", "error", err)
@@ -710,7 +720,7 @@ func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, countOOB b
 	}
 	e, err := h.entries.Get(r.Context(), uid, id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.notFoundOr500(w, r, err, "get entry")
 		return
 	}
 	if err := mutate(r.Context(), id, e); err != nil {
@@ -749,7 +759,12 @@ func (h *Handler) readerMarkUnread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.entries.MarkRead(r.Context(), uid, []core.ID{id}, false); err != nil {
-		h.log.Warn("reader mark unread", "entry_id", int64(id), "error", err)
+		// A failed mutation must not reply success: redirecting to "/" as if the
+		// entry were re-queued would hide the failure (the still-read entry is simply
+		// absent from Unread). Return 500 instead, matching markFeedRead (audit B10).
+		h.log.Error("reader mark unread", "entry_id", int64(id), "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("HX-Redirect", "/")
 	w.WriteHeader(http.StatusNoContent)
@@ -774,7 +789,7 @@ func (h *Handler) readerToggleStar(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.entries.Get(r.Context(), uid, id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.notFoundOr500(w, r, err, "get entry")
 		return
 	}
 	starred := !e.Starred
@@ -795,7 +810,12 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.entries.Delete(r.Context(), uid, id); err != nil {
-		h.log.Warn("delete entry", "entry_id", int64(id), "error", err)
+		// A failed delete must not reply success: the row would vanish client-side
+		// (or the reader redirect) while the entry still exists, reappearing on the
+		// next load with no explanation. Return 500, matching deleteFeed (audit B10).
+		h.log.Error("delete entry", "entry_id", int64(id), "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 	// From the reader there is no row to remove — send the client to Unread.
 	// 204 + HX-Redirect mirrors readerMarkUnread (no body to swap).
@@ -808,6 +828,19 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	// of the header count (htmx processes OOB swaps even alongside a delete swap).
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	h.writeListCountOOB(r.Context(), w, r.Header.Get("HX-Current-URL"))
+}
+
+// notFoundOr500 writes the right status for a store lookup error: 404 only for a
+// genuine ErrNotFound, else log + 500. A transient DB/I-O error or a cancelled ctx
+// must not masquerade as "not found" — that misleads the user and, since this path
+// otherwise logs nothing, leaves the real failure undiagnosable (audit B10).
+func (h *Handler) notFoundOr500(w http.ResponseWriter, r *http.Request, err error, what string) {
+	if errors.Is(err, core.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	h.log.Error(what, "error", err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
 // feedTitleMap fetches all feeds for the default user and returns a map of feed ID → title.
@@ -898,7 +931,7 @@ func (h *Handler) categoryEntries(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.cats.Get(r.Context(), uid, id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.notFoundOr500(w, r, err, "get category")
 		return
 	}
 	h.renderList(w, r, c.Title, "/categories/"+strconv.FormatInt(int64(id), 10), core.EntryFilter{CategoryID: &id})
@@ -1067,5 +1100,7 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		PublishedFull: e.PublishedAt.Format("2 Jan 2006, 15:04"),
 		PublishedAttr: e.PublishedAt.Format(time.RFC3339),
 		Summary:       summaryText(e),
+		ExtractFailed: e.ExtractState == core.ExtractFailed,
+		ExtractError:  e.ExtractError,
 	}
 }

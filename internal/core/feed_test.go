@@ -309,6 +309,29 @@ func TestSetFullContentBackfillsAllExistingEntries(t *testing.T) {
 	}
 }
 
+// B10 #6: re-enabling full content must give a previously terminally-'failed'
+// entry a fresh attempt budget — MarkFeedEntriesPending resets extract_attempts to
+// 0, else a single new failure re-terminates it (3+1 >= cap).
+func TestSetFullContentResetsFailedAttempts(t *testing.T) {
+	store := coretest.NewMemStore()
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewFeedService(store, nil, nil, nil, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x/f", NextCheckAt: clk.T, CreatedAt: clk.T, UpdatedAt: clk.T})
+	eid := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "d", URL: "https://x/d", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractFailed, ExtractAttempts: 3, ExtractError: "boom"})
+
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	got, _ := store.GetEntry(ctx, core.DefaultUserID, eid)
+	if got.ExtractState != core.ExtractPending || got.ExtractAttempts != 0 {
+		t.Fatalf("re-queued failed entry: want pending attempts=0, got %q attempts=%d", got.ExtractState, got.ExtractAttempts)
+	}
+	if got.ExtractError != "" {
+		t.Fatalf("stale extract_error lingered on re-queue: %q", got.ExtractError)
+	}
+}
+
 func TestPollFeedErrorBacksOff(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()
@@ -738,4 +761,88 @@ type upsertErrStore struct{ *coretest.MemStore }
 
 func (upsertErrStore) UpsertEntries(context.Context, core.ID, []*core.Entry) ([]*core.Entry, error) {
 	return nil, errors.New("disk full")
+}
+
+// B10 #2: a feed whose stored URL serves HTML (a site-page subscribe whose initial
+// discovery died) must self-heal on a later poll — parse fails, so PollFeed routes
+// through the full resolve+discover path, adopts the discovered feed URL, and
+// clears the stalled error state.
+func TestPollFeedRediscoversHTMLFeed(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const pageURL = "https://example.com/site"
+	const discoveredURL = "https://example.com/feed.xml"
+	// Every fetch returns an HTML body; the parser only parses the discovered URL.
+	fetcher := fixedFetcher{resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>")}}
+	parser := discoveryParser{discoveredURL: discoveredURL, feed: &core.ParsedFeed{Title: "Blog"}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: pageURL, Title: pageURL})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != discoveredURL {
+		t.Fatalf("feed_url = %q, want rediscovered %q", got.FeedURL, discoveredURL)
+	}
+	if got.ErrorCount != 0 || got.CheckedAt == nil {
+		t.Fatalf("feed still stalled after rediscovery: count=%d checkedAt=%v", got.ErrorCount, got.CheckedAt)
+	}
+}
+
+// B10 #3: EditFeed applies the conflict-prone URL change first, so a duplicate-URL
+// conflict leaves the other fields (title) untouched rather than half-saved.
+func TestEditFeedURLConflictPersistsNothingElse(t *testing.T) {
+	ctx := context.Background()
+	st := coretest.NewMemStore()
+	svc := core.NewFeedService(st, coretest.StubFetcher{}, coretest.StubParser{}, coretest.PassSanitizer{}, coretest.StubClock{T: time.Unix(1000, 0)}, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	a, _ := svc.CreateSubscription(ctx, core.DefaultUserID, "https://e.com/a", nil, false)
+	_, _ = svc.CreateSubscription(ctx, core.DefaultUserID, "https://e.com/b", nil, false)
+
+	// Rename A *and* point it at B's URL: the URL step conflicts.
+	_, err := svc.EditFeed(ctx, core.DefaultUserID, a.ID, core.EditFeedInput{Title: "Renamed", URL: "https://e.com/b"})
+	if !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("want ErrConflict, got %v", err)
+	}
+	got, _ := st.GetFeed(ctx, core.DefaultUserID, a.ID)
+	if got.UserTitle != "" {
+		t.Fatalf("title persisted despite URL conflict: %q — edit was not conflict-safe", got.UserTitle)
+	}
+	if got.FeedURL != "https://e.com/a" {
+		t.Fatalf("feed_url changed despite conflict: %q", got.FeedURL)
+	}
+}
+
+// updateFeedCtxErrStore fails UpdateFeed whenever the passed ctx is already done,
+// mimicking a real store rejecting a cancelled/expired context.
+type updateFeedCtxErrStore struct{ *coretest.MemStore }
+
+func (s updateFeedCtxErrStore) UpdateFeed(ctx context.Context, f *core.Feed) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.MemStore.UpdateFeed(ctx, f)
+}
+
+// B10 #5: when a poll fails *because* its ctx was cancelled/expired, recordError
+// must still persist the error state — it detaches the ctx for the write, so the
+// pending-row-becomes-error-row UX is not silently lost.
+func TestRecordErrorSurvivesCancelledContext(t *testing.T) {
+	store := updateFeedCtxErrStore{coretest.NewMemStore()}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid, _ := store.CreateFeed(context.Background(), &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(context.Background(), core.DefaultUserID, fid)
+	fetcher := coretest.StubFetcher{Err: context.Canceled}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the poll's ctx is already dead — the cause of the failure
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed should swallow the error, got %v", err)
+	}
+	got, _ := store.GetFeed(context.Background(), core.DefaultUserID, fid)
+	if got.ErrorCount != 1 || got.LastError == "" {
+		t.Fatalf("error state not persisted under cancelled ctx: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
 }
