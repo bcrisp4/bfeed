@@ -49,7 +49,7 @@ sqlc: ## Regenerate sqlc code (after editing queries/ or migrations/)
 	sqlc generate
 
 sqlc-check: ## Fail if committed sqlc code is stale (CI parity)
-	sqlc generate && git diff --exit-code internal/store/sqlite/sqlc
+	sqlc generate && git diff --exit-code internal/store/sqlite/sqlc && test -z "$$(git status --porcelain internal/store/sqlite/sqlc)"
 
 migrate: ## Apply DB migrations (BFEED_BASE_URL is required by the config loader, unused here)
 	BFEED_BASE_URL=http://localhost:8080 go run ./cmd/bfeed migrate

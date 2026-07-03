@@ -49,6 +49,7 @@ Releases are tag-driven via goreleaser — see `docs/releasing.md`.
 
 CI/tooling gotchas:
 - CI triggers on **PRs and pushes to `main`** — a feature-branch push alone won't run it; open a PR.
+- The `skip-changelog` label only takes effect if present **when a CI run starts** — CI's `pull_request` trigger has no `labeled` type, so labelling *after* PR-open leaves the first run evaluating a label-less payload and the `changelog` gate fails. Fix: label at/before PR-open, or push a commit (an empty `synchronize` is fine — `git commit --allow-empty`) to re-fire CI with the label. Note: `git push -f` is blocked here, so re-trigger with an empty commit, not amend+force-push.
 - Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use the `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
 - `goreleaser check` validates schema only, **not templates** — validate `.goreleaser.yaml` with `goreleaser release --snapshot --clean` (it catches bad fields like an invalid `{{ .IsPrerelease }}`; the engine is docker/buildx via `dockers_v2`, podman is unsupported in goreleaser ≥2.16).
 - `Dockerfile.release` has **no build stage** — goreleaser injects prebuilt binaries at `${TARGETPLATFORM}/bfeed`. To build it locally, reconstruct that context: `mkdir -p linux/arm64 && cp <linux bfeed binary> linux/arm64/bfeed && docker build -f Dockerfile.release --build-arg TARGETPLATFORM=linux/arm64 .` (distroless has no shell — verify by running the container, not `ls`).

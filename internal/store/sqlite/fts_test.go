@@ -80,6 +80,41 @@ func TestFTSInsertStatusDeleteSync(t *testing.T) {
 	}
 }
 
+// Entries are removed from FTS by two paths: direct DeleteEntry (above) and the
+// feeds.id ON DELETE CASCADE when a whole feed is deleted. This guards the second
+// path: the entries_ad AFTER DELETE trigger must fire for cascade deletes too, or
+// orphaned FTS docs accumulate and — because entries.id rowids are reused — Search
+// could return a live entry for a dead one's terms.
+func TestFTSSyncOnFeedDeleteCascade(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fid := seedFeed(t, s)
+	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{
+		ftsEntry(fid, "g1", "Kubernetes guide", "<p>pods and nodes</p>", ""),
+		ftsEntry(fid, "g2", "Docker basics", "<p>containers</p>", ""),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ftsIDs(t, s, "kubernetes"); len(got) != 1 {
+		t.Fatalf("entry not indexed pre-delete: %v", got)
+	}
+
+	// Delete the whole feed → entries cascade → entries_ad must clear FTS.
+	if err := s.DeleteFeed(ctx, core.DefaultUserID, fid); err != nil {
+		t.Fatal(err)
+	}
+	if got := ftsIDs(t, s, "kubernetes"); len(got) != 0 {
+		t.Fatalf("feed-delete cascade left orphaned FTS doc: %v", got)
+	}
+	if got := ftsIDs(t, s, "docker"); len(got) != 0 {
+		t.Fatalf("feed-delete cascade left orphaned FTS doc: %v", got)
+	}
+	// The external-content index must still be internally consistent.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO entries_fts(entries_fts) VALUES('integrity-check')`); err != nil {
+		t.Fatalf("FTS integrity-check failed after cascade delete: %v", err)
+	}
+}
+
 func TestFTSIndexesSummary(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

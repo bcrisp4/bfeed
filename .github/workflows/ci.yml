@@ -97,6 +97,9 @@ jobs:
         run: |
           sqlc generate
           git diff --exit-code internal/store/sqlite/sqlc
+          # git diff misses brand-new untracked output (a new query or a version
+          # bump can emit a new *.sql.go); fail on any uncommitted change too.
+          test -z "$(git status --porcelain internal/store/sqlite/sqlc)"
 
   # Enforce a curated CHANGELOG.md entry per PR (see docs/changelog.md).
   # Skipped on PRs labelled skip-changelog and on pushes to main (a skipped
