@@ -33,6 +33,50 @@ func TestScrapeEntrySuccessWritesContentAndMarksDone(t *testing.T) {
 	}
 }
 
+// recordingExtractor / recordingSanitizer capture the base URL passed to them so
+// the test can assert the post-redirect FinalURL (not the pre-redirect entry URL)
+// is used to absolutize relative links.
+type recordingExtractor struct {
+	html    string
+	pageURL string
+}
+
+func (e *recordingExtractor) Extract(_ context.Context, pageURL string, _ []byte) (string, error) {
+	e.pageURL = pageURL
+	return e.html, nil
+}
+
+type recordingSanitizer struct{ baseURL string }
+
+func (s *recordingSanitizer) Sanitize(html, baseURL string) string {
+	s.baseURL = baseURL
+	return html
+}
+
+func TestScrapeEntryUsesFinalURLAsBase(t *testing.T) {
+	const entryURL = "https://feedproxy.example/redir"
+	const finalURL = "https://real.example.com/article"
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>"), FinalURL: finalURL,
+	}}
+	ext := &recordingExtractor{html: "<p>x</p>"}
+	san := &recordingSanitizer{}
+	store := coretest.NewMemStore()
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewScrapeService(store, fetch, ext, san, clk, coretest.DiscardLogger(),
+		core.ScrapeConfig{MaxAttempts: 3, BaseBackoff: time.Minute, MaxBackoff: time.Hour}, nil)
+	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: entryURL, ExtractState: core.ExtractPending})
+	if err := svc.ScrapeEntry(context.Background(), &core.Entry{ID: id, URL: entryURL, ExtractState: core.ExtractPending}); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+	if ext.pageURL != finalURL {
+		t.Errorf("Extract base = %q, want final URL %q", ext.pageURL, finalURL)
+	}
+	if san.baseURL != finalURL {
+		t.Errorf("Sanitize base = %q, want final URL %q", san.baseURL, finalURL)
+	}
+}
+
 func TestScrapeEntryRetriesThenFails(t *testing.T) {
 	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 500}}
 	svc, store, _ := newScrapeFixture(t, fetch, coretest.StubExtractor{})

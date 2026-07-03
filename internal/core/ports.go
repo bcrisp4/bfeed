@@ -17,6 +17,13 @@ type FetchResponse struct {
 	ETag         string
 	LastModified string
 	RetryAfter   time.Duration
+	// FinalURL is the post-redirect URL the response was actually read from; it
+	// equals the request URL when no redirect occurred. Consumers resolve relative
+	// links against it (never the pre-redirect request URL).
+	FinalURL string
+	// PermanentRedirect is true iff at least one redirect occurred and EVERY hop
+	// was permanent (301/308) — i.e. FinalURL is the feed's new canonical identity.
+	PermanentRedirect bool
 }
 
 type Fetcher interface {
