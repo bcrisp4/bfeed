@@ -215,13 +215,16 @@ func (h *Handler) headerCount(ctx context.Context, f core.EntryFilter) (string, 
 // header ("N unread") would go stale. Only the Unread ("/") and single-feed
 // ("/feeds/{id}") views render a header count; any other path is a no-op.
 func (h *Handler) writeListCountOOB(ctx context.Context, w http.ResponseWriter, currentURL string) {
+	if currentURL == "" {
+		return // no HX-Current-URL (non-htmx caller / missing header): nothing to refresh
+	}
 	u, err := url.Parse(currentURL)
 	if err != nil {
 		return
 	}
 	var f core.EntryFilter
 	switch p := u.Path; {
-	case p == "" || p == "/":
+	case p == "/":
 		// zero filter → Unread view (listActive default)
 	case strings.HasPrefix(p, "/feeds/"):
 		id, err := strconv.ParseInt(strings.TrimPrefix(p, "/feeds/"), 10, 64)
