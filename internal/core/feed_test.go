@@ -552,6 +552,43 @@ func TestResolveAndIngestConflictDeletesDuplicateRow(t *testing.T) {
 	}
 }
 
+// deleteFeedErrStore wraps MemStore and always fails DeleteFeed.
+type deleteFeedErrStore struct {
+	*coretest.MemStore
+}
+
+func (s *deleteFeedErrStore) DeleteFeed(context.Context, core.ID, core.ID) error {
+	return errors.New("db locked")
+}
+
+// B8/F1: if deleting the conflicted duplicate row fails, ResolveAndIngest must
+// not silently return nil (leaving the row due, re-polling the non-feed URL) —
+// it degrades to recording an error so the row backs off.
+func TestResolveAndIngestConflictDeleteFailureRecordsError(t *testing.T) {
+	ctx := context.Background()
+	inner := coretest.NewMemStore()
+	store := &deleteFeedErrStore{inner}
+	const canonical = "https://example.com/feed.xml"
+	seedFeed(t, inner, &core.Feed{UserID: core.DefaultUserID, FeedURL: canonical, Title: "Existing"})
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: canonical, PermanentRedirect: true,
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: &core.ParsedFeed{Title: "B"}})
+	dupID := seedFeed(t, inner, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://example.com/site", Title: "B"})
+
+	f, _ := inner.GetFeed(ctx, core.DefaultUserID, dupID)
+	if err := svc.ResolveAndIngest(ctx, f); err != nil {
+		t.Fatalf("ResolveAndIngest returned hard error: %v", err)
+	}
+	got, err := inner.GetFeed(ctx, core.DefaultUserID, dupID)
+	if err != nil {
+		t.Fatalf("row must still exist after failed delete: %v", err)
+	}
+	if got.ErrorCount == 0 || got.LastError == "" {
+		t.Fatalf("delete failure must record an error: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
 // B8/F2: trivially different spellings of the same feed URL (case, default port,
 // fragment) must normalize to one canonical form so the UNIQUE(user_id, feed_url)
 // constraint dedupes them instead of creating a duplicate subscription.

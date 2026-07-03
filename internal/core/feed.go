@@ -152,8 +152,13 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error)
 				// with no discovery step to ever self-heal (audit B8). No tombstones
 				// are written — a re-subscribe gets a fresh feed_id.
 				if derr := s.store.DeleteFeed(ctx, f.UserID, f.ID); derr != nil {
+					// Deletion failed, so the row still exists: degrade to the
+					// error-row behaviour (informative message + backoff) rather
+					// than return nil and leave it silently due, re-polling the
+					// non-feed URL forever.
 					s.log.Warn("deleting duplicate feed row after URL conflict failed",
 						"feed_id", int64(f.ID), "url", feedURL, "error", derr)
+					return s.recordError(ctx, f, s.clk.Now(), "already subscribed to this feed", 0)
 				}
 				return nil
 			}
