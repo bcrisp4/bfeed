@@ -332,6 +332,26 @@ func TestSetFullContentResetsFailedAttempts(t *testing.T) {
 	}
 }
 
+// B10 review: disabling full content clears a terminally-'failed' entry's state and
+// reason, so the reader stops showing an extraction-failed note for a feed the user
+// has turned extraction off for.
+func TestSetFullContentDisableClearsFailedState(t *testing.T) {
+	store := coretest.NewMemStore()
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewFeedService(store, nil, nil, nil, clk, coretest.DiscardLogger(), core.FeedServiceConfig{})
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x/f", NextCheckAt: clk.T, CreatedAt: clk.T, UpdatedAt: clk.T, FetchFullContent: true})
+	eid := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "d", URL: "https://x/d", PublishedAt: clk.T, CreatedAt: clk.T, ExtractState: core.ExtractFailed, ExtractAttempts: 3, ExtractError: "boom"})
+
+	if err := svc.SetFullContent(ctx, core.DefaultUserID, fid, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	got, _ := store.GetEntry(ctx, core.DefaultUserID, eid)
+	if got.ExtractState != core.ExtractNone || got.ExtractError != "" {
+		t.Fatalf("disable did not clear failed state: state=%q err=%q", got.ExtractState, got.ExtractError)
+	}
+}
+
 func TestPollFeedErrorBacksOff(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()
@@ -776,7 +796,9 @@ func TestPollFeedRediscoversHTMLFeed(t *testing.T) {
 	fetcher := fixedFetcher{resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>")}}
 	parser := discoveryParser{discoveredURL: discoveredURL, feed: &core.ParsedFeed{Title: "Blog"}}
 	svc, _ := newFeedSvc(store, fetcher, parser)
-	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: pageURL, Title: pageURL})
+	// ErrorCount > 0: an already-stuck feed (its initial resolve failed), which is
+	// exactly the state the audit case reaches. Healthy feeds are covered below.
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: pageURL, Title: pageURL, ErrorCount: 1, LastError: "parse: ..."})
 
 	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
 	if err := svc.PollFeed(ctx, f); err != nil {
@@ -788,6 +810,31 @@ func TestPollFeedRediscoversHTMLFeed(t *testing.T) {
 	}
 	if got.ErrorCount != 0 || got.CheckedAt == nil {
 		t.Fatalf("feed still stalled after rediscovery: count=%d checkedAt=%v", got.ErrorCount, got.CheckedAt)
+	}
+}
+
+// B10 review: a HEALTHY feed (ErrorCount == 0) that hits a single transient
+// 200-HTML blip (a CDN/WAF interstitial) must NOT trigger rediscovery and repoint
+// its URL — it just records one error and backs off. Guards against interstitial hijack.
+func TestPollFeedHealthyHTMLBlipDoesNotRediscover(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const feedURL = "https://good.example/feed.xml"
+	fetcher := fixedFetcher{resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>interstitial</html>")}}
+	parser := discoveryParser{discoveredURL: "https://evil.example/feed.xml", feed: &core.ParsedFeed{Title: "Hijacked"}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: feedURL, Title: "Good"}) // ErrorCount 0
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != feedURL {
+		t.Fatalf("healthy feed URL hijacked to %q on a single HTML blip", got.FeedURL)
+	}
+	if got.ErrorCount != 1 {
+		t.Fatalf("want one recorded error, got %d", got.ErrorCount)
 	}
 }
 

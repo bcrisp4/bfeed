@@ -69,6 +69,28 @@ func TestDeleteEntryStoreErrorIs500(t *testing.T) {
 	}
 }
 
+// B10 review: deleting an already-gone entry (double-submit, or a stale list row
+// removed in another tab) is idempotent success — ErrNotFound must NOT become 500,
+// or htmx won't apply hx-swap="delete" and the row is stranded on screen.
+func TestDeleteEntryNotFoundIsSuccess(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0)}})
+	path := "/entries/" + strconv.FormatInt(int64(ins[0].ID), 10) + "/delete"
+
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest(http.MethodPost, path, nil))
+	if rec1.Code != 200 {
+		t.Fatalf("first delete: want 200, got %d", rec1.Code)
+	}
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodPost, path, nil))
+	if rec2.Code != 200 {
+		t.Fatalf("second (idempotent) delete: want 200, got %d", rec2.Code)
+	}
+}
+
 // B10 #8: a transient EntryStats failure must hide counts on the per-row fragment
 // (mirroring listFeeds), not render a fabricated "0 unread".
 type statsErrStore struct{ *coretest.MemStore }

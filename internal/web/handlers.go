@@ -134,7 +134,7 @@ func (h *Handler) feedEntries(w http.ResponseWriter, r *http.Request) {
 	// render an empty "Feed" page) and title the list with its display name.
 	f, err := h.feeds.Get(r.Context(), uid, id)
 	if err != nil {
-		http.NotFound(w, r)
+		h.notFoundOr500(w, r, err, "get feed")
 		return
 	}
 	h.renderList(w, r, f.DisplayTitle(), "/feeds/"+strconv.FormatInt(int64(id), 10), core.EntryFilter{FeedID: &id})
@@ -543,11 +543,15 @@ func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id cor
 	ctx := r.Context()
 	f, gerr := h.feeds.Get(ctx, uid, id)
 	if gerr != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		h.notFoundOr500(w, r, gerr, "get feed for edit error")
 		return
 	}
-	stats, _ := h.feeds.EntryStats(ctx, uid)
+	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	if statsErr != nil {
+		h.log.Warn("feed entry stats", "error", statsErr)
+	}
 	row := h.buildFeedRow(f, stats[id], time.Now())
+	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror feedEditForm)
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
 	if errors.Is(cause, core.ErrConflict) {
@@ -631,7 +635,7 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 		return
 	}
 	if !row.Refreshing && !row.Pending {
-		h.writeGroupHeadOOB(ctx, w, f, stats)
+		h.writeGroupHeadOOB(ctx, w, f, stats, statsErr == nil)
 	}
 }
 
@@ -647,7 +651,7 @@ func (h *Handler) feedRow(w http.ResponseWriter, r *http.Request) {
 
 // writeGroupHeadOOB renders an out-of-band swap for the feed's category group
 // head with recomputed feed and unread counts.
-func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats) {
+func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, f *core.Feed, stats map[core.ID]core.FeedEntryStats, showCounts bool) {
 	feeds, err := h.feeds.List(ctx, uid)
 	if err != nil {
 		return
@@ -656,7 +660,9 @@ func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, 
 	if f.CategoryID != nil {
 		catID = int64(*f.CategoryID)
 	}
-	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised", ShowCounts: true}
+	// On a stats error the stats map is nil, so hide the group's aggregate count
+	// rather than emitting a fabricated "0 unread" (mirror the per-row ShowCounts).
+	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised", ShowCounts: showCounts}
 	if catID != 0 {
 		if c, err := h.cats.Get(ctx, uid, core.ID(catID)); err == nil {
 			head.Title = c.Title
@@ -809,10 +815,12 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.entries.Delete(r.Context(), uid, id); err != nil {
-		// A failed delete must not reply success: the row would vanish client-side
+	if err := h.entries.Delete(r.Context(), uid, id); err != nil && !errors.Is(err, core.ErrNotFound) {
+		// A genuine failure must not reply success: the row would vanish client-side
 		// (or the reader redirect) while the entry still exists, reappearing on the
 		// next load with no explanation. Return 500, matching deleteFeed (audit B10).
+		// ErrNotFound is idempotent success, though — a double-submit or a stale list
+		// row deleted in another tab should still let htmx remove the row, not 500.
 		h.log.Error("delete entry", "entry_id", int64(id), "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

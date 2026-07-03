@@ -131,6 +131,22 @@ func TestScrapeTransientStatusDoesNotBurnAttempts(t *testing.T) {
 	}
 }
 
+// B10 review: a hostile/misconfigured Retry-After must be clamped to MaxBackoff so
+// a transient failure can't park an entry for years.
+func TestScrapeRetryAfterClampedToMaxBackoff(t *testing.T) {
+	ctx := context.Background()
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 503, ContentType: "text/html", RetryAfter: 100 * 24 * time.Hour}}
+	svc, store, clk := newScrapeFixture(t, fetch, coretest.StubExtractor{}) // MaxBackoff 24h
+	id := coretest.SeedEntry(store, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
+	if err := svc.ScrapeEntry(ctx, &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending}); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+	// Clamped to MaxBackoff (24h): due just after 24h, not 100 days out.
+	if due, _ := store.ListPendingExtractions(ctx, clk.T.Add(25*time.Hour), 10); len(due) != 1 {
+		t.Fatalf("entry not due after MaxBackoff clamp: %d", len(due))
+	}
+}
+
 // B4/F3: a persist (SetEntryContent) failure must reschedule the entry with
 // backoff (via fail), not return raw leaving it pending with next_extract_at in
 // the past and attempts unincremented — otherwise the Scraper retries every tick.

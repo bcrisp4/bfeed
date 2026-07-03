@@ -11,10 +11,14 @@ import (
 )
 
 const cancelFeedExtractions = `-- name: CancelFeedExtractions :exec
-UPDATE entries SET extract_state = 'none', next_extract_at = NULL
-WHERE feed_id = ? AND extract_state = 'pending'
+UPDATE entries SET extract_state = 'none', next_extract_at = NULL, extract_error = ''
+WHERE feed_id = ? AND extract_state IN ('pending','failed')
 `
 
+// Disabling full-content clears the feed's extraction artifacts: queued ('pending')
+// entries are un-queued, and terminally-'failed' ones reset to 'none' with the
+// failure reason cleared. Otherwise the reader keeps showing an extraction-failed
+// note for a feed the user has turned extraction off for (audit B10).
 func (q *Queries) CancelFeedExtractions(ctx context.Context, feedID int64) error {
 	_, err := q.db.ExecContext(ctx, cancelFeedExtractions, feedID)
 	return err

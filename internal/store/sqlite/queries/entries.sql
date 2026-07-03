@@ -60,8 +60,12 @@ UPDATE entries SET extract_state = 'pending', next_extract_at = ?, extract_attem
 WHERE feed_id = ? AND extract_state IN ('none','failed');
 
 -- name: CancelFeedExtractions :exec
-UPDATE entries SET extract_state = 'none', next_extract_at = NULL
-WHERE feed_id = ? AND extract_state = 'pending';
+-- Disabling full-content clears the feed's extraction artifacts: queued ('pending')
+-- entries are un-queued, and terminally-'failed' ones reset to 'none' with the
+-- failure reason cleared. Otherwise the reader keeps showing an extraction-failed
+-- note for a feed the user has turned extraction off for (audit B10).
+UPDATE entries SET extract_state = 'none', next_extract_at = NULL, extract_error = ''
+WHERE feed_id = ? AND extract_state IN ('pending','failed');
 
 -- name: WeeklyEntryCount :one
 SELECT COUNT(*) FROM entries

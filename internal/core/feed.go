@@ -304,7 +304,13 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 		// Plain PollFeed would fail parse here forever with no re-discovery. Route it
 		// back through the full resolve+discover path so a scheduled poll or manual
 		// refresh self-heals and persists the discovered feed URL (audit B10).
-		if isHTML(resp.ContentType) {
+		//
+		// Gate on ErrorCount > 0 so a HEALTHY feed's single transient 200-HTML blip (a
+		// CDN/WAF interstitial, a maintenance page) just records one error and backs
+		// off — it must not let a one-off interstitial trigger rediscovery and
+		// silently repoint the subscription. A genuinely-stuck feed already carries
+		// errors (its initial resolve failed → recordError), so it still self-heals.
+		if isHTML(resp.ContentType) && f.ErrorCount > 0 {
 			return s.ResolveAndIngest(ctx, f)
 		}
 		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0)
@@ -440,12 +446,18 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 	f.UpdatedAt = now
 	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, f.ErrorCount, retryAfter, s.cfg.Jitter)
 	s.log.Warn("feed poll error", "feed_id", int64(f.ID), "url", f.FeedURL, "error", msg)
-	// Persist with a detached context: when the poll failed *because* ctx was
-	// cancelled/expired (the 60s subscribe budget, or shutdown), reusing it here
-	// would fail the write too and the error row would never be recorded — the
-	// pending-row-becomes-error-row UX silently never happens (audit B10).
-	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
+	// When the poll failed *because* ctx was cancelled/expired (the 60s subscribe
+	// budget, or shutdown), reusing it for the write would fail too and the error row
+	// would never be recorded — the pending-row-becomes-error-row UX silently never
+	// happens (audit B10). Detach only in that case, so a normal poll error still
+	// persists on the live request ctx (keeping its deadline and any values); we
+	// don't want to unconditionally sever cancellation on every error path.
+	pctx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		pctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+	}
 	return s.store.UpdateFeed(pctx, f)
 }
 

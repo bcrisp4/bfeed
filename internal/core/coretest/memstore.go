@@ -521,8 +521,9 @@ func (s *MemStore) SetFeedFullContent(_ context.Context, u, feedID core.ID, on b
 				e.ExtractError = ""
 				s.nextExtract[e.ID] = at
 			}
-		} else if e.ExtractState == core.ExtractPending {
+		} else if e.ExtractState == core.ExtractPending || e.ExtractState == core.ExtractFailed {
 			e.ExtractState = core.ExtractNone
+			e.ExtractError = ""
 			delete(s.nextExtract, e.ID)
 		}
 	}
