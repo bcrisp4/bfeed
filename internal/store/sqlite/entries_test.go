@@ -110,6 +110,41 @@ func TestSetStatusAndStarred(t *testing.T) {
 	}
 }
 
+func TestListEntriesStarredFilter(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fid := seedFeed(t, s)
+	ins, err := s.UpsertEntries(ctx, fid, []*core.Entry{
+		mkEntry(fid, "a", time.Unix(1_700_000_100, 0).UTC()),
+		mkEntry(fid, "b", time.Unix(1_700_000_200, 0).UTC()),
+		mkEntry(fid, "c", time.Unix(1_700_000_300, 0).UTC()),
+	})
+	if err != nil || len(ins) != 3 {
+		t.Fatalf("seed: ins=%d err=%v", len(ins), err)
+	}
+	if err := s.SetStarred(ctx, core.DefaultUserID, []core.ID{ins[1].ID}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	star := true
+	got, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Starred: &star})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != ins[1].ID {
+		t.Fatalf("starred filter got %d entries (want only b starred): %+v", len(got), got)
+	}
+
+	unstar := false
+	rest, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Starred: &unstar})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) != 2 {
+		t.Fatalf("unstarred filter got %d entries (want 2): %+v", len(rest), rest)
+	}
+}
+
 func TestHotListUsesIndex(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -128,7 +163,7 @@ func TestHotListUsesIndex(t *testing.T) {
 		}
 		plan += detail + "\n"
 	}
-	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+	if strings.Contains(plan, "USE TEMP B-TREE") {
 		t.Fatalf("hot list query sorts in memory:\n%s", plan)
 	}
 	if !strings.Contains(plan, "idx_entries_user_status_pub") {
@@ -154,11 +189,65 @@ func TestHistoryUsesIndex(t *testing.T) {
 		}
 		plan += detail + "\n"
 	}
-	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+	if strings.Contains(plan, "USE TEMP B-TREE") {
 		t.Fatalf("history query sorts in memory:\n%s", plan)
 	}
 	if !strings.Contains(plan, "idx_entries_readhist") {
 		t.Fatalf("history query not using partial index:\n%s", plan)
+	}
+}
+
+func TestFeedScopedListUsesIndex(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	rows, err := s.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN SELECT id FROM entries WHERE user_id=1 AND feed_id=7 ORDER BY published_at DESC, id DESC LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("feed-scoped list sorts in memory:\n%s", plan)
+	}
+	if !strings.Contains(plan, "idx_entries_feed_pub") {
+		t.Fatalf("feed-scoped list not using idx_entries_feed_pub:\n%s", plan)
+	}
+}
+
+func TestStarredListUsesIndex(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	// ListEntries emits a literal starred=1 (not a bound param) so the planner can
+	// prove the partial index predicate holds; this query mirrors that shape.
+	rows, err := s.db.QueryContext(ctx,
+		`EXPLAIN QUERY PLAN SELECT id FROM entries WHERE user_id=1 AND starred=1 ORDER BY published_at DESC, id DESC LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		if err := rows.Scan(&a, &b, &c, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan += detail + "\n"
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("starred list sorts in memory:\n%s", plan)
+	}
+	if !strings.Contains(plan, "idx_entries_starred") {
+		t.Fatalf("starred list not using idx_entries_starred:\n%s", plan)
 	}
 }
 
@@ -360,7 +449,7 @@ func TestCategoryStreamUsesIndexNoSort(t *testing.T) {
 		}
 		plan += detail + "\n"
 	}
-	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+	if strings.Contains(plan, "USE TEMP B-TREE") {
 		t.Fatalf("category stream sorts in memory:\n%s", plan)
 	}
 	if !strings.Contains(plan, "idx_entries_user_pub") {

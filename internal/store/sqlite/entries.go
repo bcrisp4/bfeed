@@ -149,8 +149,10 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 		args = append(args, string(*f.Status))
 	}
 	if f.Starred != nil {
-		where = append(where, "e.starred = ?")
-		args = append(args, b2i(*f.Starred))
+		// Literal (not a bound param) so the planner can prove the partial index
+		// idx_entries_starred (WHERE starred = 1) applies. b2i yields only 0/1, so
+		// the interpolated value is a bounded constant — safe under the G201 rationale.
+		where = append(where, fmt.Sprintf("e.starred = %d", b2i(*f.Starred)))
 	}
 	// Category filter joins feeds (entries don't carry category). The all-statuses
 	// published-order scan is served sort-free by idx_entries_user_pub.
