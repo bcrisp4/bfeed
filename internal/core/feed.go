@@ -177,7 +177,12 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	if resp.Status != 200 || len(resp.Body) == 0 {
 		return "", nil, nil, fmt.Errorf("%w: feed returned status %d", ErrValidation, resp.Status)
 	}
-	if pf, perr := s.parser.Parse(resp.Body, rawURL); perr == nil && pf != nil && (pf.Title != "" || len(pf.Entries) > 0) {
+	// gofeed returns a non-nil error for non-feed content (HTML, arbitrary XML),
+	// so a nil error with a non-nil feed already means "positively identified as a
+	// feed" — do NOT also require a title or entries, or a valid but freshly
+	// created (untitled, item-less) feed is wrongly rejected and falls through to
+	// HTML discovery of its own non-HTML body.
+	if pf, perr := s.parser.Parse(resp.Body, resp.ContentType, rawURL); perr == nil && pf != nil {
 		return rawURL, pf, resp, nil
 	}
 	urls, derr := s.parser.Discover(resp.Body, rawURL)
@@ -188,7 +193,7 @@ func (s *FeedService) resolveFeed(ctx context.Context, rawURL string) (string, *
 	if err != nil || resp2.Status != 200 {
 		return "", nil, nil, fmt.Errorf("%w: discovered feed unreachable", ErrValidation)
 	}
-	pf, perr := s.parser.Parse(resp2.Body, urls[0])
+	pf, perr := s.parser.Parse(resp2.Body, resp2.ContentType, urls[0])
 	if perr != nil {
 		return "", nil, nil, fmt.Errorf("%w: discovered feed unparseable", ErrValidation)
 	}
@@ -225,7 +230,7 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 	if resp.Status != 200 {
 		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), 0)
 	}
-	pf, err := s.parser.Parse(resp.Body, f.FeedURL)
+	pf, err := s.parser.Parse(resp.Body, resp.ContentType, f.FeedURL)
 	if err != nil {
 		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0)
 	}
@@ -240,13 +245,21 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 	if f.FetchFullContent {
 		state = ExtractPending
 	}
+	now := s.clk.Now()
 	entries := make([]*Entry, 0, len(pf.Entries))
 	for _, pe := range pf.Entries {
+		// Undated items (parser leaves PublishedAt zero) would persist as year-1
+		// and sink to the permanent bottom of every published-desc list. Fall back
+		// to first-seen (ingest) time so ordering matches other feed readers.
+		published := pe.PublishedAt
+		if published.IsZero() {
+			published = now
+		}
 		entries = append(entries, &Entry{
 			UserID: f.UserID, FeedID: f.ID, GUID: pe.GUID, URL: pe.URL, Title: pe.Title,
 			Author: pe.Author, Content: s.san.Sanitize(pe.Content, f.FeedURL),
-			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: pe.PublishedAt,
-			Status: StatusUnread, CreatedAt: s.clk.Now(),
+			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: published,
+			Status: StatusUnread, CreatedAt: now,
 			Hash: pe.Hash, ExtractState: state,
 		})
 	}
@@ -284,7 +297,11 @@ func (s *FeedService) minCheck(now time.Time) time.Time {
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
 	if pf != nil {
 		if err := s.ingest(ctx, f, pf); err != nil {
-			return err
+			// A store-layer ingest failure (disk full, I/O error, lock timeout)
+			// must not skip rescheduling: returning early here leaves next_check_at
+			// in the past, so the feed is re-dispatched (full-body, no conditional
+			// GET) every tick. Route through recordError so it backs off instead.
+			return s.recordError(ctx, f, now, "ingest: "+err.Error(), 0)
 		}
 		f.Title = orKeep(pf.Title, f.Title)
 		f.SiteURL = orKeep(pf.SiteURL, f.SiteURL)

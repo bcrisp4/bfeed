@@ -13,6 +13,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Feeds served in a non-UTF-8 character set (declared only via the HTTP `Content-Type` header, as many older feeds are) now ingest correctly instead of failing every poll and getting permanently stuck; their text is decoded to the right characters. Feeds that declare their encoding in the document itself continue to work unchanged.
+- Entries published without a date are now ordered by when bfeed first saw them, so they appear at the top of the list with everything else instead of being buried at the very bottom (and no longer show a nonsensical year-0001 timestamp).
+- A newly created feed that has no entries yet (and no title) can now be subscribed to, instead of being rejected with "no feed found at URL" until it publishes its first item.
+- A feed whose entries momentarily fail to save (for example, a full disk or a busy database) now backs off and retries instead of hammering the source at the polling tick rate; the same fix applies to full-content article extraction.
 - A malformed or malicious feed or article that trips a bug in the parser, content extractor, or sanitiser can no longer crash the whole server: the failure is now contained to that one feed/entry (recorded as an error and retried with backoff) instead of taking the process down and getting stuck in a restart loop.
 - `bfeed serve` now exits with a non-zero status when it cannot start the web server (for example, the listen address is already in use), so process supervisors and container restart policies react instead of treating a server that never started as healthy.
 - Shutdown now waits for in-flight "add feed" and "refresh" operations to finish before closing the database, so a subscribe or refresh triggered just before shutdown is no longer silently lost.

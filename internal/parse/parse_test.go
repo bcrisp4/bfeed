@@ -8,7 +8,7 @@ import (
 
 func TestParseRSS(t *testing.T) {
 	data, _ := os.ReadFile("testdata/sample_rss.xml")
-	pf, err := New().Parse(data, "https://sample.test/feed.xml")
+	pf, err := New().Parse(data, "", "https://sample.test/feed.xml")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -24,6 +24,36 @@ func TestParseRSS(t *testing.T) {
 	}
 	if e.Hash == "" {
 		t.Fatal("hash must be set")
+	}
+}
+
+// B4/F2: a non-UTF-8 feed whose charset lives only in the HTTP Content-Type
+// (no XML encoding declaration) must be transcoded, not hard-fail "invalid UTF-8".
+// windows-1251 bytes: 0xd2 0xe5 0xf1 0xf2 = "Тест".
+func TestParseHonorsHTTPCharsetWhenNoEncodingDecl(t *testing.T) {
+	body := []byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>` +
+		"\xd2\xe5\xf1\xf2" + `</title><item><title>i</title></item></channel></rss>`)
+	pf, err := New().Parse(body, "application/rss+xml; charset=windows-1251", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if pf.Title != "Тест" {
+		t.Fatalf("title = %q, want decoded %q", pf.Title, "Тест")
+	}
+}
+
+// B4/F2 guard: a feed that declares its encoding in-band (gofeed already
+// transcodes it) must not be double-transcoded when the HTTP header repeats the
+// same charset — the raw bytes must reach gofeed untouched.
+func TestParseNoDoubleTranscodeWhenEncodingDeclared(t *testing.T) {
+	body := []byte(`<?xml version="1.0" encoding="windows-1251"?><rss version="2.0"><channel><title>` +
+		"\xd2\xe5\xf1\xf2" + `</title><item><title>i</title></item></channel></rss>`)
+	pf, err := New().Parse(body, "application/rss+xml; charset=windows-1251", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if pf.Title != "Тест" {
+		t.Fatalf("title = %q, want %q (double-transcode corruption?)", pf.Title, "Тест")
 	}
 }
 
@@ -65,7 +95,7 @@ func TestParseTTL(t *testing.T) {
 	p := New()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pf, err := p.Parse([]byte(tc.xml), "https://e.com/f")
+			pf, err := p.Parse([]byte(tc.xml), "", "https://e.com/f")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +122,7 @@ func TestParseTTLChannelScoped(t *testing.T) {
 	p := New()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pf, err := p.Parse([]byte(tc.xml), "https://e.com/f")
+			pf, err := p.Parse([]byte(tc.xml), "", "https://e.com/f")
 			if err != nil {
 				t.Fatal(err)
 			}

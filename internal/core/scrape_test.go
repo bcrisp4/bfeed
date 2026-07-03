@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,6 +51,37 @@ func TestScrapeEntryRetriesThenFails(t *testing.T) {
 	if got.ExtractState != core.ExtractFailed {
 		t.Fatalf("want failed at cap, got %q attempts=%d", got.ExtractState, got.ExtractAttempts)
 	}
+}
+
+// B4/F3: a persist (SetEntryContent) failure must reschedule the entry with
+// backoff (via fail), not return raw leaving it pending with next_extract_at in
+// the past and attempts unincremented — otherwise the Scraper retries every tick.
+func TestScrapeReschedulesWhenPersistFails(t *testing.T) {
+	ctx := context.Background()
+	inner := coretest.NewMemStore()
+	store := setEntryContentErrStore{inner}
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html; charset=utf-8", Body: []byte("<html>..</html>")}}
+	ext := coretest.StubExtractor{HTML: "<p>extracted</p>"}
+	svc := core.NewScrapeService(store, fetch, ext, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(),
+		core.ScrapeConfig{MaxAttempts: 3, BaseBackoff: 10 * time.Minute, MaxBackoff: 24 * time.Hour}, nil)
+
+	id := coretest.SeedEntry(inner, &core.Entry{UserID: core.DefaultUserID, FeedID: 1, GUID: "g", URL: "https://x/a", ExtractState: core.ExtractPending})
+	if err := svc.ScrapeEntry(ctx, &core.Entry{ID: id, URL: "https://x/a", ExtractState: core.ExtractPending}); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+	got, _ := inner.GetEntry(ctx, core.DefaultUserID, id)
+	if got.ExtractState != core.ExtractPending || got.ExtractAttempts != 1 {
+		t.Fatalf("persist failure not rescheduled: state=%q attempts=%d", got.ExtractState, got.ExtractAttempts)
+	}
+}
+
+// setEntryContentErrStore wraps MemStore and fails every SetEntryContent write,
+// simulating a store-layer persist failure during extraction.
+type setEntryContentErrStore struct{ *coretest.MemStore }
+
+func (setEntryContentErrStore) SetEntryContent(context.Context, core.ID, string) error {
+	return errors.New("disk full")
 }
 
 func TestExtractBackoffGrowsAndCaps(t *testing.T) {

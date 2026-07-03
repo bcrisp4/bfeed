@@ -34,8 +34,8 @@ func (f StubFetcher) Fetch(context.Context, core.FetchRequest) (*core.FetchRespo
 
 type StubParser struct{ PF *core.ParsedFeed }
 
-func (p StubParser) Parse([]byte, string) (*core.ParsedFeed, error) { return p.PF, nil }
-func (p StubParser) Discover([]byte, string) ([]string, error)      { return nil, nil }
+func (p StubParser) Parse([]byte, string, string) (*core.ParsedFeed, error) { return p.PF, nil }
+func (p StubParser) Discover([]byte, string) ([]string, error)              { return nil, nil }
 
 type PassSanitizer struct{}
 
