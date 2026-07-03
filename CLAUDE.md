@@ -12,6 +12,7 @@ The design is documented and authoritative — read it before non-trivial work:
 - `docs/roadmap.md` — everything deliberately deferred, with the additive path back.
 - `docs/releasing.md` — how to cut a release (annotated semver tag → goreleaser).
 - `docs/changelog.md` — the changelog policy (what to write, when, how CI enforces it).
+- `docs/audit-2026-07.md` — the 2026-07 codebase audit (84 verified findings) organised by remediation batch; `docs/prompts/remediation-batch.md` is the copy-paste kickoff prompt for working one batch (tracked in milestone "Fable audit remediation", issues #26–#38, one PR per batch).
 
 (Implementation plans under `docs/superpowers/plans/` are gitignored, per the user's "don't commit plans" rule. `bfeed.db` and WAL files in the repo root are gitignored local dev state.)
 
@@ -50,6 +51,7 @@ CI/tooling gotchas:
 - CI triggers on **PRs and pushes to `main`** — a feature-branch push alone won't run it; open a PR.
 - Go-installed tools (`golangci-lint`, `goreleaser`, go-installed `sqlc`) live in `$(go env GOPATH)/bin`, often **not** on `PATH` — use the `make` targets (they resolve it) or full paths; `make tools` installs pinned versions.
 - `goreleaser check` validates schema only, **not templates** — validate `.goreleaser.yaml` with `goreleaser release --snapshot --clean` (it catches bad fields like an invalid `{{ .IsPrerelease }}`; the engine is docker/buildx via `dockers_v2`, podman is unsupported in goreleaser ≥2.16).
+- `Dockerfile.release` has **no build stage** — goreleaser injects prebuilt binaries at `${TARGETPLATFORM}/bfeed`. To build it locally, reconstruct that context: `mkdir -p linux/arm64 && cp <linux bfeed binary> linux/arm64/bfeed && docker build -f Dockerfile.release --build-arg TARGETPLATFORM=linux/arm64 .` (distroless has no shell — verify by running the container, not `ls`).
 - Request a **Copilot PR review** via the API, not `gh pr edit --add-reviewer Copilot` (fails: "could not resolve user 'copilot'"): `gh api repos/{owner}/{repo}/pulls/{n}/requested_reviewers -f "reviewers[]=copilot-pull-request-reviewer[bot]"`. Reply in-thread via `.../pulls/{n}/comments/{id}/replies`.
 - macOS `sed` (BSD) has **no `\b`** word boundary — `sed 's/\bx\b/y/'` silently matches nothing. Use the Edit tool or `perl -i -pe` for whole-word renames.
 - Playwright MCP: `file://` URLs are blocked — serve mock HTML over `python3 -m http.server` and link the live app's `/static/app.css`; `browser_take_screenshot` saves to the **repo root**, not `.playwright-mcp/`.
@@ -87,7 +89,7 @@ The poll pipeline lives in `FeedService.PollFeed` so the `Poller` only schedules
 
 Full-content extraction mirrors polling: `Scraper`/`ScrapeService` are the `Poller`/`FeedService` analogue, driven by DB-backed `entries.extract_state` (`none`/`pending`/`done`/`failed`) + `next_extract_at`; the `Scraper` shares the one `Fetcher` (per-host budget) with the `Poller`.
 
-**Web (htmx) response conventions:** per-item actions return a swapped HTML fragment (e.g. `entryrow`); bulk / whole-collection mutations return `204` + `HX-Refresh: true` (htmx does a full reload — keeps nav/sidebar unread counts consistent, no fragment targeting). List-view toolbar controls belong in the `content` block (`entries.gohtml`), **not** the `entrylist`/`entryrow` fragments (`rows.gohtml`) that htmx "load more" re-renders, or they get duplicated/lost on pagination.
+**Web (htmx) response conventions:** per-item actions return a swapped HTML fragment (e.g. `entryrow`); bulk / whole-collection mutations return `204` + `HX-Refresh: true` (htmx does a full reload — keeps nav/sidebar unread counts consistent, no fragment targeting). List-view toolbar controls belong in the `content` block (`entries.gohtml`), **not** the `entrylist`/`entryrow` fragments (`rows.gohtml`) that htmx "load more" re-renders, or they get duplicated/lost on pagination. The vendored htmx is **2.0.4**, which by default does **not** swap `4xx`/`5xx` responses — an inline error fragment meant to render must return **`200`** (as `renderSubscribeError` does) or the browser silently discards it (`renderEditError`'s `422` is the B9 bug).
 
 **Background feed ops (iter 7):** subscribe + manual refresh run in a goroutine on `context.Background()` (**not** the request ctx — it's cancelled when the handler returns), tracked by an in-memory `inflightSet` (`Handler.busy`). The feed row self-polls `GET /feeds/{id}/row` (`hx-trigger="every 1500ms"`) while in-flight and drops the trigger when done; completion piggybacks an `hx-swap-oob` group-head count update. Subscribe replies `HX-Refresh` (optimistic pending row); refresh/edit swap the row fragment. `FeedService.Subscribe` is split into `CreateSubscription` (validate+persist, no I/O) + `ResolveAndIngest` (background; records errors, no rollback); inline edit goes through `EditFeed`/`POST /feeds/{id}`.
 
