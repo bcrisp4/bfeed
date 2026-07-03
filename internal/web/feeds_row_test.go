@@ -1,11 +1,43 @@
 package web
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
+
+// The feedrow/feedgrouphead templates must omit the unread/total counts when
+// ShowCounts is false (stats lookup failed) rather than render fabricated zeros.
+func TestFeedRowHidesCountsWhenStatsUnavailable(t *testing.T) {
+	tmpl := parseTemplates()
+
+	render := func(name string, data any) string {
+		var b strings.Builder
+		if err := tmpl["feedrow"].ExecuteTemplate(&b, name, data); err != nil {
+			t.Fatalf("execute %s: %v", name, err)
+		}
+		return b.String()
+	}
+
+	shown := render("feedrow", feedRowVM{ID: 1, Title: "Blog", Host: "b.test", Unread: 3, Total: 9, ShowCounts: true})
+	if !strings.Contains(shown, "3 unread") {
+		t.Errorf("ShowCounts=true should render counts, got %s", shown)
+	}
+	hidden := render("feedrow", feedRowVM{ID: 1, Title: "Blog", Host: "b.test", Unread: 3, Total: 9, ShowCounts: false})
+	if strings.Contains(hidden, "unread</span> / ") || strings.Contains(hidden, "3 unread") {
+		t.Errorf("ShowCounts=false should omit per-feed counts, got %s", hidden)
+	}
+
+	headHidden := render("feedgrouphead", feedGroupHeadVM{Title: "Tech", FeedCount: 2, Unread: 5, ShowCounts: false})
+	if strings.Contains(headHidden, "unread") {
+		t.Errorf("group head should omit unread count when ShowCounts=false, got %s", headHidden)
+	}
+	if !strings.Contains(headHidden, "2 feeds") {
+		t.Errorf("group head should still show feed count, got %s", headHidden)
+	}
+}
 
 func TestFeedHost(t *testing.T) {
 	cases := []struct {

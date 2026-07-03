@@ -1,5 +1,6 @@
 {{define "content"}}
 <h1>Categories</h1>
+{{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
 <form class="subscribe" method="post" action="/categories">
   <input type="text" name="title" placeholder="New category" required>
   <button class="primary" type="submit">Add</button>

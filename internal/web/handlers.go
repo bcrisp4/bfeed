@@ -78,24 +78,27 @@ type feedRowVM struct {
 	Refreshing  bool   // background refresh in flight (has CheckedAt)
 	Pending     bool   // background subscribe in flight (no CheckedAt yet)
 	Editing     bool   // edit form is open
+	ShowCounts  bool   // false hides the unread/total counts (stats lookup failed)
 	Cats        []feedEditCatVM
 }
 
 type feedGroupVM struct {
-	CatID     int64
-	Title     string
-	FeedCount int
-	Unread    int
-	OOB       bool
-	Feeds     []feedRowVM
+	CatID      int64
+	Title      string
+	FeedCount  int
+	Unread     int
+	OOB        bool
+	ShowCounts bool
+	Feeds      []feedRowVM
 }
 
 type feedGroupHeadVM struct {
-	CatID     int64
-	Title     string
-	FeedCount int
-	Unread    int
-	OOB       bool
+	CatID      int64
+	Title      string
+	FeedCount  int
+	Unread     int
+	OOB        bool
+	ShowCounts bool
 }
 
 type feedsPageVM struct {
@@ -125,7 +128,14 @@ func (h *Handler) feedEntries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.renderList(w, r, "Feed", "/feeds/"+strconv.FormatInt(int64(id), 10), core.EntryFilter{FeedID: &id})
+	// Confirm the feed exists (a stale bookmark to a deleted feed must 404, not
+	// render an empty "Feed" page) and title the list with its display name.
+	f, err := h.feeds.Get(r.Context(), uid, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.renderList(w, r, f.DisplayTitle(), "/feeds/"+strconv.FormatInt(int64(id), 10), core.EntryFilter{FeedID: &id})
 }
 
 // renderList fetches feeds once, builds a feed-title map, then lists entries.
@@ -160,30 +170,78 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 		return
 	}
 	vm.Empty, vm.EmptySub = emptyFor(f)
-	// HeaderCount is best-effort chrome: a failed stats lookup omits the count
-	// (the list itself still renders) but is logged so the failure isn't silent.
-	switch {
-	case listActive(f) == "unread":
-		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
-			h.log.Warn("header unread count", "error", err)
-		} else {
-			total := 0
-			for _, s := range stats {
-				total += s.Unread
-			}
-			vm.HeaderCount = fmt.Sprintf("%d unread", total)
-		}
-	case f.FeedID != nil:
-		if stats, err := h.feeds.EntryStats(r.Context(), uid); err != nil {
-			h.log.Warn("header feed count", "feed_id", int64(*f.FeedID), "error", err)
-		} else {
-			s := stats[*f.FeedID]
-			vm.HeaderCount = fmt.Sprintf("%d unread · %d total", s.Unread, s.Total)
-		}
+	if hc, ok := h.headerCount(r.Context(), f); ok {
+		vm.HeaderCount = hc
 	}
 	vm.chrome = h.chromeFor(r, listActive(f))
 	if err := h.tmpl["entries"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entries/layout", "error", err)
+	}
+}
+
+// headerCount returns the preformatted list-header count for a filter, or
+// ("", false) for views that render no count (starred/history/category) or when
+// the stats lookup fails. It is best-effort chrome: a failed lookup is logged
+// (so the failure isn't silent) and the list still renders without the count.
+func (h *Handler) headerCount(ctx context.Context, f core.EntryFilter) (string, bool) {
+	switch {
+	case listActive(f) == "unread":
+		stats, err := h.feeds.EntryStats(ctx, uid)
+		if err != nil {
+			h.log.Warn("header unread count", "error", err)
+			return "", false
+		}
+		total := 0
+		for _, s := range stats {
+			total += s.Unread
+		}
+		return fmt.Sprintf("%d unread", total), true
+	case f.FeedID != nil:
+		stats, err := h.feeds.EntryStats(ctx, uid)
+		if err != nil {
+			h.log.Warn("header feed count", "feed_id", int64(*f.FeedID), "error", err)
+			return "", false
+		}
+		s := stats[*f.FeedID]
+		return fmt.Sprintf("%d unread · %d total", s.Unread, s.Total), true
+	default:
+		return "", false
+	}
+}
+
+// writeListCountOOB appends an out-of-band swap that refreshes the list header
+// count for the view the request came from (htmx sends HX-Current-URL). Per-row
+// mark-read/mark-unread/delete swap only the entry row, so without this the
+// header ("N unread") would go stale. Only the Unread ("/") and single-feed
+// ("/feeds/{id}") views render a header count; any other path is a no-op.
+func (h *Handler) writeListCountOOB(ctx context.Context, w http.ResponseWriter, currentURL string) {
+	if currentURL == "" {
+		return // no HX-Current-URL (non-htmx caller / missing header): nothing to refresh
+	}
+	u, err := url.Parse(currentURL)
+	if err != nil {
+		return
+	}
+	var f core.EntryFilter
+	switch p := u.Path; {
+	case p == "/":
+		// zero filter → Unread view (listActive default)
+	case strings.HasPrefix(p, "/feeds/"):
+		id, err := strconv.ParseInt(strings.TrimPrefix(p, "/feeds/"), 10, 64)
+		if err != nil {
+			return
+		}
+		fid := core.ID(id)
+		f.FeedID = &fid
+	default:
+		return
+	}
+	hc, ok := h.headerCount(ctx, f)
+	if !ok {
+		return
+	}
+	if err := h.tmpl["entryrow"].ExecuteTemplate(w, "listcountoob", hc); err != nil {
+		h.log.Error("template execute", "template", "entryrow/listcountoob", "error", err)
 	}
 }
 
@@ -235,7 +293,7 @@ func (h *Handler) buildFeedRow(f *core.Feed, st core.FeedEntryStats, now time.Ti
 		ID: f.ID, Title: f.DisplayTitle(), UserTitle: f.UserTitle, FeedURL: f.FeedURL, Host: feedHost(f.FeedURL),
 		LastError: f.LastError, CategoryID: cid, FullContent: f.FetchFullContent,
 		Unread: st.Unread, Total: st.Total, Stalled: f.ErrorCount >= h.errorLimit,
-		Next: humanizeUntil(f.NextCheckAt, now),
+		Next: humanizeUntil(f.NextCheckAt, now), ShowCounts: true,
 	}
 	if f.CheckedAt != nil {
 		row.Updated = humanizeSince(*f.CheckedAt, now)
@@ -308,7 +366,12 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
 	now := time.Now()
-	row := func(f *core.Feed) feedRowVM { return h.buildFeedRow(f, stats[f.ID], now) }
+	showCounts := statsErr == nil
+	row := func(f *core.Feed) feedRowVM {
+		r := h.buildFeedRow(f, stats[f.ID], now)
+		r.ShowCounts = showCounts // hide fabricated zeros when the stats lookup failed
+		return r
+	}
 	byCat := map[core.ID][]feedRowVM{}
 	var uncat []feedRowVM
 	for _, f := range feeds {
@@ -322,7 +385,7 @@ func (h *Handler) listFeeds(w http.ResponseWriter, r *http.Request) {
 	// Only render groups that actually contain feeds — an empty heading with a
 	// "No feeds." line under it is noise (the HasFeeds gate covers no-feeds-at-all).
 	mkGroup := func(catID int64, title string, rows []feedRowVM) feedGroupVM {
-		g := feedGroupVM{CatID: catID, Title: title, Feeds: rows, FeedCount: len(rows)}
+		g := feedGroupVM{CatID: catID, Title: title, Feeds: rows, FeedCount: len(rows), ShowCounts: showCounts}
 		for _, rr := range rows {
 			g.Unread += rr.Unread
 		}
@@ -466,8 +529,10 @@ func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 	h.renderFeedRow(w, r, id)
 }
 
-// renderEditError re-renders the edit panel with an inline error message and
-// returns status 422 so htmx swaps it in without treating it as a success.
+// renderEditError re-renders the edit panel with an inline error message. It
+// returns 200 (like renderSubscribeError): htmx 2.0.4 does not swap 4xx/5xx by
+// default, so a non-2xx status would make the browser silently discard the
+// error fragment and the Save button would appear to do nothing.
 func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id core.ID, cause error) {
 	ctx := r.Context()
 	f, gerr := h.feeds.Get(ctx, uid, id)
@@ -485,7 +550,6 @@ func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id cor
 		row.EditError = "Couldn't save: " + cause.Error()
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusUnprocessableEntity)
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
 		h.log.Error("template execute", "template", "feedrow/editerr", "error", err)
 	}
@@ -582,7 +646,7 @@ func (h *Handler) writeGroupHeadOOB(ctx context.Context, w http.ResponseWriter, 
 	if f.CategoryID != nil {
 		catID = int64(*f.CategoryID)
 	}
-	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised"}
+	head := feedGroupHeadVM{CatID: catID, OOB: true, Title: "Uncategorised", ShowCounts: true}
 	if catID != 0 {
 		if c, err := h.cats.Get(ctx, uid, core.ID(catID)); err == nil {
 			head.Title = c.Title
@@ -627,13 +691,19 @@ func (h *Handler) deleteFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	// Deleting a feed cascades its entries, changing both the group's feed count
+	// and its unread total — a whole-collection mutation, so reload the page to
+	// keep every count consistent (matches markFeedRead).
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // toggleEntry is the shared skeleton for toggleRead and toggleStar.
 // It fetches the entry, calls mutate (which performs the state change), re-fetches
-// the (possibly updated) entry, and renders the entryrow fragment.
-func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, mutate func(ctx context.Context, id core.ID, cur *core.Entry) error) {
+// the (possibly updated) entry, and renders the entryrow fragment. When countOOB
+// is set (read toggles, which change the unread count — not star toggles) it also
+// emits an OOB refresh of the list-header count.
+func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, countOOB bool, mutate func(ctx context.Context, id core.ID, cur *core.Entry) error) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -652,6 +722,10 @@ func (h *Handler) toggleEntry(w http.ResponseWriter, r *http.Request, mutate fun
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
 	if err := h.tmpl["entryrow"].ExecuteTemplate(w, "entryrow", toEntryVM(e, feedTitle)); err != nil {
 		h.log.Error("template execute", "template", "entryrow/entryrow", "error", err)
+		return
+	}
+	if countOOB {
+		h.writeListCountOOB(r.Context(), w, r.Header.Get("HX-Current-URL"))
 	}
 }
 
@@ -660,7 +734,7 @@ func (h *Handler) toggleRead(w http.ResponseWriter, r *http.Request) {
 		h.readerMarkUnread(w, r)
 		return
 	}
-	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
+	h.toggleEntry(w, r, true, func(ctx context.Context, id core.ID, cur *core.Entry) error {
 		read := cur.Status != core.StatusRead
 		return h.entries.MarkRead(ctx, uid, []core.ID{id}, read)
 	})
@@ -686,7 +760,7 @@ func (h *Handler) toggleStar(w http.ResponseWriter, r *http.Request) {
 		h.readerToggleStar(w, r)
 		return
 	}
-	h.toggleEntry(w, r, func(ctx context.Context, id core.ID, cur *core.Entry) error {
+	h.toggleEntry(w, r, false, func(ctx context.Context, id core.ID, cur *core.Entry) error {
 		return h.entries.Star(ctx, uid, []core.ID{id}, !cur.Starred)
 	})
 }
@@ -730,7 +804,10 @@ func (h *Handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	// List path: the row is removed by hx-swap="delete"; also emit an OOB refresh
+	// of the header count (htmx processes OOB swaps even alongside a delete swap).
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	h.writeListCountOOB(r.Context(), w, r.Header.Get("HX-Current-URL"))
 }
 
 // feedTitleMap fetches all feeds for the default user and returns a map of feed ID → title.
@@ -768,9 +845,18 @@ type categoriesPageVM struct {
 	chrome
 	Categories    []categoryVM
 	Uncategorised int
+	Error         string // inline banner for a failed create/rename (blank = none)
 }
 
 func (h *Handler) categoriesIndex(w http.ResponseWriter, r *http.Request) {
+	h.renderCategoriesPage(w, r, "")
+}
+
+// renderCategoriesPage renders the categories index, optionally with an inline
+// error banner. The create/rename forms are plain full-page POSTs, so a failed
+// save re-renders this page with a friendly message rather than dumping the user
+// on a raw http.Error text page.
+func (h *Handler) renderCategoriesPage(w http.ResponseWriter, r *http.Request, errMsg string) {
 	ctx := r.Context()
 	cats, err := h.cats.List(ctx, uid)
 	if err != nil {
@@ -782,13 +868,26 @@ func (h *Handler) categoriesIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	vm := categoriesPageVM{Uncategorised: uncat}
+	vm := categoriesPageVM{Uncategorised: uncat, Error: errMsg}
 	for _, c := range cats {
 		vm.Categories = append(vm.Categories, categoryVM{ID: c.ID, Title: c.Title, Unread: counts[c.ID]})
 	}
 	vm.chrome = h.chromeFor(r, "categories")
 	if err := h.tmpl["categories"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "categories/layout", "error", err)
+	}
+}
+
+// categoryErrorMessage maps a create/rename failure to friendly copy, or returns
+// ("", false) for an unexpected store error the caller should surface as 500.
+func categoryErrorMessage(err error) (string, bool) {
+	switch {
+	case errors.Is(err, core.ErrConflict):
+		return "A category with that name already exists.", true
+	case errors.Is(err, core.ErrValidation):
+		return "Category name can't be blank.", true
+	default:
+		return "", false
 	}
 }
 
@@ -811,7 +910,11 @@ func (h *Handler) uncategorisedEntries(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.cats.Create(r.Context(), uid, r.FormValue("title")); err != nil {
-		http.Error(w, "create category failed: "+err.Error(), http.StatusUnprocessableEntity)
+		if msg, ok := categoryErrorMessage(err); ok {
+			h.renderCategoriesPage(w, r, msg)
+			return
+		}
+		http.Error(w, "create category failed: "+err.Error(), 500)
 		return
 	}
 	http.Redirect(w, r, "/categories", http.StatusSeeOther)
@@ -823,7 +926,11 @@ func (h *Handler) renameCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.cats.Rename(r.Context(), uid, id, r.FormValue("title")); err != nil {
-		http.Error(w, "rename failed: "+err.Error(), http.StatusUnprocessableEntity)
+		if msg, ok := categoryErrorMessage(err); ok {
+			h.renderCategoriesPage(w, r, msg)
+			return
+		}
+		http.Error(w, "rename failed: "+err.Error(), 500)
 		return
 	}
 	http.Redirect(w, r, "/categories", http.StatusSeeOther)
@@ -834,11 +941,16 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.cats.Delete(r.Context(), uid, id); err != nil {
+	if err := h.cats.Delete(r.Context(), uid, id); err != nil && !errors.Is(err, core.ErrNotFound) {
+		// A not-found delete (stale row, double-fired request) is not a server
+		// error: the category is gone either way, so fall through to the refresh.
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	// Deleting a category re-homes its feeds to Uncategorised, shifting the
+	// Uncategorised unread count on the same page — reload so it stays honest.
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type searchVM struct {
