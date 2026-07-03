@@ -325,7 +325,7 @@ type discoveryParser struct {
 	feed          *core.ParsedFeed
 }
 
-func (p discoveryParser) Parse(_ []byte, feedURL string) (*core.ParsedFeed, error) {
+func (p discoveryParser) Parse(_ []byte, _, feedURL string) (*core.ParsedFeed, error) {
 	if feedURL == p.discoveredURL {
 		return p.feed, nil
 	}
@@ -427,4 +427,89 @@ func TestEditFeedRejectsBadURL(t *testing.T) {
 	if _, err := svc.EditFeed(context.Background(), core.DefaultUserID, f.ID, core.EditFeedInput{URL: "javascript:alert(1)"}); !errors.Is(err, core.ErrValidation) {
 		t.Errorf("want ErrValidation, got %v", err)
 	}
+}
+
+// B4/F1: an item with no parseable date (PublishedAt left zero by the parser)
+// must be ingested with the first-seen (ingest) time, not the year-1 zero value
+// that sinks it to the permanent bottom of every published-desc list.
+func TestIngestSubstitutesIngestTimeForUndatedEntries(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: "https://b.test/1", Title: "undated"}, // PublishedAt zero
+	}}}
+	svc, clk := newFeedSvc(store, fetcher, parser)
+
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	_ = f
+	es, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{})
+	if len(es) != 1 {
+		t.Fatalf("entries = %d, want 1", len(es))
+	}
+	if es[0].PublishedAt.IsZero() {
+		t.Fatal("undated entry persisted with zero PublishedAt (sinks to bottom of every list)")
+	}
+	if !es[0].PublishedAt.Equal(clk.Now()) {
+		t.Fatalf("PublishedAt = %v, want ingest time %v", es[0].PublishedAt, clk.Now())
+	}
+}
+
+// B4/F3: a store-layer ingest failure must still reschedule the feed with
+// backoff (via recordError), not return early leaving next_check_at in the past
+// — otherwise ListDueFeeds re-dispatches the feed (full-body) every tick.
+func TestPollReschedulesWhenIngestFails(t *testing.T) {
+	ctx := context.Background()
+	store := upsertErrStore{coretest.NewMemStore()}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/feed.xml", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog", Entries: []core.ParsedEntry{{GUID: "g1", URL: "https://b.test/1"}}}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if !got.NextCheckAt.After(now) {
+		t.Fatalf("next_check_at = %v, not advanced past %v — feed will hot-loop", got.NextCheckAt, now)
+	}
+	if got.ErrorCount != 1 || got.LastError == "" {
+		t.Fatalf("ingest failure not recorded as an error: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
+// B4/F4: a syntactically valid feed with a blank title and no items (a freshly
+// created feed) must resolve cleanly, not be rejected as "no feed found at URL"
+// (which ResolveAndIngest records as a feed error, leaving it permanently stalled).
+func TestSubscribeAcceptsValidEmptyFeed(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	// Parser positively identifies a feed but it has no title and no entries yet.
+	// StubParser.Discover returns nothing, so the old title/entries acceptance
+	// clause would drop this into discovery and record "no feed found at URL".
+	parser := coretest.StubParser{PF: &core.ParsedFeed{}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, f.ID)
+	if got.ErrorCount != 0 || got.LastError != "" {
+		t.Fatalf("valid empty feed recorded an error: count=%d err=%q", got.ErrorCount, got.LastError)
+	}
+}
+
+// upsertErrStore wraps MemStore and fails every UpsertEntries, simulating a
+// store-layer ingest failure (disk full, I/O error, lock timeout).
+type upsertErrStore struct{ *coretest.MemStore }
+
+func (upsertErrStore) UpsertEntries(context.Context, core.ID, []*core.Entry) ([]*core.Entry, error) {
+	return nil, errors.New("disk full")
 }

@@ -13,8 +13,8 @@ import (
 // bug in the parser on attacker-controlled XML.
 type panicParser struct{}
 
-func (panicParser) Parse([]byte, string) (*core.ParsedFeed, error) { panic("parser blew up") }
-func (panicParser) Discover([]byte, string) ([]string, error)      { panic("discover blew up") }
+func (panicParser) Parse([]byte, string, string) (*core.ParsedFeed, error) { panic("parser blew up") }
+func (panicParser) Discover([]byte, string) ([]string, error)              { panic("discover blew up") }
 
 // panicExtractor panics on Extract, simulating readability choking on a
 // pathological article HTML.

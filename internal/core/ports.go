@@ -37,7 +37,9 @@ type ParsedEntry struct {
 }
 
 type FeedParser interface {
-	Parse(data []byte, feedURL string) (*ParsedFeed, error)
+	// Parse decodes feed bytes. contentType is the HTTP Content-Type (may be
+	// empty); it carries the charset for feeds that declare none in-band.
+	Parse(data []byte, contentType, feedURL string) (*ParsedFeed, error)
 	Discover(data []byte, pageURL string) ([]string, error)
 }
 

@@ -108,7 +108,13 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 		// failure rather than overwriting the feed-provided content with nothing.
 		return s.fail(ctx, e, "sanitised content empty")
 	}
-	return s.store.SetEntryContent(ctx, e.ID, safe)
+	if err := s.store.SetEntryContent(ctx, e.ID, safe); err != nil {
+		// A persist failure must reschedule with backoff (via fail), not return
+		// raw: returning here leaves the entry pending with next_extract_at in the
+		// past and attempts unincremented, so the Scraper retries it every tick.
+		return s.fail(ctx, e, "persist: "+err.Error())
+	}
+	return nil
 }
 
 // fail records a failed extraction attempt. If the attempt cap is reached it

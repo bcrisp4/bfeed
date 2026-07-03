@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/mmcdole/gofeed"
 	ext "github.com/mmcdole/gofeed/extensions"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/charset"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -24,8 +26,8 @@ func New() *Parser { return &Parser{fp: gofeed.NewParser()} }
 
 var _ core.FeedParser = (*Parser)(nil)
 
-func (p *Parser) Parse(data []byte, feedURL string) (*core.ParsedFeed, error) {
-	f, err := p.fp.Parse(bytes.NewReader(data))
+func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFeed, error) {
+	f, err := p.fp.Parse(decodeReader(data, contentType))
 	if err != nil {
 		return nil, fmt.Errorf("gofeed parse: %w", err)
 	}
@@ -62,6 +64,51 @@ func (p *Parser) Parse(data []byte, feedURL string) (*core.ParsedFeed, error) {
 		})
 	}
 	return out, nil
+}
+
+// decodeReader returns a UTF-8 reader for the feed bytes. gofeed only transcodes
+// when the XML declaration names a non-UTF-8 encoding, so a feed whose charset
+// lives only in the HTTP Content-Type (RFC 3023) fails as "invalid UTF-8". We
+// bridge that gap with charset.NewReader, which honors the HTTP charset, a BOM,
+// and content sniffing. Crucially we do this ONLY when the bytes carry no in-band
+// encoding declaration: if we pre-transcoded a feed that also declares its
+// encoding, encoding/xml would re-invoke gofeed's CharsetReader on the now-UTF-8
+// stream and double-transcode it into mojibake. Falls back to the raw bytes if a
+// charset reader can't be built.
+func decodeReader(data []byte, contentType string) io.Reader {
+	if hasXMLEncodingDecl(data) {
+		return bytes.NewReader(data)
+	}
+	if r, err := charset.NewReader(bytes.NewReader(data), contentType); err == nil {
+		return r
+	}
+	return bytes.NewReader(data)
+}
+
+// hasXMLEncodingDecl reports whether the bytes begin with an XML declaration that
+// carries an encoding attribute (e.g. <?xml version="1.0" encoding="utf-8"?>). It
+// scans only the prolog: past a leading BOM/whitespace, and no further than the
+// closing "?>" of the declaration.
+func hasXMLEncodingDecl(data []byte) bool {
+	if len(data) > 512 {
+		data = data[:512] // the declaration, if any, is in the prolog
+	}
+	s := strings.TrimLeft(string(data), "\ufeff \t\r\n") // strip BOM + leading whitespace
+	if !strings.HasPrefix(s, "<?xml") {
+		return false
+	}
+	end := strings.Index(s, "?>")
+	if end < 0 {
+		return false
+	}
+	// Match exactly the spelling gofeed/goxpp honors: a lowercase, adjacent
+	// "encoding=" (it does NOT recognize a case-variant or whitespace-around-'='
+	// form \u2014 verified: those raw-byte feeds fail "invalid UTF-8"). The check is
+	// deliberately congruent with the parser: it returns true only when gofeed
+	// itself will transcode, so we skip pre-wrapping only then and never
+	// double-transcode. Any spelling gofeed ignores falls through to charset
+	// pre-transcoding, which is exactly what such a feed needs.
+	return strings.Contains(s[:end], "encoding=")
 }
 
 // EntryHash computes a stable content hash for an entry. Exposed so the service
