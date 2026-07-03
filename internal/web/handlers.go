@@ -362,7 +362,10 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 	// that polls until the feed populates (or turns into an error row).
 	// context.Background() is intentional: the goroutine must outlive the request.
 	if h.busy.start(f.ID) {
+		h.bgOps.Add(1)
 		go func() { //nolint:gosec // G118: background goroutine intentionally outlives request; context.Background() is correct here
+			defer h.bgOps.Done() // last: Drain unblocks only after cleanup
+			defer core.RecoverGuard(h.log, "background subscribe", "feed_id", int64(f.ID))
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			defer h.busy.done(f.ID)
@@ -519,7 +522,10 @@ func (h *Handler) startRefresh(id core.ID) {
 	if !h.busy.start(id) {
 		return
 	}
+	h.bgOps.Add(1)
 	go func() {
+		defer h.bgOps.Done() // last: Drain unblocks only after cleanup
+		defer core.RecoverGuard(h.log, "background refresh", "feed_id", int64(id))
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		defer h.busy.done(id)

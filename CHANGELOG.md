@@ -13,6 +13,9 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- A malformed or malicious feed or article that trips a bug in the parser, content extractor, or sanitiser can no longer crash the whole server: the failure is now contained to that one feed/entry (recorded as an error and retried with backoff) instead of taking the process down and getting stuck in a restart loop.
+- `bfeed serve` now exits with a non-zero status when it cannot start the web server (for example, the listen address is already in use), so process supervisors and container restart policies react instead of treating a server that never started as healthy.
+- Shutdown now waits for in-flight "add feed" and "refresh" operations to finish before closing the database, so a subscribe or refresh triggered just before shutdown is no longer silently lost.
 - The container image now starts correctly with its default database path: the `/data` volume is created owned by the non-root user, so `docker run` (or a fresh named/anonymous volume) no longer fails on Linux with "unable to open database file". Previously the published image exited immediately unless you pre-created and chowned the volume by hand.
 
 ## [0.7.0] - 2026-06-25

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -125,7 +126,12 @@ func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL 
 // discovered/changed URL, ingests entries, and reschedules. On any failure it
 // records the error on the feed (so a pending row becomes an error row) and
 // returns it. Intended to run in a background goroutine.
-func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
+func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = s.recordPanic(ctx, f, r)
+		}
+	}()
 	feedURL, pf, resp, err := s.resolveFeed(ctx, f.FeedURL)
 	if err != nil {
 		return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
@@ -199,7 +205,12 @@ func (s *FeedService) Refresh(ctx context.Context, userID, feedID ID) error {
 
 // PollFeed implements FeedPoller: fetch (conditional) → parse → sanitise → upsert → reschedule.
 // Fetch/parse errors are recorded on the feed and swallowed (background workers continue).
-func (s *FeedService) PollFeed(ctx context.Context, f *Feed) error {
+func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = s.recordPanic(ctx, f, r)
+		}
+	}()
 	now := s.clk.Now()
 	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: f.FeedURL, ETag: f.ETag, LastModified: f.LastModified})
 	if err != nil {
@@ -305,6 +316,15 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, f.ErrorCount, retryAfter, s.cfg.Jitter)
 	s.log.Warn("feed poll error", "feed_id", int64(f.ID), "url", f.FeedURL, "error", msg)
 	return s.store.UpdateFeed(ctx, f)
+}
+
+// recordPanic records a recovered pipeline panic as a feed error (with backoff
+// reschedule) so a single pathological feed degrades to an error row instead of
+// crashing the poll goroutine and staying due forever. See RecoverGuard.
+func (s *FeedService) recordPanic(ctx context.Context, f *Feed, r any) error {
+	s.log.Error("recovered panic polling feed",
+		"feed_id", int64(f.ID), "url", f.FeedURL, "panic", r, "stack", string(debug.Stack()))
+	return s.recordError(ctx, f, s.clk.Now(), fmt.Sprintf("panic: %v", r), 0)
 }
 
 // EditFeedInput carries the four user-editable feed fields. An empty URL leaves

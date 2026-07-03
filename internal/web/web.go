@@ -1,11 +1,13 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/CAFxX/httpcompression"
 
@@ -46,10 +48,14 @@ type Handler struct {
 	imgRewrite func(string) string // nil = image proxy disabled
 	errorLimit int                 // a feed with error_count >= this is flagged stalled in the UI
 	busy       *inflightSet
+	bgOps      sync.WaitGroup // tracks in-flight background subscribe/refresh goroutines
+	router     http.Handler   // the composed middleware chain; ServeHTTP delegates here
 }
 
-// New constructs a fully-routed http.Handler for the bfeed web UI.
-func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int) http.Handler {
+// New constructs a fully-routed *Handler for the bfeed web UI. The returned
+// value implements http.Handler; callers that need to drain in-flight
+// background feed ops on shutdown hold onto the concrete type to call Drain.
+func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int) *Handler {
 	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit, busy: newInflightSet()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
@@ -90,7 +96,30 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 		// Only static, valid options are passed, so this can never fail at runtime.
 		panic("web: compression adapter: " + err.Error())
 	}
-	return compress(logging(log, noStore(mux)))
+	h.router = compress(logging(log, noStore(mux)))
+	return h
+}
+
+// ServeHTTP delegates to the composed middleware chain so *Handler satisfies
+// http.Handler.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.router.ServeHTTP(w, r)
+}
+
+// Drain waits for in-flight background feed-op goroutines (subscribe/refresh) to
+// finish, or for ctx to expire. It returns true if they drained, false if ctx
+// expired first (some ops may still be running). Called between srv.Shutdown and
+// db.Close so a graceful shutdown never closes the DB underneath a mid-flight
+// ResolveAndIngest/Refresh write.
+func (h *Handler) Drain(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() { h.bgOps.Wait(); close(done) }()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func parseTemplates() map[string]*template.Template {
