@@ -11,7 +11,7 @@
         {{- if .Pending}}<span class="pending">resolving feed…</span>
         {{- else}}
           <span class="host">{{.Host}}</span>
-          <span class="dot">·</span><span><span class="unread">{{.Unread}} unread</span> / {{.Total}}</span>
+          {{- if .ShowCounts}}<span class="dot">·</span><span><span class="unread">{{.Unread}} unread</span> / {{.Total}}</span>{{end}}
           {{- if .Stalled}}<span class="dot">·</span><span class="stalled">⚠ stalled — {{.LastError}}</span>
           {{- else if .LastError}}<span class="dot">·</span><span class="err">error: {{.LastError}}</span>{{end}}
           {{- if .Updated}}<span class="dot">·</span><span>updated {{.Updated}}</span>{{end}}
@@ -37,7 +37,7 @@
 {{end}}
 
 {{define "feedgrouphead"}}
-<div class="fm-group-head" id="feed-group-{{.CatID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Title}} <span class="g-count">· {{.FeedCount}} feeds · {{.Unread}} unread</span></div>
+<div class="fm-group-head" id="feed-group-{{.CatID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Title}} <span class="g-count">· {{.FeedCount}} feeds{{if .ShowCounts}} · {{.Unread}} unread{{end}}</span></div>
 {{end}}
 
 {{define "feededit"}}

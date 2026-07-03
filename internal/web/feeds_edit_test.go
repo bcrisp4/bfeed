@@ -92,7 +92,10 @@ func TestEditFormReturns404ForUnknownFeed(t *testing.T) {
 	}
 }
 
-func TestEditSaveBadURLReturns422WithPanel(t *testing.T) {
+// A bad URL re-renders the edit panel with an inline error at status 200 —
+// htmx 2.0.4 does not swap 4xx/5xx by default, so a 422 would be silently
+// discarded and the user would see nothing (mirrors renderSubscribeError).
+func TestEditSaveBadURLReturns200WithPanel(t *testing.T) {
 	h, st := newTestHandler(t, coretest.StubFetcher{})
 	id := seedFeed(t, st)
 	form := strings.NewReader("title=&url=javascript%3Aalert(1)&category_id=")
@@ -100,15 +103,15 @@ func TestEditSaveBadURLReturns422WithPanel(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 so htmx swaps the error panel, got %d", rec.Code)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `class="feed-edit"`) {
-		t.Errorf("422 response should re-render the edit panel, body=%s", body)
+		t.Errorf("response should re-render the edit panel, body=%s", body)
 	}
 	if !strings.Contains(body, `class="form-error"`) {
-		t.Errorf("422 response should show form-error, body=%s", body)
+		t.Errorf("response should show form-error, body=%s", body)
 	}
 }
 

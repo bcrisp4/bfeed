@@ -145,6 +145,65 @@ func TestCreateCategory(t *testing.T) {
 	}
 }
 
+// A duplicate or blank category name must re-render the categories page with an
+// inline error (200 HTML), not dump the user on a raw text/plain error page.
+func TestCreateCategoryConflictShowsInlineError(t *testing.T) {
+	h, store := newWeb(t)
+	store.CreateCategory(context.Background(), &core.Category{UserID: core.DefaultUserID, Title: "News"})
+
+	form := strings.NewReader("title=News")
+	req := httptest.NewRequest(http.MethodPost, "/categories", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("conflict status %d, want 200 with inline error", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="form-error"`) || !strings.Contains(body, "already exists") {
+		t.Fatalf("expected inline conflict error, body=%s", body)
+	}
+	if !strings.Contains(body, "<h1>Categories</h1>") {
+		t.Fatalf("expected full categories page, body=%s", body)
+	}
+}
+
+func TestRenameCategoryConflictShowsInlineError(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"})
+	techID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
+
+	form := strings.NewReader("title=News")
+	req := httptest.NewRequest(http.MethodPost, "/categories/"+strconv.FormatInt(int64(techID), 10)+"/rename", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename conflict status %d, want 200 with inline error", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("expected inline conflict error, body=%s", rec.Body.String())
+	}
+}
+
+// A whitespace-only title passes the client-side `required` attribute but fails
+// server validation; it must show the inline banner, not a raw error page.
+func TestCreateCategoryBlankShowsInlineError(t *testing.T) {
+	h, _ := newWeb(t)
+	form := strings.NewReader("title=+++")
+	req := httptest.NewRequest(http.MethodPost, "/categories", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("blank-title status %d, want 200 with inline error", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `class="form-error"`) {
+		t.Fatalf("expected inline validation error, body=%s", rec.Body.String())
+	}
+}
+
 func TestDeleteCategoryUncategorisesFeeds(t *testing.T) {
 	h, store := newWeb(t)
 	ctx := context.Background()
@@ -154,12 +213,36 @@ func TestDeleteCategoryUncategorisesFeeds(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/categories/"+strconv.FormatInt(int64(catID), 10)+"/delete", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("status %d", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d, want 204", rec.Code)
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Errorf("delete category should reload the page to refresh Uncategorised count")
 	}
 	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
 	if f.CategoryID != nil {
 		t.Fatalf("feed not uncategorised after category delete")
+	}
+}
+
+// A stale/double delete (category already gone) is not a server error: the htmx
+// flow shows nothing on 5xx, so a not-found delete must succeed (204), not 500.
+func TestDeleteMissingCategoryIsNotServerError(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	catID, _ := store.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "Gone"})
+
+	del := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/categories/"+strconv.FormatInt(int64(catID), 10)+"/delete", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := del(); code != http.StatusNoContent {
+		t.Fatalf("first delete status %d, want 204", code)
+	}
+	if code := del(); code != http.StatusNoContent {
+		t.Fatalf("second (stale) delete status %d, want 204 not 500", code)
 	}
 }
 
@@ -706,5 +789,111 @@ func TestFeedsPageShowsStalledBadge(t *testing.T) {
 	// feedrow emits <span class="err">error: ...</span> for non-stalled errors
 	if !strings.Contains(body, "error: blip") {
 		t.Fatalf("healthy feed should show inline error, not badge:\n%s", body)
+	}
+}
+
+// seedUnread creates one feed with n unread entries and returns the feed id plus
+// the seeded entry ids in order.
+func seedUnread(t *testing.T, store *coretest.MemStore, n int) (core.ID, []core.ID) {
+	t.Helper()
+	ctx := context.Background()
+	fid, err := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := make([]*core.Entry, 0, n)
+	for i := 0; i < n; i++ {
+		batch = append(batch, &core.Entry{UserID: core.DefaultUserID, FeedID: fid, GUID: "g" + strconv.Itoa(i), Title: "post " + strconv.Itoa(i), Status: core.StatusUnread, PublishedAt: time.Unix(int64(100+i), 0)})
+	}
+	ins, err := store.UpsertEntries(ctx, fid, batch)
+	if err != nil || len(ins) != n {
+		t.Fatalf("seed entries: ins=%d err=%v", len(ins), err)
+	}
+	ids := make([]core.ID, len(ins))
+	for i, e := range ins {
+		ids[i] = e.ID
+	}
+	return fid, ids
+}
+
+// Marking an entry read from the Unread list emits an OOB refresh of the header
+// count (span#list-count) with the decremented total, so the header stays live.
+func TestMarkReadEmitsHeaderCountOOB(t *testing.T) {
+	h, store := newWeb(t)
+	_, ids := seedUnread(t, store, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/entries/"+strconv.FormatInt(int64(ids[0]), 10)+"/read", nil)
+	req.Header.Set("HX-Current-URL", "/")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="list-count"`) || !strings.Contains(body, `hx-swap-oob="true"`) {
+		t.Fatalf("mark-read should emit OOB header count, body=%s", body)
+	}
+	if !strings.Contains(body, "1 unread") {
+		t.Fatalf("OOB count should reflect 1 remaining unread, body=%s", body)
+	}
+}
+
+// Starring an entry does not change the unread count, so it must NOT emit an OOB
+// header refresh (which would otherwise overwrite the header on every star).
+func TestStarDoesNotEmitHeaderCountOOB(t *testing.T) {
+	h, store := newWeb(t)
+	_, ids := seedUnread(t, store, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/entries/"+strconv.FormatInt(int64(ids[0]), 10)+"/star", nil)
+	req.Header.Set("HX-Current-URL", "/")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if strings.Contains(rec.Body.String(), `id="list-count"`) {
+		t.Fatalf("star must not emit OOB header count, body=%s", rec.Body.String())
+	}
+}
+
+// Deleting an entry from a list view emits the OOB header count refresh.
+func TestDeleteEntryEmitsHeaderCountOOB(t *testing.T) {
+	h, store := newWeb(t)
+	_, ids := seedUnread(t, store, 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/entries/"+strconv.FormatInt(int64(ids[0]), 10)+"/delete", nil)
+	req.Header.Set("HX-Current-URL", "/")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `id="list-count"`) || !strings.Contains(rec.Body.String(), `hx-swap-oob="true"`) {
+		t.Fatalf("list-path delete should emit OOB header count, body=%s", rec.Body.String())
+	}
+}
+
+// GET /feeds/{id} for a missing feed must 404 (stale bookmark), and a real feed
+// must title the page with its display name, not the literal "Feed".
+func TestFeedEntriesMissingFeed404(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/feeds/999999", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing feed status %d, want 404", rec.Code)
+	}
+}
+
+func TestFeedEntriesShowsFeedTitle(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "The Daily Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds/"+strconv.FormatInt(int64(fid), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "The Daily Blog") {
+		t.Fatalf("single-feed page should show the feed title, body=%s", rec.Body.String())
 	}
 }

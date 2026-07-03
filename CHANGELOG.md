@@ -13,6 +13,13 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Editing a feed's details with an invalid or already-subscribed address now shows the error inline in the edit form instead of the Save button silently doing nothing.
+- "Load more" on a long entry list no longer leaves a stale button mid-list or re-appends the same page as duplicate entries; the button now advances cleanly to the next page.
+- Opening a link to a feed that has since been deleted now returns a proper "not found" page instead of an empty untitled "Feed" page, and a single feed's page now shows the feed's name in its heading.
+- Deleting a feed or a category now immediately refreshes the affected feed/unread counts on the page instead of leaving stale totals until a manual reload; deleting an already-deleted category no longer reports a server error.
+- Adding or renaming a category to a name that already exists (or a blank name) now shows a friendly inline message on the Categories page instead of dumping you on a raw error page.
+- The unread count in a list's header now updates immediately when you mark or delete an entry from that list, instead of showing the old number until you navigate away.
+- When the entry-count lookup fails, the Feeds page now omits the per-feed counts rather than showing a misleading "0 unread / 0".
 - Deleting a feed and immediately subscribing to another no longer risks the new feed silently inheriting the deleted one's address, title, and articles (or the new feed's own setup being skipped). Feed identifiers are no longer reused after deletion.
 - Editing a feed's address while it is refreshing (including the delete-and-re-add repair flow) no longer leaves it stuck showing the old address's content and update markers, and the new address is now fetched promptly instead of after a long delay.
 - Turning on full-text article extraction for a feed while it is mid-refresh now also extracts the entries that arrive during that refresh, instead of leaving them permanently un-extracted until you toggle the setting off and on again.

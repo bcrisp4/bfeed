@@ -62,8 +62,11 @@ func TestDeleteFeedRemovesFeedAndEntries(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/feeds/"+strconv.FormatInt(int64(fid), 10)+"/delete", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("delete feed status %d, want 200", rec.Code)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete feed status %d, want 204", rec.Code)
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Errorf("delete feed should reload the page to refresh group counts (HX-Refresh)")
 	}
 	if _, err := store.GetFeed(ctx, core.DefaultUserID, fid); err == nil {
 		t.Fatal("feed still present after delete")
@@ -102,6 +105,12 @@ func TestCursorPaginationLoadMore(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "Load more") {
 		t.Fatalf("expected Load more link on overflowing list:\n%s", body)
+	}
+	// The button must replace itself on click (hx-target="this" + outerHTML), not
+	// append into #entries — otherwise the old button is stranded mid-list and a
+	// second click re-appends the same page, duplicating entries.
+	if !strings.Contains(body, `hx-target="this"`) || !strings.Contains(body, `hx-swap="outerHTML"`) {
+		t.Fatalf("Load more button must self-replace (hx-target=this hx-swap=outerHTML):\n%s", body)
 	}
 	m := regexp.MustCompile(`\?cursor=([A-Za-z0-9_-]+)`).FindStringSubmatch(body)
 	if m == nil {

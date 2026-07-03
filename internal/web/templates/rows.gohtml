@@ -1,10 +1,14 @@
 {{define "entrylist"}}
 <div id="entries">
 {{range .Entries}}{{template "entryrow" .}}{{end}}
-{{if .NextCursor}}<button hx-get="{{$.ListPath}}?cursor={{.NextCursor}}" hx-target="#entries" hx-swap="beforeend"
+{{if .NextCursor}}<button hx-get="{{$.ListPath}}?cursor={{.NextCursor}}" hx-target="this" hx-swap="outerHTML"
   hx-select="#entries > *">Load more</button>{{end}}
 </div>
 {{end}}
+
+{{/* OOB refresh of the list-header count after a per-row mark-read/delete.
+     Silently ignored by htmx when the current page has no #list-count span. */}}
+{{define "listcountoob"}}<span id="list-count" class="count" hx-swap-oob="true">{{.}}</span>{{end}}
 
 {{define "entryrow"}}
 <div class="entry {{if eq .Status "read"}}read{{end}}" id="entry-{{.ID}}">
