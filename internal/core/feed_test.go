@@ -34,6 +34,42 @@ func (p *recordingParser) Parse(_ []byte, _, base string) (*core.ParsedFeed, err
 }
 func (p *recordingParser) Discover([]byte, string) ([]string, error) { return nil, nil }
 
+func TestIngestSanitizesContentAgainstFinalURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	const orig = "https://old.test/feed.xml"
+	const finalURL = "https://mirror.test/feed.xml"
+	// A temporary redirect: identity is NOT adopted, but relative links in entry
+	// content must still resolve against where the bytes came from (finalURL).
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{
+		Status: 200, Body: []byte("<rss/>"), FinalURL: finalURL, PermanentRedirect: false,
+	}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "B", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: finalURL + "/1", Content: `<img src="/x.png">`},
+	}}}
+	san := &recordingSanitizer{}
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	cfg := core.FeedServiceConfig{
+		Schedule:   core.ScheduleConfig{MinInterval: 15 * time.Minute, MaxInterval: 24 * time.Hour, Factor: 1},
+		Reschedule: core.RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour},
+		Jitter:     func(time.Duration) time.Duration { return 0 },
+	}
+	svc := core.NewFeedService(store, fetcher, parser, san, clk, coretest.DiscardLogger(), cfg)
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: orig, Title: "B"})
+
+	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if err := svc.PollFeed(ctx, f); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	if san.baseURL != finalURL {
+		t.Fatalf("Sanitize base = %q, want final URL %q (not pre-redirect %q)", san.baseURL, finalURL, orig)
+	}
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+	if got.FeedURL != orig {
+		t.Fatalf("temporary redirect wrongly adopted: feed_url = %q, want %q", got.FeedURL, orig)
+	}
+}
+
 func seedFeed(t *testing.T, store *coretest.MemStore, f *core.Feed) core.ID {
 	t.Helper()
 	id, err := store.CreateFeed(context.Background(), f)

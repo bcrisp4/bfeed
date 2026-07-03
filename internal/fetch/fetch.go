@@ -141,7 +141,7 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 		RetryAfter:   parseRetryAfter(resp.Header.Get("Retry-After")),
 		FinalURL:     resp.Request.URL.String(), // last request in the redirect chain
 	}
-	out.PermanentRedirect = rt.hops > 0 && rt.permanent && out.FinalURL != req.URL
+	out.PermanentRedirect = rt.hops > 0 && rt.permanent
 	if resp.StatusCode == http.StatusNotModified {
 		out.NotModified = true
 		return out, nil

@@ -294,7 +294,11 @@ func (s *FeedService) adoptPermanentRedirect(ctx context.Context, f *Feed, resp 
 	f.LastModified = ""
 }
 
-func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error {
+// ingest sanitises and upserts a parsed feed's entries. baseURL is the URL the
+// feed bytes were actually read from (post-redirect); relative href/img in entry
+// content resolve against it — never the pre-redirect feed URL, which for a
+// temporary redirect (not adopted as identity) would bake in broken links.
+func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseURL string) error {
 	if pf == nil {
 		return nil
 	}
@@ -314,8 +318,8 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed) error
 		}
 		entries = append(entries, &Entry{
 			UserID: f.UserID, FeedID: f.ID, GUID: pe.GUID, URL: pe.URL, Title: pe.Title,
-			Author: pe.Author, Content: s.san.Sanitize(pe.Content, f.FeedURL),
-			Summary: s.san.Sanitize(pe.Summary, f.FeedURL), PublishedAt: published,
+			Author: pe.Author, Content: s.san.Sanitize(pe.Content, baseURL),
+			Summary: s.san.Sanitize(pe.Summary, baseURL), PublishedAt: published,
 			Status: StatusUnread, CreatedAt: now,
 			Hash: pe.Hash, ExtractState: state,
 		})
@@ -353,7 +357,7 @@ func (s *FeedService) minCheck(now time.Time) time.Time {
 
 func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time, resp *FetchResponse, pf *ParsedFeed) error {
 	if pf != nil {
-		if err := s.ingest(ctx, f, pf); err != nil {
+		if err := s.ingest(ctx, f, pf, orURL(resp.FinalURL, f.FeedURL)); err != nil {
 			// A store-layer ingest failure (disk full, I/O error, lock timeout)
 			// must not skip rescheduling: returning early here leaves next_check_at
 			// in the past, so the feed is re-dispatched (full-body, no conditional
