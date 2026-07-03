@@ -71,6 +71,10 @@ Generated code in `internal/store/sqlite/sqlc/` committed and **never hand-edite
 
 **sqlc param-inference gotcha:** `BETWEEN sqlc.arg(lo) AND sqlc.arg(hi)` *inside `CASE` expression* drops bound args — generated func ends up with too few params (silent; fails only at call/compile). Use explicit `>= sqlc.arg(lo) AND … <= sqlc.arg(hi)` instead, and **always eyeball generated signature after `make sqlc`**.
 
+**Non-ASCII in `queries/*.sql` silently corrupts generated SQL:** a multibyte char (e.g. em-dash `—` U+2014) anywhere in a query file — even a `--` comment — throws off sqlc's byte tracking, relocating each subsequent query's trailing `?;` to the top of its generated const (leaving `WHERE … =` danglingly incomplete). `go build` passes (valid Go string); fails only at query time as "SQL logic error: incomplete input". Keep query files ASCII-only; scan after editing with `grep -nP '[^\x00-\x7F]' internal/store/sqlite/queries/*.sql`.
+
+**Table-rebuild migrations** (changing a PK to `AUTOINCREMENT`, or any `CREATE new / copy / DROP old / RENAME`) must use `-- +goose NO TRANSACTION` + explicit `PRAGMA foreign_keys=OFF; … PRAGMA foreign_keys=ON;`. The DSN sets `foreign_keys(ON)`, so a `DROP TABLE` of a **parent** (e.g. `feeds`) runs an implicit cascade that wipes children (`entries`/`tombstones`); and `PRAGMA foreign_keys` is a **no-op inside a transaction**, so it only bites in NO TRANSACTION mode. Carry ids over explicitly (`INSERT INTO new (id,…) SELECT id,… FROM old`) to preserve identity + FK refs; recreate the table's indexes after `RENAME`. Verify with an upgrade-path test (goose `UpTo(…, N-1)`, seed rows, `UpTo(…, N)`, assert data survives). See `0010_feeds_autoincrement.sql`.
+
 **Exception — dynamic SQL is not sqlc:** queries with runtime-variable shape (conditional `WHERE`, variadic `IN`, dynamic `ORDER`/keyset column) are hand-written `fmt.Sprintf` + bound-params directly in `store/sqlite/*.go`, **not** in `queries/` — e.g. `ListEntries`, `SetStatus`, `SetStarred`, `MarkReadByFilter`. sqlc only compiles static SQL, so these can't live there; editing them needs **no** `make sqlc`. Safe because only skeleton (column names, WHERE/ORDER fragments) interpolated from **closed code allowlist** — every value is bound `?` — why the `//nolint:gosec // G201` on them is legitimate. **One deliberate value exception:** `ListEntries` interpolates a *literal* `e.starred = 0/1` (via `b2i`), not a bound `?`, because a **partial index** (`idx_entries_starred WHERE starred = 1`) is unusable by `starred = ?` — SQLite needs a literal to prove the partial predicate holds. Bounded 0/1 literal, still G201-safe.
 
 ### Running / CLI
@@ -80,6 +84,8 @@ BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=te
 Subcommands: `serve` (default), `migrate`, `healthcheck` (for container HEALTHCHECK), `version`.
 
 `BFEED_LISTEN_ADDR` (bind, default `:8080`) and `BFEED_BASE_URL` (external URL for links/cookies/User-Agent, **required**) intentionally distinct — setting only `BASE_URL` does **not** change bind port. Other env: `BFEED_DATABASE_PATH`, `BFEED_POLL_TICK`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`, `BFEED_SCHED_FACTOR`, `BFEED_FEED_ERROR_LIMIT`, `BFEED_FEED_WORKERS`, `BFEED_HOST_CONCURRENCY` (see `internal/config`).
+
+**SSRF guard (B11) blocks loopback/private fetch targets:** subscribing to a `localhost`/`127.0.0.1`/`::1` feed fails "ssrf guard: blocked address", so you **can't** e2e-test feed ingest against a local `python3 -m http.server`. Rely on unit tests (fake `Fetcher`) for the ingest pipeline; a running `serve` only confirms wiring/migration, not real fetch.
 
 ## Architecture (ports & adapters)
 
