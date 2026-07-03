@@ -53,9 +53,7 @@ func (p *Scraper) Run(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for e := range jobs {
-				if err := p.scr.ScrapeEntry(ctx, e); err != nil {
-					p.log.Error("scrape entry", "entry_id", int64(e.ID), "error", err)
-				}
+				p.scrapeOne(ctx, e)
 			}
 		}()
 	}
@@ -71,6 +69,16 @@ func (p *Scraper) Run(ctx context.Context) {
 		case <-ticker.C:
 			p.dispatch(ctx, jobs)
 		}
+	}
+}
+
+// scrapeOne runs one extraction, guarded so a panic on untrusted article HTML
+// degrades to a logged error rather than killing the worker goroutine (and the
+// process).
+func (p *Scraper) scrapeOne(ctx context.Context, e *Entry) {
+	defer RecoverGuard(p.log, "scrape worker", "entry_id", int64(e.ID))
+	if err := p.scr.ScrapeEntry(ctx, e); err != nil {
+		p.log.Error("scrape entry", "entry_id", int64(e.ID), "error", err)
 	}
 }
 

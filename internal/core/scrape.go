@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -75,7 +77,17 @@ var _ EntryScraper = (*ScrapeService)(nil)
 // replaces the stored content. On any failure it records a retry (with backoff)
 // or, past the attempt cap, marks extraction terminally failed — keeping the
 // feed-provided content either way.
-func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) error {
+func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// A panic while extracting/sanitising untrusted article HTML degrades
+			// to a recorded extraction failure (with backoff) instead of crashing
+			// the scrape goroutine. See RecoverGuard.
+			s.log.Error("recovered panic scraping entry",
+				"entry_id", int64(e.ID), "url", e.URL, "panic", r, "stack", string(debug.Stack()))
+			err = s.fail(ctx, e, fmt.Sprintf("panic: %v", r))
+		}
+	}()
 	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: e.URL})
 	if err != nil {
 		return s.fail(ctx, e, "fetch: "+err.Error())

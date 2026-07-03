@@ -43,9 +43,7 @@ func (p *Poller) Run(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for f := range jobs {
-				if err := p.poll.PollFeed(ctx, f); err != nil {
-					p.log.Error("poll feed", "feed_id", int64(f.ID), "error", err)
-				}
+				p.pollOne(ctx, f)
 			}
 		}()
 	}
@@ -62,6 +60,15 @@ func (p *Poller) Run(ctx context.Context) {
 		case <-ticker.C:
 			p.dispatch(ctx, jobs)
 		}
+	}
+}
+
+// pollOne runs one feed poll, guarded so a panic on untrusted content degrades
+// to a logged error rather than killing the worker goroutine (and the process).
+func (p *Poller) pollOne(ctx context.Context, f *Feed) {
+	defer RecoverGuard(p.log, "poll worker", "feed_id", int64(f.ID))
+	if err := p.poll.PollFeed(ctx, f); err != nil {
+		p.log.Error("poll feed", "feed_id", int64(f.ID), "error", err)
 	}
 }
 

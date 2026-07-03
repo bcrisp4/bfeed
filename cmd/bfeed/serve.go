@@ -101,16 +101,21 @@ func runServe() int {
 		imgRewrite = signer.ProxyURL
 	}
 
+	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit),
+		Handler:           webHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Buffered so the goroutine never blocks; read once after shutdown to decide
+	// the exit code. A bind failure (port in use) must surface as exit 1.
+	srvErr := make(chan error, 1)
 	go func() {
 		log.Info("listening", "addr", cfg.ListenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http server", "error", err)
-			stop()
+			srvErr <- err
+			stop() // trigger the graceful-shutdown path below
 		}
 	}()
 
@@ -131,5 +136,19 @@ func runServe() int {
 	case <-time.After(15 * time.Second):
 		log.Warn("scraper did not drain in time")
 	}
-	return 0
+	// Wait for in-flight web background feed ops before the deferred db.Close so
+	// a subscribe/refresh mid-write is not cut off by a closed pool.
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelDrain()
+	if !webHandler.Drain(drainCtx) {
+		log.Warn("web background ops did not drain in time")
+	}
+	// A server that never listened (e.g. bind failure) reports failure so
+	// restart policies keyed on the exit code react.
+	select {
+	case <-srvErr:
+		return 1
+	default:
+		return 0
+	}
 }
