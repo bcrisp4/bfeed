@@ -110,9 +110,16 @@ func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL 
 		return nil, err
 	}
 	now := s.clk.Now()
+	// Grace period before the pending row is poll-due: the web layer resolves it in a
+	// background goroutine right after this returns, and that resolve owns the first
+	// ingest. Making it immediately due (NextCheckAt: now) lets the Poller dispatch it
+	// concurrently and clobber the resolve's result with a last-write-wins UpdateFeed
+	// (audit B7). One MinInterval out means the Poller only picks it up if the resolve
+	// died; a normal resolve overwrites next_check_at via recordSuccess well before.
 	f := &Feed{
 		UserID: userID, CategoryID: categoryID, FeedURL: rawURL, Title: feedTitle("", rawURL),
-		NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: fetchFullContent,
+		NextCheckAt: now.Add(s.cfg.Schedule.MinInterval), CreatedAt: now, UpdatedAt: now,
+		FetchFullContent: fetchFullContent,
 	}
 	id, err := s.store.CreateFeed(ctx, f)
 	if err != nil {
@@ -137,7 +144,7 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error)
 		return s.recordError(ctx, f, s.clk.Now(), err.Error(), 0)
 	}
 	if feedURL != f.FeedURL {
-		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL); err != nil {
+		if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, feedURL, s.clk.Now()); err != nil {
 			msg := err.Error()
 			if errors.Is(err, ErrConflict) { // discovered a feed already subscribed under another row
 				msg = "already subscribed to this feed"
@@ -277,7 +284,7 @@ func (s *FeedService) adoptPermanentRedirect(ctx context.Context, f *Feed, resp 
 	if !resp.PermanentRedirect || resp.FinalURL == "" || resp.FinalURL == f.FeedURL {
 		return
 	}
-	if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, resp.FinalURL); err != nil {
+	if err := s.store.SetFeedURL(ctx, f.UserID, f.ID, resp.FinalURL, s.clk.Now()); err != nil {
 		if errors.Is(err, ErrConflict) {
 			s.log.Warn("feed permanently redirected to an already-subscribed URL; keeping current URL",
 				"feed_id", int64(f.ID), "from", f.FeedURL, "to", resp.FinalURL)
@@ -302,10 +309,10 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 	if pf == nil {
 		return nil
 	}
-	state := ExtractNone
-	if f.FetchFullContent {
-		state = ExtractPending
-	}
+	// extract_state is NOT set here: the store derives it from the feed's live
+	// fetch_full_content inside the upsert transaction, so entries this poll inserts
+	// reflect a concurrent full-content toggle rather than the poll-time snapshot
+	// (audit B7).
 	now := s.clk.Now()
 	entries := make([]*Entry, 0, len(pf.Entries))
 	for _, pe := range pf.Entries {
@@ -321,7 +328,7 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 			Author: pe.Author, Content: s.san.Sanitize(pe.Content, baseURL),
 			Summary: s.san.Sanitize(pe.Summary, baseURL), PublishedAt: published,
 			Status: StatusUnread, CreatedAt: now,
-			Hash: pe.Hash, ExtractState: state,
+			Hash: pe.Hash,
 		})
 	}
 	_, err := s.store.UpsertEntries(ctx, f.ID, entries)
@@ -457,7 +464,7 @@ func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFe
 		}
 	}
 	if newURL != "" && newURL != f.FeedURL {
-		if err := s.store.SetFeedURL(ctx, userID, feedID, newURL); err != nil {
+		if err := s.store.SetFeedURL(ctx, userID, feedID, newURL, s.clk.Now()); err != nil {
 			return res, err
 		}
 		res.URLChanged = true

@@ -135,10 +135,11 @@ func (s *MemStore) UpdateFeed(_ context.Context, f *core.Feed) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ex, ok := s.feeds[f.ID]
-	if !ok || ex.UserID != f.UserID {
-		// The real UpdateFeed is an unchecked `:exec ... WHERE id = ? AND user_id = ?`,
-		// so a missing or other-user feed (the poll-races-a-delete case) is a silent
-		// no-op in production, not an error.
+	if !ok || ex.UserID != f.UserID || ex.FeedURL != f.FeedURL {
+		// The real UpdateFeed is `:exec ... WHERE id = ? AND user_id = ? AND feed_url = ?`,
+		// so a missing/other-user feed (poll-races-a-delete) OR a feed whose URL a
+		// concurrent edit changed mid-poll (the feed_url CAS guard) is a silent no-op
+		// in production, not an error (audit B7).
 		return nil
 	}
 	ex.SiteURL = f.SiteURL
@@ -184,6 +185,19 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.Entry) ([]*core.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Mirror store/sqlite: decide extract_state from the feed's CURRENT
+	// FetchFullContent read inside the "transaction", not the caller's snapshot
+	// (audit B7). A gone feed (never id-reused, since feeds are AUTOINCREMENT) ingests
+	// nothing — the real store's FK would reject the insert. (SeedEntry stages entries
+	// via seedEntry, not this path, so it is unaffected.)
+	feed, ok := s.feeds[feedID]
+	if !ok {
+		return nil, nil
+	}
+	insertState := core.ExtractNone
+	if feed.FetchFullContent {
+		insertState = core.ExtractPending
+	}
 	var ins []*core.Entry
 	for _, e := range es {
 		if s.tombstones[tkey(feedID, e.GUID)] {
@@ -216,9 +230,7 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 		cp := *e
 		cp.ID = id
 		cp.FeedID = feedID
-		if cp.ExtractState == "" {
-			cp.ExtractState = core.ExtractNone
-		}
+		cp.ExtractState = insertState
 		if cp.ExtractState == core.ExtractPending {
 			s.nextExtract[id] = cp.CreatedAt
 		}
@@ -226,6 +238,26 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 		ins = append(ins, &cp)
 	}
 	return ins, nil
+}
+
+// SeedEntry stages e verbatim (honoring its ExtractState), bypassing UpsertEntries'
+// feed-derived extract_state logic. Test-only helper for staging arbitrary entry
+// state; see coretest.SeedEntry.
+func (s *MemStore) SeedEntry(e *core.Entry) core.ID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.nextID
+	s.nextID++
+	cp := *e
+	cp.ID = id
+	if cp.ExtractState == "" {
+		cp.ExtractState = core.ExtractNone
+	}
+	if cp.ExtractState == core.ExtractPending {
+		s.nextExtract[id] = cp.CreatedAt
+	}
+	s.entries[id] = &cp
+	return id
 }
 
 func (s *MemStore) GetEntry(_ context.Context, u, id core.ID) (*core.Entry, error) {
@@ -490,7 +522,7 @@ func (s *MemStore) SetFeedUserTitle(_ context.Context, u, feedID core.ID, title 
 	return nil
 }
 
-func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) error {
+func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.feeds[feedID]
@@ -506,6 +538,7 @@ func (s *MemStore) SetFeedURL(_ context.Context, u, feedID core.ID, url string) 
 	cp.FeedURL = url
 	cp.ETag = ""         // mirror the SQL: stale conditional-GET headers must not
 	cp.LastModified = "" // carry across a URL change (would risk a spurious 304).
+	cp.NextCheckAt = now // make the new URL promptly poll-due (audit B7).
 	s.feeds[feedID] = &cp
 	return nil
 }
@@ -600,6 +633,11 @@ func (s *MemStore) SetEntryContent(_ context.Context, entryID core.ID, content s
 	e, ok := s.entries[entryID]
 	if !ok {
 		return core.ErrNotFound
+	}
+	// Mirror the SQL CAS `WHERE id = ? AND extract_state = 'pending'`: a stale scraper
+	// writing onto a recycled/already-settled entry id is a silent no-op (audit B7).
+	if e.ExtractState != core.ExtractPending {
+		return nil
 	}
 	e.Content = content
 	e.ExtractState = core.ExtractDone

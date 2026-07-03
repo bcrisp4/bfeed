@@ -20,6 +20,22 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 
+	// Read the feed's CURRENT fetch_full_content inside the tx, so entries this poll
+	// inserts get the right extract_state even if a concurrent EditFeed toggled it
+	// after the poll's in-memory snapshot was taken (audit B7). If the feed row is
+	// gone (deleted mid-poll — and never id-reused, since feeds are AUTOINCREMENT),
+	// there is nothing to ingest into: bail cleanly rather than trip a FK error.
+	ff, err := q.GetFeedFullContent(ctx, int64(feedID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, mapErr(err)
+	}
+	insertState := core.ExtractNone
+	if ff == 1 {
+		insertState = core.ExtractPending
+	}
+
 	var inserted []*core.Entry
 	for _, e := range entries {
 		// Skip tombstoned (feed_id, guid): never resurrect deleted entries.
@@ -31,10 +47,9 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 		existing, err := q.GetEntryByGUID(ctx, sqlc.GetEntryByGUIDParams{FeedID: int64(feedID), Guid: e.GUID})
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			state := e.ExtractState
-			if state == "" {
-				state = core.ExtractNone
-			}
+			// extract_state is decided from the feed's live fetch_full_content read
+			// above (in-tx), not the caller-supplied snapshot value.
+			state := insertState
 			var nextAt sql.NullInt64
 			if state == core.ExtractPending {
 				nextAt = nullUnix(&e.CreatedAt)

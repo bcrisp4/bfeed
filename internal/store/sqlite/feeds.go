@@ -116,6 +116,7 @@ func (s *Store) UpdateFeed(ctx context.Context, f *core.Feed) error {
 		TtlSeconds:   nullDurSec(f.TTL),
 		ID:           int64(f.ID),
 		UserID:       int64(f.UserID),
+		FeedUrl:      f.FeedURL, // CAS guard: no-op if a concurrent edit changed the URL
 	}))
 }
 
@@ -196,8 +197,10 @@ func (s *Store) SetFeedUserTitle(ctx context.Context, userID, feedID core.ID, ti
 	return nil
 }
 
-func (s *Store) SetFeedURL(ctx context.Context, userID, feedID core.ID, url string) error {
-	n, err := s.q.SetFeedURL(ctx, sqlc.SetFeedURLParams{FeedUrl: url, ID: int64(feedID), UserID: int64(userID)})
+func (s *Store) SetFeedURL(ctx context.Context, userID, feedID core.ID, url string, now time.Time) error {
+	n, err := s.q.SetFeedURL(ctx, sqlc.SetFeedURLParams{
+		FeedUrl: url, NextCheckAt: toUnix(now), ID: int64(feedID), UserID: int64(userID),
+	})
 	if err != nil {
 		return mapErr(err)
 	}

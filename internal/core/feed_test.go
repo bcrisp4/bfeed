@@ -454,7 +454,7 @@ type setFeedURLErrStore struct {
 	*coretest.MemStore
 }
 
-func (s *setFeedURLErrStore) SetFeedURL(ctx context.Context, u, feedID core.ID, url string) error {
+func (s *setFeedURLErrStore) SetFeedURL(ctx context.Context, u, feedID core.ID, url string, now time.Time) error {
 	return errors.New("db locked")
 }
 

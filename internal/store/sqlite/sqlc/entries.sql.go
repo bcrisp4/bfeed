@@ -93,6 +93,22 @@ func (q *Queries) GetEntryByGUID(ctx context.Context, arg GetEntryByGUIDParams) 
 	return i, err
 }
 
+const getFeedFullContent = `-- name: GetFeedFullContent :one
+SELECT fetch_full_content FROM feeds WHERE id = ?
+`
+
+// System-internal read (no user scoping): UpsertEntries calls this inside its
+// transaction so a newly-ingested entry's extract_state reflects the feed's CURRENT
+// fetch_full_content, not a poll-time snapshot that a concurrent toggle has since
+// changed (audit B7). Single-writer serialization makes the read consistent with
+// the inserts in the same tx.
+func (q *Queries) GetFeedFullContent(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getFeedFullContent, id)
+	var fetch_full_content int64
+	err := row.Scan(&fetch_full_content)
+	return fetch_full_content, err
+}
+
 const insertEntry = `-- name: InsertEntry :one
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
   published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
@@ -222,7 +238,8 @@ func (q *Queries) MarkFeedEntriesPending(ctx context.Context, arg MarkFeedEntrie
 }
 
 const setEntryContent = `-- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL WHERE id = ?
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL
+WHERE id = ? AND extract_state = 'pending'
 `
 
 type SetEntryContentParams struct {
@@ -230,6 +247,13 @@ type SetEntryContentParams struct {
 	ID      int64
 }
 
+// extract_state = 'pending' in the WHERE is a compare-and-swap guard against
+// entries.id reuse (entries keep a plain rowid, unlike feeds): a stale Scraper
+// goroutine finishing after its entry was deleted and the id recycled would
+// otherwise stamp the wrong article's content onto the new occupant. Guarding on
+// 'pending' makes that write a no-op whenever the recycled row isn't itself
+// awaiting extraction (the common case). The normal scrape path leaves the row
+// 'pending' until this write, so it is unaffected. (audit B7)
 func (q *Queries) SetEntryContent(ctx context.Context, arg SetEntryContentParams) error {
 	_, err := q.db.ExecContext(ctx, setEntryContent, arg.Content, arg.ID)
 	return err

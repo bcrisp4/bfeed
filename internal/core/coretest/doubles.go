@@ -11,16 +11,11 @@ import (
 	"github.com/bcrisp4/bfeed/internal/core"
 )
 
-// SeedEntry inserts e into store via UpsertEntries and returns its assigned ID.
+// SeedEntry stages e into store verbatim (honoring its ExtractState) and returns its
+// assigned ID. Unlike UpsertEntries it does not derive extract_state from the feed, so
+// tests can stage arbitrary entry state without first configuring a feed.
 func SeedEntry(store *MemStore, e *core.Entry) core.ID {
-	ins, err := store.UpsertEntries(context.Background(), e.FeedID, []*core.Entry{e})
-	if err != nil {
-		panic("SeedEntry: " + err.Error())
-	}
-	if len(ins) != 1 {
-		panic("SeedEntry: entry not inserted (tombstone collision or duplicate GUID?)")
-	}
-	return ins[0].ID
+	return store.SeedEntry(e)
 }
 
 type StubFetcher struct {

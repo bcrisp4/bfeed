@@ -30,7 +30,23 @@ WHERE extract_state = 'pending' AND next_extract_at <= ?
 ORDER BY published_at DESC, id DESC LIMIT ?;
 
 -- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL WHERE id = ?;
+-- extract_state = 'pending' in the WHERE is a compare-and-swap guard against
+-- entries.id reuse (entries keep a plain rowid, unlike feeds): a stale Scraper
+-- goroutine finishing after its entry was deleted and the id recycled would
+-- otherwise stamp the wrong article's content onto the new occupant. Guarding on
+-- 'pending' makes that write a no-op whenever the recycled row isn't itself
+-- awaiting extraction (the common case). The normal scrape path leaves the row
+-- 'pending' until this write, so it is unaffected. (audit B7)
+UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL
+WHERE id = ? AND extract_state = 'pending';
+
+-- name: GetFeedFullContent :one
+-- System-internal read (no user scoping): UpsertEntries calls this inside its
+-- transaction so a newly-ingested entry's extract_state reflects the feed's CURRENT
+-- fetch_full_content, not a poll-time snapshot that a concurrent toggle has since
+-- changed (audit B7). Single-writer serialization makes the read consistent with
+-- the inserts in the same tx.
+SELECT fetch_full_content FROM feeds WHERE id = ?;
 
 -- name: UpdateExtractState :exec
 UPDATE entries SET extract_state = ?, extract_attempts = ?, next_extract_at = ? WHERE id = ?;

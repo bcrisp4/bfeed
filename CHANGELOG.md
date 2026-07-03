@@ -13,6 +13,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Deleting a feed and immediately subscribing to another no longer risks the new feed silently inheriting the deleted one's address, title, and articles (or the new feed's own setup being skipped). Feed identifiers are no longer reused after deletion.
+- Editing a feed's address while it is refreshing (including the delete-and-re-add repair flow) no longer leaves it stuck showing the old address's content and update markers, and the new address is now fetched promptly instead of after a long delay.
+- Turning on full-text article extraction for a feed while it is mid-refresh now also extracts the entries that arrive during that refresh, instead of leaving them permanently un-extracted until you toggle the setting off and on again.
+- A just-added feed no longer briefly flips to an error state when a scheduled poll races its initial setup.
 - Opening a single feed's entries or the Starred page is now fast on large libraries: both are served directly from their keyset indexes instead of scanning your entire entry history on every page load.
 - Feeds that permanently move to a new address (a `301`/`308` redirect) are now followed to the new URL and remembered, so bfeed stops re-fetching the old redirecting address on every poll and a later re-subscribe to the new address no longer creates a duplicate feed. Temporary redirects are left as-is.
 - Images and links now resolve correctly when a fetch redirects (for example, via a link-tracking hop or a moved site): relative URLs in full-text (reader-view) articles and in feed entry content are resolved against the address the content was actually served from instead of the original link, so they no longer break. Feed auto-discovery resolves relative feed links the same way.
