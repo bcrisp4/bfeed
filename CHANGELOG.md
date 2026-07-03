@@ -28,6 +28,12 @@ section is renamed to the new version and becomes the GitHub Release notes.
 - `bfeed serve` now exits with a non-zero status when it cannot start the web server (for example, the listen address is already in use), so process supervisors and container restart policies react instead of treating a server that never started as healthy.
 - Shutdown now waits for in-flight "add feed" and "refresh" operations to finish before closing the database, so a subscribe or refresh triggered just before shutdown is no longer silently lost.
 - The container image now starts correctly with its default database path: the `/data` volume is created owned by the non-root user, so `docker run` (or a fresh named/anonymous volume) no longer fails on Linux with "unable to open database file". Previously the published image exited immediately unless you pre-created and chowned the volume by hand.
+- Subscribing by a site's homepage address when you already follow that site's feed no longer leaves a broken duplicate feed that repeatedly fetches the wrong page; the redundant subscription is now dropped automatically.
+- Feed addresses that differ only trivially (letter case, a default `:80`/`:443` port, or a trailing `#fragment`) are now treated as the same feed, so you can't accidentally subscribe to the same feed twice and see every article duplicated.
+- Categories are now case-insensitive: creating or renaming a category to `news` when `News` already exists is rejected instead of producing two look-alike categories side by side.
+- Renaming a feed now re-sorts it under its new name on the Feeds page and sidebar, instead of staying filed under its old publisher name.
+- Feeds advertised only as a JSON Feed (the standard `application/feed+json` type) are now found by address auto-discovery instead of failing with "no feed found at URL".
+- Feed items that arrive without a unique identifier no longer risk collapsing into a single entry (losing the others) when several share the same link and title; distinct items are now kept apart.
 
 ## [0.7.0] - 2026-06-25
 

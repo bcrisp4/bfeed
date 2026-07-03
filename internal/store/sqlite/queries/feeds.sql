@@ -9,7 +9,12 @@ RETURNING id;
 SELECT * FROM feeds WHERE id = ? AND user_id = ?;
 
 -- name: ListFeeds :many
-SELECT * FROM feeds WHERE user_id = ? ORDER BY title COLLATE NOCASE ASC;
+-- Order by the DISPLAY title (user_title override when set, else the poll-owned
+-- title), matching Feed.DisplayTitle() so a renamed feed sorts under its new
+-- name. A pending feed's title is pre-populated with its URL, so it sorts by its
+-- displayed name too (audit B8).
+SELECT * FROM feeds WHERE user_id = ?
+ORDER BY (CASE WHEN user_title <> '' THEN user_title ELSE title END) COLLATE NOCASE ASC;
 
 -- name: ListDueFeeds :many
 SELECT * FROM feeds

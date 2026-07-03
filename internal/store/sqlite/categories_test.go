@@ -59,6 +59,36 @@ func TestCreateCategoryDuplicateConflict(t *testing.T) {
 	}
 }
 
+// B8/F5: category uniqueness is case-insensitive (matching the NOCASE list
+// ordering), so 'news' cannot be created alongside 'News' — they would look like
+// accidental duplicates on the categories page.
+func TestCreateCategoryCaseInsensitiveConflict(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "news"}); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("case-variant duplicate err = %v, want ErrConflict", err)
+	}
+}
+
+// B8/F5: renaming into a case-variant of an existing category also conflicts.
+func TestRenameCategoryCaseInsensitiveConflict(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "News"}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.CreateCategory(ctx, &core.Category{UserID: core.DefaultUserID, Title: "Tech"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateCategory(ctx, &core.Category{ID: id, UserID: core.DefaultUserID, Title: "NEWS"}); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("case-variant rename err = %v, want ErrConflict", err)
+	}
+}
+
 func TestDeleteCategorySetsFeedsNull(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

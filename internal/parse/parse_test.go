@@ -80,6 +80,77 @@ func TestDiscover(t *testing.T) {
 	}
 }
 
+// B8/F4: JSON Feed 1.1 advertises autodiscovery with type="application/feed+json"
+// (application/json was the 1.0-era value). Discover must accept it.
+func TestDiscoverFeedJSON(t *testing.T) {
+	html := `<html><head>` +
+		`<link rel="alternate" type="application/feed+json" href="/feed.json">` +
+		`</head></html>`
+	urls, err := New().Discover([]byte(html), "https://abs.test/blog/")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(urls) != 1 || urls[0] != "https://abs.test/feed.json" {
+		t.Fatalf("discovered = %v, want [https://abs.test/feed.json]", urls)
+	}
+}
+
+// B8/F3: GUID-less items with NO link and NO title (no identity at all) must
+// not all collapse onto one row via a shared derived GUID — the item index is a
+// last-resort disambiguator for this pathological case.
+func TestParseGUIDlessEmptyItemsAreDistinct(t *testing.T) {
+	// Two items, no <guid>, no <link>, no <title>.
+	rss := `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>` +
+		`<item><description>a</description></item>` +
+		`<item><description>b</description></item>` +
+		`</channel></rss>`
+	pf, err := New().Parse([]byte(rss), "", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pf.Entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(pf.Entries))
+	}
+	if pf.Entries[0].GUID == pf.Entries[1].GUID {
+		t.Fatalf("empty GUID-less items collided on GUID %q", pf.Entries[0].GUID)
+	}
+}
+
+// B8/F3: a GUID-less item's derived GUID is length-prefixed, so link and title
+// can't be juggled across the join delimiter to forge a collision between two
+// otherwise-distinct items.
+func TestParseGUIDlessDerivationNotInjectable(t *testing.T) {
+	// item A: link="https://e.com/a|b", title="c"
+	// item B: link="https://e.com/a",   title="b|c"
+	// A bare "link|title" join would make these equal; length-prefixing must not.
+	rss := `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>` +
+		`<item><title>c</title><link>https://e.com/a|b</link></item>` +
+		`<item><title>b|c</title><link>https://e.com/a</link></item>` +
+		`</channel></rss>`
+	pf, err := New().Parse([]byte(rss), "", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pf.Entries) != 2 || pf.Entries[0].GUID == pf.Entries[1].GUID {
+		t.Fatalf("injectable GUID derivation: entries=%+v", pf.Entries)
+	}
+}
+
+// B8/F3: EntryHash must not be delimiter-injectable — distinct (title,content,
+// summary) triples that concatenate to the same "|"-joined string must hash
+// differently, and identical inputs must hash the same (idempotent).
+func TestEntryHashDisambiguatesAndIsStable(t *testing.T) {
+	// Classic ambiguity under a bare "|" join: "a"+"|"+"b|c" == "a|b"+"|"+"c".
+	h1 := EntryHash("a", "b|c", "")
+	h2 := EntryHash("a|b", "c", "")
+	if h1 == h2 {
+		t.Fatalf("ambiguous triples hashed equal: %q", h1)
+	}
+	if a, b := EntryHash("x", "y", "z"), EntryHash("x", "y", "z"); a != b {
+		t.Fatalf("EntryHash not stable for identical inputs: %q vs %q", a, b)
+	}
+}
+
 func TestParseTTL(t *testing.T) {
 	rssTTL := `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
 		<ttl>45</ttl><item><title>i</title></item></channel></rss>`

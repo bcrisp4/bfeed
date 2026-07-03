@@ -34,11 +34,24 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 	base, _ := url.Parse(feedURL)
 	out := &core.ParsedFeed{Title: f.Title, Description: f.Description, SiteURL: resolve(base, f.Link)}
 	out.TTL = feedTTL(f, data)
-	for _, it := range f.Items {
+	for i, it := range f.Items {
 		link := resolve(base, it.Link)
 		guid := it.GUID
 		if guid == "" {
-			guid = hashStr(link + "|" + it.Title)
+			// Derive a stable key from link+title. Length-prefixed (not a bare
+			// "|") so the two fields can't be juggled across the delimiter to
+			// forge a collision (link="a|b",title="c" vs link="a",title="b|c").
+			// link+title is kept as the whole key so a newest-first feed that
+			// prepends items keeps each item's GUID stable across polls — an
+			// index-based key would re-number every item on each new post and
+			// duplicate the entire feed. The item index is a last-resort
+			// disambiguator ONLY when both fields are empty (items with no
+			// identity at all, which would otherwise all collapse to one row).
+			parts := []string{link, it.Title}
+			if link == "" && it.Title == "" {
+				parts = append(parts, strconv.Itoa(i))
+			}
+			guid = hashStr(joinFields(parts...))
 		}
 		var pub time.Time
 		if it.PublishedParsed != nil {
@@ -114,7 +127,22 @@ func hasXMLEncodingDecl(data []byte) bool {
 // EntryHash computes a stable content hash for an entry. Exposed so the service
 // can set Entry.Hash consistently.
 func EntryHash(title, content, summary string) string {
-	return hashStr(title + "|" + content + "|" + summary)
+	return hashStr(joinFields(title, content, summary))
+}
+
+// joinFields concatenates parts into a single injection-proof string by
+// length-prefixing each part ("<len>:<part>"). Unlike a bare delimiter join,
+// no arrangement of delimiter characters inside the parts can make two distinct
+// tuples produce the same output, so hashes derived from it never falsely
+// collide (e.g. ("a","b|c") and ("a|b","c")).
+func joinFields(parts ...string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(strconv.Itoa(len(p)))
+		b.WriteByte(':')
+		b.WriteString(p)
+	}
+	return b.String()
 }
 
 // feedTTL derives the publisher's minimum poll interval from RSS <ttl> (scanned
@@ -231,7 +259,8 @@ func (p *Parser) Discover(data []byte, pageURL string) ([]string, error) {
 				}
 			}
 			if rel == "alternate" && href != "" &&
-				(typ == "application/rss+xml" || typ == "application/atom+xml" || typ == "application/json") {
+				(typ == "application/rss+xml" || typ == "application/atom+xml" ||
+					typ == "application/json" || typ == "application/feed+json") {
 				out = append(out, resolve(base, href))
 			}
 		}

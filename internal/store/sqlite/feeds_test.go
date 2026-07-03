@@ -367,3 +367,40 @@ func TestSetFeedUserTitle(t *testing.T) {
 		t.Errorf("want ErrNotFound for unknown feed, got %v", err)
 	}
 }
+
+// B8/F6: ListFeeds orders by DISPLAY name (user_title override when set, else the
+// poll-owned title), so a renamed feed sorts under its new name — not the stale
+// publisher title.
+func TestListFeedsOrdersByDisplayTitle(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1, 0)
+	mk := func(url, title string) core.ID {
+		id, err := st.CreateFeed(ctx, &core.Feed{
+			UserID: core.DefaultUserID, FeedURL: url, Title: title,
+			NextCheckAt: now, CreatedAt: now, UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// Raw-title order would be [Nintendo, ZDNet]; after the rename the display
+	// order is [Apple News, Nintendo].
+	zdnet := mk("https://z.com/f", "ZDNet")
+	mk("https://n.com/f", "Nintendo")
+	if err := st.SetFeedUserTitle(ctx, core.DefaultUserID, zdnet, "Apple News"); err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := st.ListFeeds(ctx, core.DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range feeds {
+		got = append(got, f.DisplayTitle())
+	}
+	if len(got) != 2 || got[0] != "Apple News" || got[1] != "Nintendo" {
+		t.Fatalf("display order = %v, want [Apple News Nintendo]", got)
+	}
+}
