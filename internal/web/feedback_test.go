@@ -116,6 +116,29 @@ func TestHostGuardRejectsForeignHost(t *testing.T) {
 	}
 }
 
+func TestHostGuardToleratesDefaultPort(t *testing.T) {
+	// BaseURL host without an explicit port; a client that includes the default
+	// port (or omits it) must still be accepted.
+	h, _ := newWebHost(t, "bfeed.example")
+	for _, host := range []string{"bfeed.example", "bfeed.example:80", "bfeed.example:443"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("Host %q vs expected bfeed.example: status %d, want 200", host, rec.Code)
+		}
+	}
+	// A non-default port is still a distinct authority → rejected.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "bfeed.example:8443"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Errorf("Host with non-default port: status %d, want 421", rec.Code)
+	}
+}
+
 func TestHostGuardDisabledWhenEmpty(t *testing.T) {
 	h, _ := newWeb(t) // expectedHost ""
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

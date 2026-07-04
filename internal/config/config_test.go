@@ -32,6 +32,17 @@ func TestLoadRequiresBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsHostlessBaseURL(t *testing.T) {
+	// Scheme-less / relative values parse without error but yield an empty Host,
+	// which would silently disable the DNS-rebinding guard — must be rejected.
+	for _, v := range []string{"bfeed.example:8080", "bfeed.example", "/just/a/path", "ftp://bfeed.example"} {
+		t.Setenv("BFEED_BASE_URL", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("BFEED_BASE_URL=%q: expected error, got nil", v)
+		}
+	}
+}
+
 func TestLoadOverrides(t *testing.T) {
 	t.Setenv("BFEED_BASE_URL", "https://x.test")
 	t.Setenv("BFEED_SCHED_MIN_INTERVAL", "10m")

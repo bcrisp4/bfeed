@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -61,6 +62,13 @@ func Load() (Config, error) {
 	}
 	if c.BaseURL == "" {
 		return c, fmt.Errorf("BFEED_BASE_URL is required")
+	}
+	// Must be an absolute http(s) URL with a host: it seeds external links and,
+	// critically, the DNS-rebinding Host guard (web.hostGuard) — a scheme-less
+	// value like "host:8080" parses with an empty Host and would silently
+	// disable that guard, so reject it here rather than fail open at runtime.
+	if u, err := url.Parse(c.BaseURL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return c, fmt.Errorf("BFEED_BASE_URL must be an absolute http(s) URL with a host (e.g. https://bfeed.example)")
 	}
 	if c.FeedWorkers < 1 || c.HostConcurrency < 1 {
 		return c, fmt.Errorf("worker/host-concurrency must be >= 1")

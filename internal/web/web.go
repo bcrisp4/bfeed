@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -235,11 +236,28 @@ func securityHeaders(next http.Handler) http.Handler {
 // rest of the app to a same-machine attacker who can spoof a loopback Host on a
 // mutating endpoint. An empty expectedHost disables the check (used by tests).
 func hostGuard(expectedHost string, next http.Handler) http.Handler {
+	expected := normalizeAuthority(expectedHost)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if expectedHost != "" && r.URL.Path != "/healthz" && !strings.EqualFold(r.Host, expectedHost) {
+		if expectedHost != "" && r.URL.Path != "/healthz" && normalizeAuthority(r.Host) != expected {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// normalizeAuthority lowercases a Host header / URL authority and drops a
+// default HTTP(S) port, so "Host", "host:80", and "host:443" compare equal.
+// Hostnames are case-insensitive, and clients/proxies may include or elide the
+// default port; the DNS-rebinding guard only cares about hostname identity.
+func normalizeAuthority(hostport string) string {
+	hostport = strings.ToLower(hostport)
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return hostport // no port present (or malformed) — compare as-is
+	}
+	if port == "80" || port == "443" {
+		return host
+	}
+	return net.JoinHostPort(host, port)
 }
