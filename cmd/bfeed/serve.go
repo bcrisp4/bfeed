@@ -44,6 +44,13 @@ func runServe() int {
 	defer db.Close()
 	store := sqlite.New(db)
 
+	var metrics *observability.Metrics
+	if cfg.MetricsAddr != "" {
+		metrics = observability.NewMetrics(version)
+		metrics.RegisterDB(db)
+		metrics.RegisterStats(store)
+	}
+
 	fetcher := fetch.New(fetch.Config{
 		UserAgent:            fmt.Sprintf("bfeed/%s (+%s)", version, cfg.BaseURL),
 		HostConcurrency:      cfg.HostConcurrency,
@@ -80,6 +87,13 @@ func runServe() int {
 	scraper := core.NewScraper(store, scrapeSvc, clock.Real{}, log,
 		core.ScraperConfig{Tick: cfg.ScrapeTick, Batch: cfg.ScrapeBatch, Workers: cfg.ScrapeWorkers})
 
+	if metrics != nil {
+		feedSvc.SetMetrics(metrics)
+		scrapeSvc.SetMetrics(metrics)
+		poller.SetMetrics(metrics)
+		scraper.SetMetrics(metrics)
+	}
+
 	pollerDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollerDone) }()
 
@@ -109,7 +123,16 @@ func runServe() int {
 	if u, err := url.Parse(cfg.BaseURL); err == nil {
 		expectedHost = u.Host
 	}
-	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost, nil, nil)
+	// metrics is a *observability.Metrics; assigning it directly to the
+	// web.HTTPMetrics interface param when nil would produce a typed-nil
+	// interface (non-nil interface wrapping a nil pointer), which web.New's
+	// `metrics != nil` checks would then treat as present. Guard explicitly.
+	var httpMetrics web.HTTPMetrics
+	if metrics != nil {
+		httpMetrics = metrics
+	}
+	ready := func(ctx context.Context) error { return db.PingContext(ctx) }
+	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost, httpMetrics, ready)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           webHandler,
@@ -117,7 +140,9 @@ func runServe() int {
 	}
 	// Buffered so the goroutine never blocks; read once after shutdown to decide
 	// the exit code. A bind failure (port in use) must surface as exit 1.
-	srvErr := make(chan error, 1)
+	// Two potential writers: the main server and (when enabled) the metrics
+	// server, each independently able to fail to bind/serve.
+	srvErr := make(chan error, 2)
 	go func() {
 		log.Info("listening", "addr", cfg.ListenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -127,12 +152,34 @@ func runServe() int {
 		}
 	}()
 
+	var msrv *http.Server
+	if metrics != nil {
+		msrv = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           metrics.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			log.Info("metrics listening", "addr", cfg.MetricsAddr)
+			if err := msrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("metrics http server", "error", err)
+				srvErr <- err
+				stop() // trigger the graceful-shutdown path below
+			}
+		}()
+	}
+
 	<-ctx.Done()
 	log.Info("shutting down")
 	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Error("shutdown", "error", err)
+	}
+	if msrv != nil {
+		if err := msrv.Shutdown(shutCtx); err != nil {
+			log.Error("metrics shutdown", "error", err)
+		}
 	}
 	select {
 	case <-pollerDone:
