@@ -875,7 +875,10 @@ requirement to use logs for high-cardinality/low-level detail:
 
 **Errors are a single counter with closed-enum labels** (Prometheus best practice — avoid
 metric-name proliferation): `bfeed_errors_total{component, reason}` where
-`component ∈ {feed_poll, article_scrape, db, http_server, image_proxy}` and
+`component ∈ {feed_poll, article_scrape, db, http_server, image_proxy}` (`http_server` and
+`image_proxy` are reserved for future use and not yet emitted; `db` covers background-dispatch
+store failures — e.g. the Poller/Scraper's own `ListDueFeeds`/`ListPendingExtractions` call
+failing, as distinct from a `feed_poll`/`article_scrape` attempt) and
 `reason ∈ {timeout, dns, tls, http_4xx, http_5xx, rate_limited, parse, internal}`. Raw error
 strings are bucketed into these in code — **never** label by feed/host/url/user (cardinality
 bomb). A 429 response classifies as `rate_limited`, taking precedence over the generic

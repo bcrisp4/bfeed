@@ -76,7 +76,7 @@ All configuration is via environment variables (12-factor), validated at startup
 |---|---|---|
 | `BFEED_BASE_URL` | — (**required**) | External URL bfeed is reached at; used for absolute links, cookies, and the polling User-Agent. |
 | `BFEED_LISTEN_ADDR` | `:8080` | Address the HTTP server binds to. |
-| `BFEED_METRICS_ADDR` | — (disabled) | Optional separate bind address for a Prometheus `/metrics` endpoint (plus its own `/healthz`); leave unset to disable metrics entirely. |
+| `BFEED_METRICS_ADDR` | — (disabled) | Optional separate bind address for a Prometheus `/metrics` endpoint (plus its own `/healthz`); leave unset to disable metrics entirely. Once set, this listener is load-bearing: if it fails to bind (e.g. the port is already in use), bfeed exits, the same as a bind failure on the main listener. |
 | `BFEED_DATABASE_PATH` | `./bfeed.db` | Path to the SQLite database file (WAL/SHM files live alongside it). |
 | `BFEED_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. |
 | `BFEED_LOG_FORMAT` | `json` | `json` (prod) or `text` (dev). |
