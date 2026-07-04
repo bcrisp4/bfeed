@@ -61,7 +61,20 @@ func TestCounts(t *testing.T) {
 	if due != 1 {
 		t.Fatalf("CountDueFeeds: want 1 (only feedA), got %d", due)
 	}
-	_ = feedC // referenced above only to seed the disabled-but-time-due row
+	// Drift guard: CountDueFeeds must always agree with the actual dispatch
+	// query it mirrors, not just happen to match on this fixture.
+	listedDue, err := st.ListDueFeeds(ctx, now, 1000)
+	if err != nil {
+		t.Fatalf("ListDueFeeds: %v", err)
+	}
+	if int64(len(listedDue)) != due {
+		t.Fatalf("CountDueFeeds=%d but ListDueFeeds returned %d rows (drift)", due, len(listedDue))
+	}
+	for _, f := range listedDue {
+		if f.ID == feedC {
+			t.Fatalf("disabled feedC must not appear in ListDueFeeds")
+		}
+	}
 
 	// e1/e2 land on feedA (FetchFullContent=true), so both are inserted
 	// extract_state='pending' with next_extract_at = their own CreatedAt:
@@ -99,5 +112,14 @@ func TestCounts(t *testing.T) {
 	}
 	if dueExtractions != 1 {
 		t.Fatalf("CountDueExtractions: want 1 (only e1), got %d", dueExtractions)
+	}
+	// Drift guard: CountDueExtractions must always agree with the actual
+	// dispatch query it mirrors, not just happen to match on this fixture.
+	listedExtractions, err := st.ListPendingExtractions(ctx, now, 1000)
+	if err != nil {
+		t.Fatalf("ListPendingExtractions: %v", err)
+	}
+	if int64(len(listedExtractions)) != dueExtractions {
+		t.Fatalf("CountDueExtractions=%d but ListPendingExtractions returned %d rows (drift)", dueExtractions, len(listedExtractions))
 	}
 }

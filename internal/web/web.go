@@ -123,7 +123,13 @@ func readyzHandler(ready func(context.Context) error) http.HandlerFunc {
 			_, _ = w.Write([]byte("ok"))
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		// 5s, not a tighter bound: the store's single-writer SQLite pool
+		// (SetMaxOpenConns(1)) means PingContext can legitimately queue behind a
+		// slow writer (e.g. a large batch UpsertEntries during a poll) rather
+		// than failing outright — a 2s bound flapped /readyz under ordinary
+		// write contention (F5). Still bounded so a genuinely wedged DB fails
+		// the probe rather than hanging it forever.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := ready(ctx); err != nil {
 			http.Error(w, "unready", http.StatusServiceUnavailable)
@@ -156,8 +162,10 @@ func methodLabel(method string) string {
 }
 
 // statusRecorder wraps a ResponseWriter to capture the status code the
-// handler actually sent, defaulting to 200 (the http.ResponseWriter default)
-// when the handler writes a body without ever calling WriteHeader.
+// handler actually sent. status is seeded to 200 (the http.ResponseWriter
+// default) at construction — the single source of the default — so neither
+// Write nor instrument need their own fallback for the write-without-
+// WriteHeader case.
 type statusRecorder struct {
 	http.ResponseWriter
 	status  int
@@ -173,10 +181,7 @@ func (sr *statusRecorder) WriteHeader(status int) {
 }
 
 func (sr *statusRecorder) Write(b []byte) (int, error) {
-	if !sr.written {
-		sr.status = http.StatusOK
-		sr.written = true
-	}
+	sr.written = true
 	return sr.ResponseWriter.Write(b)
 }
 
@@ -193,7 +198,7 @@ func (sr *statusRecorder) Unwrap() http.ResponseWriter {
 func instrument(m HTTPMetrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		sr := &statusRecorder{ResponseWriter: w}
+		sr := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sr, r)
 		// Go's ServeMux sets r.Pattern in place during ServeHTTP; read it only
 		// after the handler has run. An unmatched request (404) leaves it empty.
@@ -201,11 +206,7 @@ func instrument(m HTTPMetrics, next http.Handler) http.Handler {
 		if route == "" {
 			route = "unmatched"
 		}
-		status := sr.status
-		if !sr.written {
-			status = http.StatusOK
-		}
-		m.HTTPRequest(route, methodLabel(r.Method), status, time.Since(start))
+		m.HTTPRequest(route, methodLabel(r.Method), sr.status, time.Since(start))
 	})
 }
 

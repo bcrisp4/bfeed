@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -51,7 +50,7 @@ func (s *Store) CountDueFeeds(ctx context.Context, now time.Time) (int64, error)
 // would dispatch on a tick at `now` (ignoring LIMIT) -- i.e. the scrape
 // backlog.
 func (s *Store) CountDueExtractions(ctx context.Context, now time.Time) (int64, error) {
-	n, err := s.q.CountDueExtractions(ctx, sql.NullInt64{Int64: toUnix(now), Valid: true})
+	n, err := s.q.CountDueExtractions(ctx, nullUnix(&now))
 	if err != nil {
 		return 0, mapErr(err)
 	}
