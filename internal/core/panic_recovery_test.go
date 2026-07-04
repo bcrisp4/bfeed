@@ -20,7 +20,7 @@ func (panicParser) Discover([]byte, string) ([]string, error)              { pan
 // pathological article HTML.
 type panicExtractor struct{}
 
-func (panicExtractor) Extract(context.Context, string, []byte) (string, error) {
+func (panicExtractor) Extract(context.Context, string, []byte, string) (string, error) {
 	panic("extractor blew up")
 }
 

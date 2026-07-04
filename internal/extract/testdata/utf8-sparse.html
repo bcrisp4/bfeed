@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="utf-8">
+  <title>On intent of code</title>
+</head>
+<body>
+<article>
+<h1>On intent of code</h1>
+<p>When we sit down to write a program, the first draft is rarely about the machine at all. It is a conversation with the next person who will read the file, and that person is usually a slightly more tired version of ourselves, six months later, with the context long gone.</p>
+<p>Names carry most of the weight. A function called process handles everything and therefore explains nothing, while a function named retryFailedUploads tells a small story before the reader ever opens its body. Good names are compressed documentation that never drifts out of date.</p>
+<p>Comments have a narrower job than most people give them. They should record what the code cannot say: the constraint, the workaround, the reason a simpler approach was rejected. Everything else belongs in the structure of the program itself, where the compiler can keep it honest.</p>
+<p>Tests are another form of intent. A well titled test describes a behaviour the author promised to keep, and a failing one points directly at the promise that was broken. Reading a test file from top to bottom should feel like reading the specification the author never wrote down.</p>
+<p>It’s tempting to chase cleverness, to compress three ideas into one expression and feel the small thrill of density. The reader pays for that thrill with interest. Plain, boring, obvious code is a gift to the future, and the future is where all of us end up living.</p>
+<p>None of this is about style guides or linters, though both help at the margins. It is about empathy under constraint, the discipline of asking, at every line, whether a stranger could follow the thought. The author’s intent, made visible, is the real product of the work.</p>
+</article>
+</body></html>

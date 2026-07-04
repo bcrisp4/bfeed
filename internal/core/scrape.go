@@ -148,7 +148,7 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 	if pageURL == "" {
 		pageURL = e.URL
 	}
-	html, err := s.ext.Extract(ctx, pageURL, resp.Body)
+	html, err := s.ext.Extract(ctx, pageURL, resp.Body, resp.ContentType)
 	if err != nil {
 		return s.fail(ctx, e, "extract: "+err.Error(), ScrapeExtractError, ReasonParse)
 	}
