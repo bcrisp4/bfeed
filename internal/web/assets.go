@@ -4,8 +4,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io/fs"
+	"mime"
 	"strings"
 )
+
+func init() {
+	// Go's built-in extension table has no entry for .webmanifest, so
+	// http.ServeContent would sniff the manifest as text/plain. Register the
+	// spec type explicitly (the explicit registration wins over sniffing, and
+	// the nosniff header then keeps browsers from second-guessing it).
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // assetHashes maps a static asset's logical name (relative to static/, e.g.
 // "app.css") to a short content hash, computed once at startup from the embedded

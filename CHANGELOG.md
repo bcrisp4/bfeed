@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- bfeed can now be installed to a phone home screen as an app, with its own icon, name, and standalone (chrome-less) display, via a web app manifest and app icons. There is no offline mode — this is add-to-home-screen only, no service worker.
+
 ### Fixed
 
 - Feed content no longer shows garbled punctuation (e.g. `’` rendered as `â€™`) when a feed is valid UTF-8 but declares no encoding anywhere (no XML `encoding=` declaration and no charset in the `Content-Type` header) and its first kilobyte is plain ASCII. The charset sniff examines only the first 1024 bytes and previously fell back to Windows-1252 in that case, corrupting accented characters and curly quotes later in the feed — the feed-path counterpart of the article-scraper decoding fix below. Entries whose title, content, or summary were garbled heal on the feed's next poll (the corrected text changes the entry's content hash, so it is updated in place), with two edge cases: in feeds without per-item GUIDs a corrected title changes the entry's derived identity, so the fixed entry appears alongside the old garbled one instead of replacing it, and an entry whose only garbled field is the author name is not re-fetched.
