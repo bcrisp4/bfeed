@@ -93,7 +93,7 @@ func TestEditFormReturns404ForUnknownFeed(t *testing.T) {
 }
 
 // A bad URL re-renders the edit panel with an inline error at status 200 —
-// htmx 2.0.4 does not swap 4xx/5xx by default, so a 422 would be silently
+// htmx 2.x does not swap 4xx/5xx by default, so a 422 would be silently
 // discarded and the user would see nothing (mirrors renderSubscribeError).
 func TestEditSaveBadURLReturns200WithPanel(t *testing.T) {
 	h, st := newTestHandler(t, coretest.StubFetcher{})
