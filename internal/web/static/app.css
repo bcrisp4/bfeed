@@ -28,7 +28,7 @@
 :root[data-theme="dark"]{--bg:#181613;--surface:#201d18;--surface-2:#211d18;--ink:#e7e0d3;--ink-soft:#d8d0c2;--muted:#978d7e;--faint:#8a8071;--rule:#2a251e;--accent:#d98a6a;--accent-ink:#181613;--star:#e0b25c;--focus:#d98a6a;}
 
 *{box-sizing:border-box}
-html{background:var(--bg);overflow-x:clip}
+html{background:var(--bg);overflow-x:hidden;overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-serif);line-height:1.62;
   margin:0 auto;max-width:var(--measure-list);padding:var(--sp-4);}
 :root[data-width="wide"] body{max-width:42rem}

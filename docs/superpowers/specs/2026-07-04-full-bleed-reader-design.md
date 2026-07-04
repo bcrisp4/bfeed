@@ -1,4 +1,8 @@
-# Full-bleed images, figures and tables in the reader view
+# Full-bleed images and figures in the reader view
+
+(Tables were in the approved design's bleed set but were dropped during
+screenshot validation — see "Validation outcome" at the end. Sections up to
+there describe the design as approved.)
 
 **Date:** 2026-07-04
 **Issue:** [#84](https://github.com/bcrisp4/bfeed/issues/84)
@@ -24,8 +28,10 @@ room to breathe.
 ## Approach
 
 Bleed elements get symmetric negative `margin-inline` computed from two
-clamps and escape their ancestors' boxes via ordinary overflow (nothing
-between `.article` and the viewport sets `overflow`):
+clamps and escape their ancestors' boxes via ordinary overflow (no ancestor
+between `.article` and the root creates a scroll container; the `html`-level
+`overflow-x: clip` backstop clips at the viewport edge only, which the
+bleed formula never crosses):
 
 ```css
 margin-inline: min(0px, max(50% - var(--measure-wide)/2, 50% - 50vw));
