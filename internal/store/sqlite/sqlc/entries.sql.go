@@ -24,6 +24,30 @@ func (q *Queries) CancelFeedExtractions(ctx context.Context, feedID int64) error
 	return err
 }
 
+const countDueExtractions = `-- name: CountDueExtractions :one
+SELECT COUNT(*) FROM entries WHERE extract_state = 'pending' AND next_extract_at <= ?
+`
+
+// Mirrors ListPendingExtractions's WHERE clause exactly (ignoring ORDER BY/LIMIT),
+// so it counts precisely the backlog ListPendingExtractions would dispatch.
+func (q *Queries) CountDueExtractions(ctx context.Context, nextExtractAt sql.NullInt64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDueExtractions, nextExtractAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countEntries = `-- name: CountEntries :one
+SELECT COUNT(*) FROM entries
+`
+
+func (q *Queries) CountEntries(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countEntries)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteEntry = `-- name: DeleteEntry :execrows
 DELETE FROM entries WHERE id = ? AND user_id = ?
 `

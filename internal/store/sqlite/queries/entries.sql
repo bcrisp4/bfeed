@@ -34,6 +34,14 @@ SELECT * FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
 ORDER BY published_at DESC, id DESC LIMIT ?;
 
+-- name: CountEntries :one
+SELECT COUNT(*) FROM entries;
+
+-- name: CountDueExtractions :one
+-- Mirrors ListPendingExtractions's WHERE clause exactly (ignoring ORDER BY/LIMIT),
+-- so it counts precisely the backlog ListPendingExtractions would dispatch.
+SELECT COUNT(*) FROM entries WHERE extract_state = 'pending' AND next_extract_at <= ?;
+
 -- name: SetEntryContent :exec
 -- extract_state = 'pending' in the WHERE is a compare-and-swap guard against
 -- entries.id reuse (entries keep a plain rowid, unlike feeds): a stale Scraper

@@ -21,6 +21,14 @@ SELECT * FROM feeds
 WHERE disabled = 0 AND next_check_at <= ?
 ORDER BY next_check_at ASC LIMIT ?;
 
+-- name: CountFeeds :one
+SELECT COUNT(*) FROM feeds;
+
+-- name: CountDueFeeds :one
+-- Mirrors ListDueFeeds's WHERE clause exactly (ignoring ORDER BY/LIMIT), so it
+-- counts precisely the backlog ListDueFeeds would dispatch on this tick.
+SELECT COUNT(*) FROM feeds WHERE disabled = 0 AND next_check_at <= ?;
+
 -- name: UpdateFeed :exec
 -- feed_url in the WHERE is a compare-and-swap guard: a poll operates on a *Feed
 -- snapshot captured at dispatch, so if the user edits the feed's URL mid-poll the
