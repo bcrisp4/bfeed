@@ -57,6 +57,22 @@ func TestLayoutHasBfcacheReloadScript(t *testing.T) {
 	}
 }
 
+func TestAppJSLocalizesTimestamps(t *testing.T) {
+	h, _ := newWeb(t)
+	// Timestamps render as UTC server-side; app.js rewrites each <time datetime>
+	// into the viewer's local timezone (issue #57). Must key off the RFC3339
+	// datetime attribute and localize via toLocaleString.
+	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	js := rec.Body.String()
+	for _, want := range []string{"time[datetime]", "datetime", "toLocaleString", "htmx:load"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js missing timezone localizer marker %q:\n%s", want, js)
+		}
+	}
+}
+
 func TestSecurityHeadersOnDynamicHTML(t *testing.T) {
 	h, _ := newWeb(t)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
