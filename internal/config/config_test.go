@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,5 +119,51 @@ func TestSchedFactorRejectsNonFinite(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Fatalf("BFEED_SCHED_FACTOR=%q should be rejected", v)
 		}
+	}
+}
+
+// A set-but-unparseable value must fail Load loudly (naming the variable),
+// instead of silently reverting to the built-in default.
+func TestLoadRejectsMalformedEnv(t *testing.T) {
+	cases := []struct{ key, val string }{
+		{"BFEED_POLL_TICK", "30"},                 // bare number, not a duration
+		{"BFEED_SCHED_MAX_INTERVAL", "48"},        // meant 48h, no unit
+		{"BFEED_FEED_WORKERS", "lots"},            // not an integer
+		{"BFEED_SCHED_FACTOR", "fast"},            // not a number
+		{"BFEED_IMAGE_PROXY", "disabled"},         // not a recognised boolean
+		{"BFEED_BLOCK_PRIVATE_NETWORKS", "maybe"}, // not a recognised boolean
+	}
+	for _, c := range cases {
+		t.Run(c.key, func(t *testing.T) {
+			t.Setenv("BFEED_BASE_URL", "http://x")
+			t.Setenv(c.key, c.val)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("%s=%q: expected error, got nil", c.key, c.val)
+			}
+			if !strings.Contains(err.Error(), c.key) {
+				t.Fatalf("%s=%q: error %q does not name the variable", c.key, c.val, err)
+			}
+		})
+	}
+}
+
+// LoadMinimal must succeed with BFEED_BASE_URL unset and ignore poller knobs
+// (even malformed ones) — it backs the migrate/healthcheck subcommands.
+func TestLoadMinimal(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "")         // migrate/healthcheck don't need it
+	t.Setenv("BFEED_POLL_TICK", "garbage") // malformed poller knob must not matter
+	t.Setenv("BFEED_DATABASE_PATH", "/tmp/x.db")
+	t.Setenv("BFEED_LISTEN_ADDR", ":9090")
+	c := LoadMinimal()
+	if c.DatabasePath != "/tmp/x.db" || c.ListenAddr != ":9090" {
+		t.Fatalf("LoadMinimal wrong: %+v", c)
+	}
+}
+
+func TestLoadMinimalDefaults(t *testing.T) {
+	c := LoadMinimal()
+	if c.ListenAddr != ":8080" || c.DatabasePath != "./bfeed.db" {
+		t.Fatalf("LoadMinimal defaults wrong: %+v", c)
 	}
 }

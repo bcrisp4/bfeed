@@ -27,6 +27,42 @@ func TestParseRSS(t *testing.T) {
 	}
 }
 
+// B13: text-only title/author/feed fields must be reduced to plain text — an
+// Atom type="html" title or double-encoded entities otherwise render as literal
+// visible markup once the templates escape them.
+func TestParseStripsMarkupFromTextFields(t *testing.T) {
+	body := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">Ben&amp;#39;s &lt;em&gt;blog&lt;/em&gt;</title>
+  <subtitle>News &amp;amp; &lt;b&gt;views&lt;/b&gt;</subtitle>
+  <entry>
+    <id>e1</id>
+    <title type="html">Ben&amp;#39;s &lt;em&gt;post&lt;/em&gt;</title>
+    <author><name>Jane &amp;lt;jane&amp;gt;</name></author>
+  </entry>
+</feed>`)
+	pf, err := New().Parse(body, "application/atom+xml", "https://e.test/feed.xml")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if pf.Title != "Ben's blog" {
+		t.Fatalf("feed title = %q, want %q", pf.Title, "Ben's blog")
+	}
+	if pf.Description != "News & views" {
+		t.Fatalf("feed description = %q, want %q", pf.Description, "News & views")
+	}
+	if len(pf.Entries) != 1 {
+		t.Fatalf("got %d entries", len(pf.Entries))
+	}
+	e := pf.Entries[0]
+	if e.Title != "Ben's post" {
+		t.Fatalf("entry title = %q, want %q", e.Title, "Ben's post")
+	}
+	if e.Author != "Jane <jane>" {
+		t.Fatalf("entry author = %q, want %q", e.Author, "Jane <jane>")
+	}
+}
+
 // B4/F2: a non-UTF-8 feed whose charset lives only in the HTTP Content-Type
 // (no XML encoding declaration) must be transcoded, not hard-fail "invalid UTF-8".
 // windows-1251 bytes: 0xd2 0xe5 0xf1 0xf2 = "Тест".

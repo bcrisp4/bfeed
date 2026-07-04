@@ -77,10 +77,21 @@ All configuration is via environment variables (12-factor), validated at startup
 | `BFEED_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. |
 | `BFEED_LOG_FORMAT` | `json` | `json` (prod) or `text` (dev). |
 | `BFEED_POLL_TICK` | `1m` | How often the scheduler wakes to dispatch due feeds. |
-| `BFEED_POLL_INTERVAL` | `15m` | Fixed interval between polls of each feed. |
+| `BFEED_SCHED_MIN_INTERVAL` | `5m` | Floor on the adaptive per-feed poll interval (cold-start rate). |
+| `BFEED_SCHED_MAX_INTERVAL` | `24h` | Ceiling on the adaptive per-feed poll interval. |
+| `BFEED_SCHED_FACTOR` | `1.0` | Multiplier on publish frequency when computing a feed's adaptive interval (higher → polls more often). |
+| `BFEED_FEED_ERROR_LIMIT` | `20` | Consecutive-error count after which the Feeds page marks a feed "stalled". |
 | `BFEED_MAX_BACKOFF` | `24h` | Ceiling for exponential backoff on a feed that keeps erroring. |
 | `BFEED_FEED_WORKERS` | `20` | Size of the background feed-poll worker pool. |
 | `BFEED_BATCH_SIZE` | `100` | Max feeds dispatched per scheduler tick. |
 | `BFEED_HOST_CONCURRENCY` | `3` | Max concurrent outbound requests per host (politeness). |
+| `BFEED_SCRAPE_WORKERS` | `20` | Size of the full-content extraction worker pool. |
+| `BFEED_SCRAPE_TICK` | `1m` | How often the scraper wakes to dispatch pending extractions. |
+| `BFEED_SCRAPE_BATCH` | `50` | Max entries dispatched for extraction per scraper tick. |
+| `BFEED_SCRAPE_MAX_ATTEMPTS` | `3` | Attempts before a failed full-content extraction is given up on. |
+| `BFEED_IMAGE_PROXY` | `true` | Proxy remote images through `/img` (strips referrer, applies a strict CSP). |
+| `BFEED_IMAGE_PROXY_SECRET` | — | Secret signing image-proxy URLs; if unset, a random key is generated once and persisted in the database. |
+| `BFEED_BLOCK_PRIVATE_NETWORKS` | `true` | SSRF guard: refuse to fetch loopback/private/link-local addresses. |
+| `BFEED_ALLOW_PRIVATE_CIDRS` | — | Comma-separated CIDRs exempted from the SSRF guard (e.g. a trusted internal feed host). |
 
 Data lives entirely in the SQLite file at `BFEED_DATABASE_PATH` — back that up to back up everything.

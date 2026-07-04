@@ -66,7 +66,10 @@ func TestSubscribeWithCategorySetsIt(t *testing.T) {
 	}
 }
 
-func TestFeedServiceSetCategory(t *testing.T) {
+// EditFeed is the sole production path that re-homes a feed's category; it must
+// enforce category ownership and persist the change (the dead SetCategory method
+// that used to do this was removed — EditFeed already inlines the same steps).
+func TestEditFeedSetsCategory(t *testing.T) {
 	ctx := context.Background()
 	store := coretest.NewMemStore()
 	now := time.Unix(1_700_000_000, 0).UTC()
@@ -74,15 +77,19 @@ func TestFeedServiceSetCategory(t *testing.T) {
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", NextCheckAt: now, CreatedAt: now, UpdatedAt: now})
 	svc, _ := newFeedSvc(store, coretest.StubFetcher{}, coretest.StubParser{})
 
-	if err := svc.SetCategory(ctx, core.DefaultUserID, fid, &catID); err != nil {
-		t.Fatalf("SetCategory: %v", err)
+	res, err := svc.EditFeed(ctx, core.DefaultUserID, fid, core.EditFeedInput{CategoryID: &catID})
+	if err != nil {
+		t.Fatalf("EditFeed: %v", err)
+	}
+	if !res.CategoryChanged {
+		t.Fatal("expected CategoryChanged")
 	}
 	f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
 	if f.CategoryID == nil || *f.CategoryID != catID {
 		t.Fatalf("not assigned: %v", f.CategoryID)
 	}
 	bad := core.ID(999)
-	if err := svc.SetCategory(ctx, core.DefaultUserID, fid, &bad); !errors.Is(err, core.ErrValidation) {
+	if _, err := svc.EditFeed(ctx, core.DefaultUserID, fid, core.EditFeedInput{CategoryID: &bad}); !errors.Is(err, core.ErrValidation) {
 		t.Fatalf("unknown category err = %v, want ErrValidation", err)
 	}
 }

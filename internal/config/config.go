@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/netip"
@@ -36,29 +37,49 @@ type Config struct {
 	AllowPrivateCIDRs    []netip.Prefix
 }
 
+// LoadMinimal reads only the handful of settings the migrate and healthcheck
+// subcommands actually use (all plain strings, no parsing), deliberately
+// skipping BaseURL requirement and every poller/scraper knob. This keeps those
+// subcommands working when BFEED_BASE_URL is unset and prevents a malformed
+// poller variable from making a liveness probe report unhealthy. It cannot fail.
+func LoadMinimal() Config {
+	return Config{
+		ListenAddr:   env("BFEED_LISTEN_ADDR", ":8080"),
+		DatabasePath: env("BFEED_DATABASE_PATH", "./bfeed.db"),
+		LogLevel:     env("BFEED_LOG_LEVEL", "info"),
+		LogFormat:    env("BFEED_LOG_FORMAT", "json"),
+	}
+}
+
 func Load() (Config, error) {
+	var l loader
 	c := Config{
 		ListenAddr:           env("BFEED_LISTEN_ADDR", ":8080"),
 		BaseURL:              env("BFEED_BASE_URL", ""),
 		DatabasePath:         env("BFEED_DATABASE_PATH", "./bfeed.db"),
 		LogLevel:             env("BFEED_LOG_LEVEL", "info"),
 		LogFormat:            env("BFEED_LOG_FORMAT", "json"),
-		PollTick:             envDur("BFEED_POLL_TICK", time.Minute),
-		SchedMinInterval:     envDur("BFEED_SCHED_MIN_INTERVAL", 5*time.Minute),
-		SchedMaxInterval:     envDur("BFEED_SCHED_MAX_INTERVAL", 24*time.Hour),
-		SchedFactor:          envFloat("BFEED_SCHED_FACTOR", 1.0),
-		FeedErrorLimit:       envInt("BFEED_FEED_ERROR_LIMIT", 20),
-		MaxBackoff:           envDur("BFEED_MAX_BACKOFF", 24*time.Hour),
-		FeedWorkers:          envInt("BFEED_FEED_WORKERS", 20),
-		BatchSize:            envInt("BFEED_BATCH_SIZE", 100),
-		HostConcurrency:      envInt("BFEED_HOST_CONCURRENCY", 3),
-		ScrapeWorkers:        envInt("BFEED_SCRAPE_WORKERS", 20),
-		ScrapeTick:           envDur("BFEED_SCRAPE_TICK", time.Minute),
-		ScrapeBatch:          envInt("BFEED_SCRAPE_BATCH", 50),
-		ScrapeMaxAttempts:    envInt("BFEED_SCRAPE_MAX_ATTEMPTS", 3),
-		ImageProxy:           envBool("BFEED_IMAGE_PROXY", true),
+		PollTick:             l.dur("BFEED_POLL_TICK", time.Minute),
+		SchedMinInterval:     l.dur("BFEED_SCHED_MIN_INTERVAL", 5*time.Minute),
+		SchedMaxInterval:     l.dur("BFEED_SCHED_MAX_INTERVAL", 24*time.Hour),
+		SchedFactor:          l.float("BFEED_SCHED_FACTOR", 1.0),
+		FeedErrorLimit:       l.int("BFEED_FEED_ERROR_LIMIT", 20),
+		MaxBackoff:           l.dur("BFEED_MAX_BACKOFF", 24*time.Hour),
+		FeedWorkers:          l.int("BFEED_FEED_WORKERS", 20),
+		BatchSize:            l.int("BFEED_BATCH_SIZE", 100),
+		HostConcurrency:      l.int("BFEED_HOST_CONCURRENCY", 3),
+		ScrapeWorkers:        l.int("BFEED_SCRAPE_WORKERS", 20),
+		ScrapeTick:           l.dur("BFEED_SCRAPE_TICK", time.Minute),
+		ScrapeBatch:          l.int("BFEED_SCRAPE_BATCH", 50),
+		ScrapeMaxAttempts:    l.int("BFEED_SCRAPE_MAX_ATTEMPTS", 3),
+		ImageProxy:           l.boolean("BFEED_IMAGE_PROXY", true),
 		ImageProxySecret:     env("BFEED_IMAGE_PROXY_SECRET", ""),
-		BlockPrivateNetworks: envBool("BFEED_BLOCK_PRIVATE_NETWORKS", true),
+		BlockPrivateNetworks: l.boolean("BFEED_BLOCK_PRIVATE_NETWORKS", true),
+	}
+	// A set-but-unparseable value is a misconfiguration: fail fast naming the
+	// offending variable rather than silently starting on the built-in default.
+	if err := l.err(); err != nil {
+		return c, err
 	}
 	if c.BaseURL == "" {
 		return c, fmt.Errorf("BFEED_BASE_URL is required")
@@ -99,34 +120,54 @@ func env(k, def string) string {
 	return def
 }
 
-func envInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
+// loader accumulates parse errors across the typed env lookups so Load can
+// report every malformed variable at once. Each helper returns the default on a
+// bad value (so the returned Config is still fully populated for context) but
+// records an error, which Load surfaces via err() before it ever validates.
+type loader struct{ errs []error }
+
+func (l *loader) err() error { return errors.Join(l.errs...) }
+
+func (l *loader) int(k string, def int) int {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
 	}
-	return def
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s: invalid integer %q", k, v))
+		return def
+	}
+	return n
 }
 
-func envFloat(k string, def float64) float64 {
-	if v := os.Getenv(k); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
+func (l *loader) float(k string, def float64) float64 {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
 	}
-	return def
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s: invalid number %q", k, v))
+		return def
+	}
+	return f
 }
 
-func envDur(k string, def time.Duration) time.Duration {
-	if v := os.Getenv(k); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
+func (l *loader) dur(k string, def time.Duration) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
 	}
-	return def
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s: invalid duration %q (want e.g. 30s, 15m, 24h)", k, v))
+		return def
+	}
+	return d
 }
 
-func envBool(k string, def bool) bool {
+func (l *loader) boolean(k string, def bool) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(k))) {
 	case "":
 		return def
@@ -135,6 +176,7 @@ func envBool(k string, def bool) bool {
 	case "0", "false", "off", "no":
 		return false
 	default:
+		l.errs = append(l.errs, fmt.Errorf("%s: invalid boolean %q (want true/false/on/off/1/0)", k, os.Getenv(k)))
 		return def
 	}
 }

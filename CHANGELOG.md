@@ -13,11 +13,14 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Changed
 
+- Configuration now fails fast at startup when an environment variable is set to a value it can't parse (for example a duration written without a unit), naming the offending variable, instead of silently ignoring it and falling back to the built-in default.
 - List and search pages are faster and lighter on large libraries: entry lists now read only a short preview of each article instead of loading whole full-text articles for every row, the unread and per-feed counts in list headers and self-refreshing feed rows are served by targeted queries instead of a full scan of every entry, and the image proxy streams images through to the browser instead of buffering each one whole in memory.
 - Polling a feed now skips re-processing entries that haven't changed since the last poll, so feeds that don't support conditional requests are cheaper to keep up to date.
 
 ### Fixed
 
+- The `migrate` and `healthcheck` subcommands no longer require `BFEED_BASE_URL` to be set, since neither uses it — running database migrations from an init container or probing container liveness no longer fails on unrelated configuration.
+- Entry and feed titles and author names that contain HTML markup or encoded entities now display as clean text instead of showing literal tags or `&#39;`-style entity codes.
 - Full-text search now matches the visible words of your articles instead of the underlying HTML markup, so searching for common terms like "https", "img", or "blank" no longer matches nearly every entry, and results are ranked more sensibly. Existing articles are re-indexed automatically on upgrade.
 - List entry previews no longer occasionally show a stray fragment of an HTML tag or a broken character at the end of the blurb when the source content is truncated at an awkward spot.
 - Full-text article extraction no longer permanently gives up on a feed's articles when the source is temporarily rate-limiting (HTTP 429) or briefly unavailable (5xx): those responses are now retried later, honouring the server's `Retry-After`, instead of counting against the give-up limit — so turning on full-text extraction for a whole feed at once can't burn out its backlog against a momentary rate limit.

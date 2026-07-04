@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// CursorKey returns the unix-seconds value of an entry's active keyset order
+// column. This defines what Cursor.Key means per Order; the sqlite store and the
+// MemStore fake must derive it identically or pagination page boundaries diverge,
+// so both call this one function rather than reimplementing the switch.
+func CursorKey(e *Entry, ord Order) int64 {
+	if ord == OrderReadAtDesc && e.ReadAt != nil {
+		return e.ReadAt.Unix()
+	}
+	return e.PublishedAt.Unix()
+}
+
 // EncodeCursor serialises a keyset position as base64("<key>:<id>"),
 // where key is the active order column in unix seconds.
 func EncodeCursor(c Cursor) string {
