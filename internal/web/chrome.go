@@ -19,6 +19,7 @@ type chrome struct {
 	Summaries string // "show" | "hide"
 	Width     string // "comfortable" | "wide"
 	Active    string // active nav key
+	PageTitle string // per-page <title>; "" → layout renders bare "bfeed"
 }
 
 // allowedOr returns v when it is one of allowed, else def.

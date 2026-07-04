@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Changed
+
+- The browser tab title now shows the article title in the reader view (e.g. "Article title — bfeed"), so entries opened in separate tabs are distinguishable in the tab strip, history, and bookmarks. Other pages still read "bfeed".
+
 ## [0.8.0] - 2026-07-04
 
 ### Added

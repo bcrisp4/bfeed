@@ -338,6 +338,7 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	}
 	vm := entryPageVM{Entry: ev, ReadingTime: readMin}
 	vm.chrome = h.chromeFor(r, "")
+	vm.PageTitle = ev.Title
 	if err := h.tmpl["entry"].ExecuteTemplate(w, "layout", vm); err != nil {
 		h.log.Error("template execute", "template", "entry/layout", "error", err)
 	}

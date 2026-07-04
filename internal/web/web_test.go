@@ -501,6 +501,39 @@ func TestEntryDetailPrefersContentOverSummary(t *testing.T) {
 	}
 }
 
+func TestReaderPageTitleIsEntryTitle(t *testing.T) {
+	h, store := newWeb(t)
+	ctx := context.Background()
+	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
+	ins, _ := store.UpsertEntries(ctx, fid, []*core.Entry{{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "Unique Article Title",
+		Content: "<p>body</p>", Status: core.StatusUnread, PublishedAt: time.Unix(100, 0),
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, "/entries/"+strconv.FormatInt(int64(ins[0].ID), 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "<title>Unique Article Title — bfeed</title>") {
+		t.Fatalf("reader page title not set to entry title:\n%s", rec.Body.String())
+	}
+}
+
+func TestListPageTitleFallsBackToAppName(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "<title>bfeed</title>") {
+		t.Fatalf("list page title should fall back to bare bfeed:\n%s", rec.Body.String())
+	}
+}
+
 func TestSearchCapsHeaderAtFifty(t *testing.T) {
 	h, store := newWeb(t)
 	ctx := context.Background()
