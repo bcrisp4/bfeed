@@ -32,7 +32,10 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 		return nil, fmt.Errorf("gofeed parse: %w", err)
 	}
 	base, _ := url.Parse(feedURL)
-	out := &core.ParsedFeed{Title: f.Title, Description: f.Description, SiteURL: resolve(base, f.Link)}
+	// Feed title/description are text-only fields; strip any markup/entities here
+	// (the parse adapter is the boundary that cleans external data) so recordSuccess
+	// persists plain text — same rationale as the per-entry title normalization below.
+	out := &core.ParsedFeed{Title: core.PlainText(f.Title), Description: core.PlainText(f.Description), SiteURL: resolve(base, f.Link)}
 	out.TTL = feedTTL(f, data)
 	for i, it := range f.Items {
 		link := resolve(base, it.Link)
@@ -61,19 +64,25 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 		}
 		author := ""
 		if it.Author != nil {
-			author = it.Author.Name
+			author = core.PlainText(it.Author.Name)
 		}
+		// Title/author are text-only fields but gofeed returns them verbatim, so a
+		// type="html" title or double-encoded entities carry markup/entities that
+		// templates then escape into literal visible tags. Reduce to plain text
+		// here. The GUID fallback above deliberately still hashes the RAW title:
+		// changing an existing entry's identity key would resurrect/duplicate it.
+		title := core.PlainText(it.Title)
 		content := it.Content
 		summary := it.Description
 		out.Entries = append(out.Entries, core.ParsedEntry{
 			GUID:        guid,
 			URL:         link,
-			Title:       it.Title,
+			Title:       title,
 			Author:      author,
 			Content:     content,
 			Summary:     summary,
 			PublishedAt: pub,
-			Hash:        EntryHash(it.Title, content, summary),
+			Hash:        EntryHash(title, content, summary),
 		})
 	}
 	return out, nil

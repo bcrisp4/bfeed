@@ -1,6 +1,4 @@
 -- +goose Up
-PRAGMA foreign_keys=OFF;
-
 CREATE TABLE users (
   id INTEGER PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,

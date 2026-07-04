@@ -234,7 +234,7 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	var next *core.Cursor
 	if len(out) > limit {
 		last := out[limit-1]
-		next = &core.Cursor{Key: sortKey(last, f.Order), ID: last.ID}
+		next = &core.Cursor{Key: core.CursorKey(last, f.Order), ID: last.ID}
 		out = out[:limit]
 	}
 	return out, next, nil
@@ -419,12 +419,4 @@ func placeholders(ids []core.ID) (string, []any) {
 		args[i] = int64(id)
 	}
 	return strings.Join(parts, ","), args
-}
-
-// sortKey returns the unix-seconds value of the entry's active order column.
-func sortKey(e *core.Entry, ord core.Order) int64 {
-	if ord == core.OrderReadAtDesc && e.ReadAt != nil {
-		return e.ReadAt.Unix()
-	}
-	return e.PublishedAt.Unix()
 }

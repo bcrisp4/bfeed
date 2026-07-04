@@ -328,7 +328,7 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		out = append(out, previewEntry(e))
 	}
 	sort.Slice(out, func(i, j int) bool {
-		ki, kj := memSortKey(out[i], f.Order), memSortKey(out[j], f.Order)
+		ki, kj := core.CursorKey(out[i], f.Order), core.CursorKey(out[j], f.Order)
 		if ki != kj {
 			return ki > kj
 		}
@@ -337,7 +337,7 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 	if f.Cursor != nil {
 		var after []*core.Entry
 		for _, e := range out {
-			k := memSortKey(e, f.Order)
+			k := core.CursorKey(e, f.Order)
 			if k < f.Cursor.Key || (k == f.Cursor.Key && int64(e.ID) < int64(f.Cursor.ID)) {
 				after = append(after, e)
 			}
@@ -351,7 +351,7 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 	var next *core.Cursor
 	if len(out) > limit {
 		last := out[limit-1]
-		next = &core.Cursor{Key: memSortKey(last, f.Order), ID: last.ID}
+		next = &core.Cursor{Key: core.CursorKey(last, f.Order), ID: last.ID}
 		out = out[:limit]
 	}
 	return out, next, nil
@@ -373,14 +373,6 @@ func truncRunes(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
-}
-
-// memSortKey returns the unix-seconds value of the entry's active order column.
-func memSortKey(e *core.Entry, ord core.Order) int64 {
-	if ord == core.OrderReadAtDesc && e.ReadAt != nil {
-		return e.ReadAt.Unix()
-	}
-	return e.PublishedAt.Unix()
 }
 
 func (s *MemStore) SetStatus(_ context.Context, u core.ID, ids []core.ID, st core.EntryStatus) error {

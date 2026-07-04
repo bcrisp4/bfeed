@@ -151,6 +151,13 @@ func runServe() int {
 	if !webHandler.Drain(drainCtx) {
 		log.Warn("web background ops did not drain in time")
 	}
+	// Cheap query-planner statistics maintenance on clean shutdown (mvp-design
+	// §16). Best-effort: a failure here must never block or fail shutdown.
+	optCtx, cancelOpt := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelOpt()
+	if _, err := db.ExecContext(optCtx, "PRAGMA optimize"); err != nil {
+		log.Warn("pragma optimize", "error", err)
+	}
 	// A server that never listened (e.g. bind failure) reports failure so
 	// restart policies keyed on the exit code react.
 	select {

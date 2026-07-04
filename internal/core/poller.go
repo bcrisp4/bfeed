@@ -13,15 +13,22 @@ type PollerConfig struct {
 	Workers   int
 }
 
+// dueLister is the narrow store surface the Poller dispatches from — it only
+// selects due feeds. Mirrors pendingLister/scrapeStore so the Poller depends on
+// the one method it uses, not the full 14-method FeedStore.
+type dueLister interface {
+	ListDueFeeds(ctx context.Context, now time.Time, limit int) ([]*Feed, error)
+}
+
 type Poller struct {
-	store FeedStore
+	store dueLister
 	poll  FeedPoller
 	clk   Clock
 	log   *slog.Logger
 	cfg   PollerConfig
 }
 
-func NewPoller(store FeedStore, poll FeedPoller, clk Clock, log *slog.Logger, cfg PollerConfig) *Poller {
+func NewPoller(store dueLister, poll FeedPoller, clk Clock, log *slog.Logger, cfg PollerConfig) *Poller {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 20
 	}

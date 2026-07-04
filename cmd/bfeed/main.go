@@ -34,11 +34,7 @@ func main() {
 }
 
 func runMigrate() int {
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
+	cfg := config.LoadMinimal() // migrate only needs DatabasePath; no BaseURL/poller knobs
 	db, err := sqlite.Open(context.Background(), cfg.DatabasePath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -50,10 +46,7 @@ func runMigrate() int {
 }
 
 func runHealthcheck() int {
-	cfg, err := config.Load()
-	if err != nil {
-		return 1
-	}
+	cfg := config.LoadMinimal() // healthcheck only needs ListenAddr; probe liveness, not config validity
 	_, port, err := net.SplitHostPort(cfg.ListenAddr)
 	if err != nil {
 		// Fall back: treat ListenAddr as ":port" style or bare addr.

@@ -70,13 +70,6 @@ func (s *FeedService) SetFullContent(ctx context.Context, userID, feedID ID, on 
 	return s.store.SetFeedFullContent(ctx, userID, feedID, on, s.clk.Now())
 }
 
-func (s *FeedService) SetCategory(ctx context.Context, userID, feedID ID, categoryID *ID) error {
-	if err := s.ensureCategoryOwned(ctx, userID, categoryID); err != nil {
-		return err
-	}
-	return s.store.SetFeedCategory(ctx, userID, feedID, categoryID)
-}
-
 // ensureCategoryOwned validates that a non-nil categoryID exists for userID.
 // An absent/foreign category is a client error (ErrValidation); any other store
 // error (DB unavailable, context cancelled) is propagated as-is so transient

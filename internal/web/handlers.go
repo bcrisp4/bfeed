@@ -420,20 +420,9 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Resolve + ingest in the background; the reloaded page shows a pending row
 	// that polls until the feed populates (or turns into an error row).
-	// context.Background() is intentional: the goroutine must outlive the request.
-	if h.busy.start(f.ID) {
-		h.bgOps.Add(1)
-		go func() { //nolint:gosec // G118: background goroutine intentionally outlives request; context.Background() is correct here
-			defer h.bgOps.Done() // last: Drain unblocks only after cleanup
-			defer core.RecoverGuard(h.log, "background subscribe", "feed_id", int64(f.ID))
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			defer h.busy.done(f.ID)
-			if err := h.feeds.ResolveAndIngest(ctx, f); err != nil {
-				h.log.Warn("background subscribe", "feed_id", int64(f.ID), "error", err)
-			}
-		}()
-	}
+	h.startBackground(f.ID, "background subscribe", func(ctx context.Context) error {
+		return h.feeds.ResolveAndIngest(ctx, f)
+	})
 	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -472,11 +461,24 @@ func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	row, ok := h.buildEditRow(w, r, id, "get feed for edit")
+	if !ok {
+		return
+	}
+	h.writeFeedRow(w, row, "feedrow/edit")
+}
+
+// buildEditRow assembles the expanded edit-panel row VM for feed id: load the
+// feed + its stats, build the row, mark it editing, attach category options. Both
+// feedEditForm and renderEditError render exactly this (the error path just adds
+// an EditError), so any new edit-panel field seeded from the feed lands in both.
+// Returns ok=false after writing an error response when the feed can't be loaded.
+func (h *Handler) buildEditRow(w http.ResponseWriter, r *http.Request, id core.ID, logCtx string) (feedRowVM, bool) {
 	ctx := r.Context()
 	f, err := h.feeds.Get(ctx, uid, id)
 	if err != nil {
-		h.notFoundOr500(w, r, err, "get feed for edit")
-		return
+		h.notFoundOr500(w, r, err, logCtx)
+		return feedRowVM{}, false
 	}
 	st, statsErr := h.feeds.FeedStats(ctx, uid, id)
 	if statsErr != nil {
@@ -486,9 +488,15 @@ func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror listFeeds)
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
+	return row, true
+}
+
+// writeFeedRow renders the standalone feedrow fragment; logTag distinguishes the
+// call site in an execute-failure log line.
+func (h *Handler) writeFeedRow(w http.ResponseWriter, row feedRowVM, logTag string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
-		h.log.Error("template execute", "template", "feedrow/edit", "error", err)
+		h.log.Error("template execute", "template", logTag, "error", err)
 	}
 }
 
@@ -535,29 +543,16 @@ func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 // default, so a non-2xx status would make the browser silently discard the
 // error fragment and the Save button would appear to do nothing.
 func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id core.ID, cause error) {
-	ctx := r.Context()
-	f, gerr := h.feeds.Get(ctx, uid, id)
-	if gerr != nil {
-		h.notFoundOr500(w, r, gerr, "get feed for edit error")
+	row, ok := h.buildEditRow(w, r, id, "get feed for edit error")
+	if !ok {
 		return
 	}
-	st, statsErr := h.feeds.FeedStats(ctx, uid, id)
-	if statsErr != nil {
-		h.log.Warn("feed entry stats", "error", statsErr)
-	}
-	row := h.buildFeedRow(f, st, time.Now())
-	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror feedEditForm)
-	row.Editing = true
-	row.Cats = h.catOptions(ctx, f.CategoryID)
 	if errors.Is(cause, core.ErrConflict) {
 		row.EditError = "A feed with that URL already exists."
 	} else {
 		row.EditError = "Couldn't save: " + cause.Error()
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
-		h.log.Error("template execute", "template", "feedrow/editerr", "error", err)
-	}
+	h.writeFeedRow(w, row, "feedrow/editerr")
 }
 
 // parseCategoryID reads the optional category_id form field. Empty → (nil, true)
@@ -588,18 +583,30 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 
 // startRefresh spawns a background poll if one is not already running for id.
 func (h *Handler) startRefresh(id core.ID) {
+	h.startBackground(id, "background refresh", func(ctx context.Context) error {
+		return h.feeds.Refresh(ctx, uid, id)
+	})
+}
+
+// startBackground spawns a busy-tracked background feed op unless one is already
+// running for id. It owns the whole scaffold the self-polling row UI depends on:
+// the inflight guard, the bgOps registration Drain waits on, panic recovery, a
+// 60s timeout on a request-independent context (the goroutine must outlive the
+// request), and warn-on-error. subscribe and refresh share it so the timeout and
+// tracking protocol can never drift between the two background-op paths.
+func (h *Handler) startBackground(id core.ID, label string, op func(context.Context) error) {
 	if !h.busy.start(id) {
 		return
 	}
 	h.bgOps.Add(1)
-	go func() {
+	go func() { //nolint:gosec // G118: background goroutine intentionally outlives the request; context.Background() is correct here
 		defer h.bgOps.Done() // last: Drain unblocks only after cleanup
-		defer core.RecoverGuard(h.log, "background refresh", "feed_id", int64(id))
+		defer core.RecoverGuard(h.log, label, "feed_id", int64(id))
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		defer h.busy.done(id)
-		if err := h.feeds.Refresh(ctx, uid, id); err != nil {
-			h.log.Warn("background refresh", "feed_id", int64(id), "error", err)
+		if err := op(ctx); err != nil {
+			h.log.Warn(label, "feed_id", int64(id), "error", err)
 		}
 	}()
 }
