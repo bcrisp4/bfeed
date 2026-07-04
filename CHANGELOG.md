@@ -13,6 +13,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Changed
 
+- Timestamps now render in your browser's local timezone with locale-aware formatting, instead of always showing the stored UTC instant. Older articles show a localized date and the hover tooltip shows the full local date and time; with JavaScript disabled the original UTC render still appears.
 - The browser tab title now shows the article title in the reader view (e.g. "Article title — bfeed"), so entries opened in separate tabs are distinguishable in the tab strip, history, and bookmarks. Other pages still read "bfeed".
 
 ## [0.8.0] - 2026-07-04
