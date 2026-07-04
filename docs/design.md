@@ -23,7 +23,7 @@ must preserve. It is the contract; feature work hangs off it.
 ## 2. Goals & non-goals
 
 **Goals**
-- Minimal, content-first UI; serif content; light/dark/system theme; single column; mobile-first.
+- Minimal, content-first UI; serif content; Light/Sepia/Dark theme (system default); single column; mobile-first.
 - Fast on poor connections; small pages; htmx-only interactivity (no heavy JS framework).
 - Pure-Go build (no cgo, no shared libraries); simple, idiomatic, testable Go.
 - Strong privacy: strip ads/trackers; never persist unsafe HTML; proxy images by default.
@@ -66,7 +66,7 @@ INTEGER-epoch time columns, bounded worker pools, and FTS5 for search.
 | HTTP server/router | **stdlib `net/http`** (Go 1.22 `ServeMux`) | Method+pattern routing in stdlib; minimal deps; `httptest`-friendly. |
 | Templating | stdlib **`html/template`** + **htmx** | Server-rendered HTML fragments; auto-escaping; tiny client. |
 | Password hashing | **argon2id** (`golang.org/x/crypto/argon2`) | OWASP first choice; memory-hard; pure Go; no bcrypt 72-byte footgun. |
-| Concurrency limiting | `golang.org/x/sync` (`semaphore`, `errgroup`) + **`golang.org/x/time/rate`** | Per-host concurrency caps *and* per-host token-bucket rate limits; structured fan-out. |
+| Concurrency limiting | bounded worker pools + reference-counted per-host semaphores (hand-rolled, channel-based); **`golang.org/x/time/rate`** for the token-bucket layer (not yet built — issue #61) | Per-host concurrency caps *and* (planned) per-host token-bucket rate limits. |
 | Logging | stdlib **`log/slog`** | Required; structured, leveled. |
 | Metrics | **`prometheus/client_golang`** | Required; `/metrics`. DB metrics come only from its built-in `collectors.NewDBStatsCollector` (`go_sql_*`). |
 
@@ -133,7 +133,7 @@ internal/
   parse/              FeedParser: gofeed adapter → ParsedFeed
   extract/            Extractor: readeck/go-readability adapter
   sanitize/           Sanitizer: bluemonday policy + tracking mitigation + image-proxy rewrite
-  imgproxy/           image proxy handler: signed URLs, SSRF guard, cache (see §10.6)
+  imgproxy/           image proxy handler: signed URLs, SSRF guard (see §10.6)
   web/                HTML handlers, templates (embed.FS), sessions, CSRF, PWA assets, themes
   api/                REST handlers, bearer auth, token scoping, admin guard
   observability/      slog setup, Prometheus registry + metric definitions
@@ -144,6 +144,10 @@ internal/
 
 All in `internal/core`. `ID` is `int64` (SQLite rowid). Times are Go `time.Time` (UTC),
 persisted as INTEGER Unix seconds (§11).
+
+> **As built:** shipped fields beyond this draft — `Feed.UserTitle` + `Feed.DisplayTitle()`
+> (iter 7), `Feed.TTL` (iter 6), `Entry.ExtractState`/`ExtractAttempts`/`ExtractError`
+> (iter 4) — are logged in §29; `internal/core/types.go` is authoritative for the current shape.
 
 ```go
 type ID int64
@@ -259,11 +263,14 @@ type FetchResponse struct {
     ETag         string
     LastModified string
     RetryAfter   time.Duration // parsed from Retry-After / 429 / 503 when present
+    FinalURL     string        // post-redirect URL; resolve relative links against this (B5)
+    PermanentRedirect bool     // true iff ≥1 hop and EVERY hop was 301/308 (identity adoption)
 }
 
 // FeedParser turns raw feed bytes (RSS/Atom/JSON Feed) into a normalised feed + entries.
+// contentType is the HTTP Content-Type, used for charset transcoding of non-UTF-8 feeds (B4).
 type FeedParser interface {
-    Parse(data []byte, feedURL string) (*ParsedFeed, error)
+    Parse(data []byte, contentType, feedURL string) (*ParsedFeed, error)
 }
 type ParsedFeed struct {
     Title, SiteURL, Description string
@@ -300,7 +307,7 @@ type FeedStore interface {
     ListFeeds(ctx context.Context, userID ID) ([]*Feed, error)
     ListDueFeeds(ctx context.Context, now time.Time, limit int) ([]*Feed, error) // next_check_at<=now, !disabled
     UpdateFeed(ctx context.Context, f *Feed) error                // persists NextCheckAt/CheckedAt/ErrorCount/etag...
-    WeeklyEntryCount(ctx context.Context, feedID ID, now time.Time) (int, error) // spacing-based virtual count (§12)
+    WeeklyEntryCount(ctx context.Context, feedID ID, now time.Time) (int, error) // COUNT over [now-week, now] (§12)
     DeleteFeed(ctx context.Context, userID, feedID ID) error      // cascades entries+FTS, writes tombstones
 }
 
@@ -433,6 +440,10 @@ func NewPoller(
   reader (N) pools** on the same file only if read latency under writes is measured to matter.
 - **FTS5** external-content virtual table mirrors `entries`, kept in sync by the canonical
   insert/delete/update triggers (delete uses the FTS5 `'delete'` command with *old* values).
+  *As built (audit B12, migration `0013`):* the index covers **plain-text projections**
+  (`title` + `content_text`/`summary_text`, filled from the sanitised HTML on every write) so
+  markup tokens (`https`, `img`, `href`) don't match; the `AFTER UPDATE` trigger is created
+  **in Go after** the one-time backfill/rebuild, not in the migration (see §29).
 - **Maintenance:** `PRAGMA optimize` periodically; `PRAGMA wal_checkpoint(TRUNCATE)` after
   large TTL deletes to reclaim WAL space; FTS5 `'optimize'` occasionally.
 - Maps driver errors to core sentinels (`ErrNotFound`, `ErrConflict`).
@@ -469,8 +480,10 @@ func NewPoller(
   `<iframe>`, `<object>`, `<form>`, and all `on*` event-handler attributes.
 - Tracking mitigation: strip known tracking query params (`utm_*`, `fbclid`, `gclid`, …)
   from links; drop 1×1 tracking-pixel images.
-- When the image proxy is enabled (default), rewrite `<img src>`/`srcset` to signed proxy
-  URLs (§10.6) so the browser never contacts origin servers.
+- When the image proxy is enabled (default), `<img src>` is rewritten to signed proxy URLs
+  (§10.6) so the browser never contacts origin servers. *As built (iter 5):* the rewrite
+  happens at **render time** in the web layer, not here in the sanitiser — stored content
+  keeps canonical origin URLs (see §29); `srcset` rewriting deferred.
 
 ### 10.6 `imgproxy` — image proxy (privacy; **enabled by default**)
 A dedicated lever for the "minimise tracking" requirement: without it, images in entries
@@ -482,8 +495,10 @@ leak the reader's IP/User-Agent to origin and third-party tracker servers on ren
   apply), with a strict timeout and max-bytes cap.
 - **SSRF guard:** only `http`/`https`; resolve and **reject private, loopback, link-local,
   and metadata IPs**; enforce a `Content-Type: image/*` allowlist on the response.
-- **Caching:** small on-disk (or bounded in-memory LRU) cache keyed by URL hash with a size
-  cap and TTL, so repeated renders don't re-fetch. Serves with long client cache headers.
+- **Caching:** *dropped* — responses are served with year-long `immutable` client cache
+  headers and signed URLs are deterministic per image URL, so browser caching already
+  prevents re-fetches; a server-side cache only pays off as poll-time prefetch (icebox
+  issue #77).
 - **Signing key:** an HMAC secret resolved at startup — use `BFEED_IMAGE_PROXY_SECRET` if set
   (operator-managed); otherwise read it from the `app_settings` table, generating a random
   32-byte key with `crypto/rand` on first run and persisting it there. It lives in the same
@@ -491,7 +506,7 @@ leak the reader's IP/User-Agent to origin and third-party tracker servers on ren
   signatures embedded in already-served pages (harmless — pages re-render on next load) but
   not the on-disk image cache (keyed by URL hash, not signature).
 - **Config:** `BFEED_IMAGE_PROXY=on|off` (default **on**), `BFEED_IMAGE_PROXY_SECRET`
-  (optional), cache size/dir, max image bytes.
+  (optional).
 
 ### 10.7 `web` / 10.8 `api` / 10.9 `observability`
 See §18, §17, §20.
@@ -503,6 +518,16 @@ Per-user ownership: `feeds`, `entries`, `categories`, `api_tokens`, `sessions` a
 `INTEGER` Unix seconds (UTC)** — smaller indexes, direct numeric range scans, no timezone
 ambiguity. Booleans are `INTEGER 0/1` with `CHECK`. `foreign_keys=ON` and every child FK
 column is indexed.
+
+> **As built:** the block below is the original target schema; the shipped schema is
+> `internal/store/sqlite/migrations/` (authoritative), which extends it additively: `feeds`
+> rebuilt with an `AUTOINCREMENT` PK so deleted ids never recycle (audit B7) and gained
+> `ttl_seconds` (iter 6) + `user_title` (iter 7); `entries` gained the extraction columns
+> (iter 4, + `extract_error` in B12) and plain-text FTS projections `content_text`/
+> `summary_text` (B12); `categories` uniqueness is `COLLATE NOCASE` (B8);
+> `idx_entries_feed_pub`/`idx_entries_starred` carry a trailing `id DESC` keyset tiebreak
+> (B6); the FTS block was restructured per §10.1 (B12). `users`/`sessions`/`api_tokens` and
+> `idx_entries_ttl` are not yet built (Multi-user / Integrations / Storage milestones).
 
 ```sql
 CREATE TABLE users (
@@ -542,7 +567,8 @@ CREATE TABLE feeds (
   updated_at INTEGER NOT NULL,
   UNIQUE (user_id, feed_url)
 ) STRICT;
--- dispatch query: WHERE disabled=0 AND error_count<limit AND next_check_at<=? ORDER BY next_check_at
+-- dispatch query: WHERE disabled=0 AND next_check_at<=? ORDER BY next_check_at
+-- (no error_count exclusion — backoff caps dead feeds; error_count only drives the UI badge, §12)
 CREATE INDEX idx_feeds_due  ON feeds(next_check_at) WHERE disabled = 0;
 CREATE INDEX idx_feeds_user ON feeds(user_id);
 
@@ -706,8 +732,9 @@ next_check_at = now + interval
   a warning badge; dispatch is unaffected.
 - Defaults: factor **1**, min **5m**, max **24h** (`BFEED_SCHED_*`).
 
-Global concurrency = feed-poll worker count (`BFEED_FEED_WORKERS`, default **100** to meet the
-concurrency requirement; per-host caps keep it polite). All steps honor `ctx` cancellation.
+Global concurrency = feed-poll worker count (`BFEED_FEED_WORKERS`, shipped default **20** —
+raise toward the §3 ≥100-capacity target if a large subscription set needs it; per-host caps
+keep it polite). All steps honor `ctx` cancellation.
 
 ## 13. Content extraction (article scrape) — decoupled stage
 
@@ -810,8 +837,8 @@ Errors return `{ "error": { "code", "message" } }`; core sentinels map to status
 ## 18. Web UI
 
 - Server-rendered `html/template`, progressively enhanced with **htmx**. No SPA framework.
-- Single-column, content-first, serif body text. Light/dark/system theme via a
-  `prefers-color-scheme` baseline plus a user toggle (persisted in a cookie).
+- Single-column, content-first, serif body text. Light/Sepia/Dark themes via a
+  `prefers-color-scheme` baseline (system default) plus a user toggle (persisted in a cookie).
 - htmx drives: mark read/unread, star, bulk actions, keyset pagination/infinite scroll,
   refresh — each returns an HTML fragment swapped in place. Full-page loads stay small.
 - Views: unread list (home), all feeds, single feed, categories, starred, history, search,
@@ -883,15 +910,18 @@ BFEED_LOG_LEVEL                info        BFEED_LOG_FORMAT   json
 # scheduling (adaptive)
 BFEED_POLL_TICK                1m          # global scheduler tick (≪ min interval)
 BFEED_BATCH_SIZE               100         # feeds dispatched per tick
-BFEED_FEED_WORKERS             100         # feed-poll pool (meets ≥100 concurrency requirement)
+BFEED_FEED_WORKERS             20          # feed-poll pool (raise toward §3's ≥100 capacity if needed)
 BFEED_SCHED_MIN_INTERVAL       5m
 BFEED_SCHED_MAX_INTERVAL       24h
 BFEED_SCHED_FACTOR             1
-BFEED_FEED_ERROR_LIMIT         20          # exclude from dispatch after N consecutive errors
+BFEED_FEED_ERROR_LIMIT         20          # Feeds-page "stalled" badge threshold (never excludes from dispatch)
+BFEED_MAX_BACKOFF              24h         # ceiling for the error-path exponential backoff
 # politeness
 BFEED_HOST_CONCURRENCY         3           # max concurrent requests per host
-BFEED_HOST_RATE_PER_SEC        1           # per-host token-bucket rate
-BFEED_HOST_BURST               3
+BFEED_HOST_RATE_PER_SEC        1           # per-host token-bucket rate (not yet built — issue #61)
+BFEED_HOST_BURST               3           # (not yet built — issue #61)
+BFEED_BLOCK_PRIVATE_NETWORKS   true        # SSRF guard on all outbound fetches (B11)
+BFEED_ALLOW_PRIVATE_CIDRS                  # comma-separated CIDR exemptions from the SSRF guard
 # article scraping (full content)
 BFEED_SCRAPE_WORKERS           20
 BFEED_SCRAPE_TICK              1m
@@ -907,7 +937,6 @@ BFEED_ADMIN_USERNAME / BFEED_ADMIN_PASSWORD   # bootstrap admin, first run only
 # privacy
 BFEED_IMAGE_PROXY              on          # default ON
 BFEED_IMAGE_PROXY_SECRET                   # optional HMAC key; generated + persisted if unset
-BFEED_IMAGE_CACHE_DIR / BFEED_IMAGE_CACHE_MAX_BYTES / BFEED_IMAGE_MAX_BYTES
 ```
 
 ## 22. Command-line interface
@@ -919,7 +948,7 @@ operations are subcommands, not shell scripts.
 
 ```
 bfeed serve                  run the HTTP server + background poller/cleaner (default if omitted)
-bfeed migrate <up|down|status>   manage schema migrations (goose); `serve` also auto-migrates on boot
+bfeed migrate                apply schema migrations (goose, up-only); `serve` also auto-migrates on boot
 bfeed user <create|list|set-password|delete> --username NAME [--admin]
                              manage users (alternative to env bootstrap); password from prompt/stdin
 bfeed token <create|list|revoke> --username NAME [--name LABEL] [--read-only]
@@ -980,8 +1009,8 @@ bfeed version                version, git commit, build date
   but the SQLite file.
 - **Tiny distroless** container (`gcr.io/distroless/static`), multi-arch (amd64 + arm64 for
   Pi), built and pushed to **GHCR** via GitHub Actions.
-- Runs as non-root; data dir is a mounted volume holding `bfeed.db` (+ WAL/SHM) and the image
-  cache. Restart-safe (migrations idempotent, scheduler self-heals from `next_check_at`).
+- Runs as non-root; data dir is a mounted volume holding `bfeed.db` (+ WAL/SHM).
+  Restart-safe (migrations idempotent, scheduler self-heals from `next_check_at`).
 
 ## 27. Invariants (the contract)
 
@@ -1030,17 +1059,18 @@ These hold across all sessions. Tests must defend them.
 
 ## 28. Open questions / future
 
-- **License** (requirements: TBD) — pick an OSI license (e.g. AGPL-3.0 or MIT) before release.
+- **License** — ✓ resolved: **Apache-2.0** (`LICENSE` in repo root).
 - **Per-feed interval override** — adaptivity is global today; a per-feed min/max pin could be
-  added if a feed needs special cadence.
+  added if a feed needs special cadence (icebox issue #76).
 - **Read/write connection split** — adopt only if single-writer + `busy_timeout` proves
-  insufficient under load.
+  insufficient under load (icebox issue #78).
 - **Search stemming** — the default `unicode61` tokenizer matches only exact word forms
   (after case/accent folding), so a search for `run` will not match `running` or `runs`.
   FTS5's `porter` tokenizer stems words to a common root at both index and query time so
   inflected forms match each other — higher recall, traded against some precision
   (`universe`/`university` collide) and the ability to match an exact form. Default stays
-  `unicode61`; the tokenizer is a config option to flip to `porter` if search feels too literal.
+  `unicode61`; the tokenizer is a config option to flip to `porter` if search feels too literal
+  (icebox issue #75).
 
 ## 29. Decision log (deltas from first draft)
 
@@ -1105,6 +1135,32 @@ These hold across all sessions. Tests must defend them.
   I/O) + background `ResolveAndIngest` (records errors, no rollback). Rename via the new
   `feeds.user_title` override column, displayed through `Feed.DisplayTitle()` (= `user_title ??
   title`); `SetFeedURL` clears `etag`/`last_modified` so a changed URL re-fetches in full.
+- **2026-07 audit remediation (batches B1–B13,** [`audit-2026-07.md`](./audit-2026-07.md)**):**
+  design-relevant deltas, all defended by tests + `CLAUDE.md` invariants:
+  - *B4:* `FeedParser.Parse` gained a `contentType` param; non-UTF-8 feeds transcoded via
+    `x/net/html/charset` only when no in-band `encoding=` decl; undated entries get
+    ingest-time `PublishedAt`.
+  - *B5:* fetch follows ≤5 redirects and exposes `FetchResponse.FinalURL` +
+    `PermanentRedirect`; relative links resolve against `FinalURL`; `feed_url` identity is
+    adopted only on fully-permanent (301/308) chains.
+  - *B6:* keyset indexes carry trailing `id DESC` tiebreaks (`idx_entries_feed_pub`,
+    `idx_entries_starred`); `ListEntries` emits a literal `starred = 0/1` so the partial
+    starred index is usable.
+  - *B7:* `feeds` rebuilt with `AUTOINCREMENT` (deleted ids never recycle); poll/edit races
+    closed with a `feed_url` CAS + in-tx `fetch_full_content` reads.
+  - *B8:* category uniqueness `COLLATE NOCASE`; feed/entry identity + dedup fixes.
+  - *B11 (security):* DNS-rebinding host guard (421 on foreign `Host`); strict CSP
+    (`script-src 'self'`, no inline) + `X-Frame-Options` + `Referrer-Policy` + `nosniff` on
+    dynamic HTML; SSRF dial-layer guard extended and applied to **all** outbound fetches with
+    `BFEED_BLOCK_PRIVATE_NETWORKS`/`BFEED_ALLOW_PRIVATE_CIDRS`; fetch hard-fails bodies over
+    `MaxBytes` and defaults `Timeout` 30s; `Retry-After` capped.
+  - *B12 (performance):* FTS rebuilt over plain-text projections (`content_text`/
+    `summary_text`, migration `0013`; `AFTER UPDATE` trigger created in Go post-backfill);
+    list projections truncate content/summary to 2048 chars (full body via `GetEntry` only);
+    poll pre-filters dedup candidates (`EntryDedup`) so unchanged entries skip sanitisation;
+    per-feed stat queries replace the full GROUP BY on hot paths.
+  - Dynamic HTML is `Cache-Control: no-store` + bfcache reload guard (B9/iter-2 era); web
+    fragments/bulk-action conventions are documented in `CLAUDE.md`, not here.
 
 ## 30. Research basis & sources
 
