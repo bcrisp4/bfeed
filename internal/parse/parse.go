@@ -11,11 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mmcdole/gofeed"
 	ext "github.com/mmcdole/gofeed/extensions"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/text/transform"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -91,18 +93,29 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 // decodeReader returns a UTF-8 reader for the feed bytes. gofeed only transcodes
 // when the XML declaration names a non-UTF-8 encoding, so a feed whose charset
 // lives only in the HTTP Content-Type (RFC 3023) fails as "invalid UTF-8". We
-// bridge that gap with charset.NewReader, which honors the HTTP charset, a BOM,
-// and content sniffing. Crucially we do this ONLY when the bytes carry no in-band
-// encoding declaration: if we pre-transcoded a feed that also declares its
-// encoding, encoding/xml would re-invoke gofeed's CharsetReader on the now-UTF-8
-// stream and double-transcode it into mojibake. Falls back to the raw bytes if a
-// charset reader can't be built.
+// bridge that gap with charset.DetermineEncoding, which honors the HTTP charset,
+// a BOM, and content sniffing. Crucially we do this ONLY when the bytes carry no
+// in-band encoding declaration: if we pre-transcoded a feed that also declares
+// its encoding, encoding/xml would re-invoke gofeed's CharsetReader on the
+// now-UTF-8 stream and double-transcode it into mojibake.
+//
+// Uncertain answers (no BOM, no header charset) lose to a full body of valid
+// UTF-8: XML with no in-band declaration is UTF-8 by spec, and the sniff's
+// guesses — it examines only the first 1024 bytes, so an ASCII-only prefix
+// yields its windows-1252 fallback, and a stray `<meta charset=…>` token in
+// feed content can name anything — would mojibake multibyte runes further
+// down (#99, the feed-path twin of #96). Genuine legacy-encoded text fails
+// utf8.Valid (cp1252 &co high bytes are bare UTF-8 continuation bytes), so
+// the sniffed fallback still transcodes it. Deliberately broader than
+// extract.decodeReader's windows-1252-only exception: HTML honors <meta>
+// declarations, XML does not — don't "align" the two guards.
 func decodeReader(data []byte, contentType string) io.Reader {
 	if hasXMLEncodingDecl(data) {
 		return bytes.NewReader(data)
 	}
-	if r, err := charset.NewReader(bytes.NewReader(data), contentType); err == nil {
-		return r
+	enc, _, certain := charset.DetermineEncoding(data, contentType)
+	if certain || !utf8.Valid(data) {
+		return transform.NewReader(bytes.NewReader(data), enc.NewDecoder())
 	}
 	return bytes.NewReader(data)
 }
