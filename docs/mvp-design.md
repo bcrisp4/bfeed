@@ -497,8 +497,9 @@ Each step is independently testable and leaves the tree green.
 
 ## 20. Path back to the full design
 
-**Everything deferred is tracked exhaustively in [`roadmap.md`](./roadmap.md)** — the single
-source of truth for what's left out, each item mapped to its `design.md` section and the
-additive surface (table/column/package/route/env) it introduces, plus a suggested iteration
-sequence. As features ship they move to the roadmap's **Done** section. Each is additive; none
-invalidates MVP code or data.
+**Everything deferred is tracked in [GitHub issues and
+milestones](https://github.com/bcrisp4/bfeed/milestones)** — the single source of truth for
+what's left out, each issue mapped to its `design.md` section and the additive surface
+(table/column/package/route/env) it introduces. [`roadmap.md`](./roadmap.md) keeps the
+tracking conventions and the shipped history. Each item is additive; none invalidates MVP
+code or data.

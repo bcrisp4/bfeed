@@ -7,11 +7,11 @@ A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binar
 - HTML sanitised before storage; trackers and tracking pixels stripped
 - Mark read/unread, star, delete; keyset pagination
 
-## Status: 🚧 work in progress (MVP)
+## Status: 🚧 work in progress
 
-This is **iteration 1 (MVP)**. It implements the core loop — subscribe → poll → read → mark-read/star — as a **single user with no in-app login** (designed to sit behind a private network such as Tailscale).
+The core loop — subscribe → poll → read → mark-read/star — plus categories, full-text search, opt-in full-content scraping, a privacy image proxy, and adaptive polling are built. Still **single user with no in-app login** (designed to sit behind a private network such as Tailscale).
 
-Deliberately **not in the MVP yet** (tracked, with the path back, in [`docs/roadmap.md`](docs/roadmap.md)): authentication & multi-user, REST API + tokens, full-text search, categories, full-content scraping, image proxy, adaptive scheduling, OPML import/export, retention cleanup, and Prometheus metrics.
+Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import/export, retention cleanup, and Prometheus metrics, among others.
 
 License: [Apache-2.0](LICENSE).
 
@@ -19,7 +19,7 @@ License: [Apache-2.0](LICENSE).
 
 - [`docs/design.md`](docs/design.md) — the full architecture & design (the long-term north star).
 - [`docs/mvp-design.md`](docs/mvp-design.md) — the scope that is **actually built today**. When the code and `design.md` differ, this explains why.
-- [`docs/roadmap.md`](docs/roadmap.md) — everything deferred past the MVP, and how each lands as an additive change.
+- [GitHub issues & milestones](https://github.com/bcrisp4/bfeed/milestones) — the remaining work, one session-sized issue at a time. [`docs/roadmap.md`](docs/roadmap.md) keeps the tracking conventions and shipped history.
 - [`docs/releasing.md`](docs/releasing.md) — how to cut a release (annotated semver tag → goreleaser).
 - [`CLAUDE.md`](CLAUDE.md) — contributor/architecture notes (ports-and-adapters layout, invariants, sqlc workflow, test conventions).
 

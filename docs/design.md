@@ -1094,7 +1094,9 @@ These hold across all sessions. Tests must defend them.
   **Delta from §10.5:** `<img src>` is rewritten to the proxy URL at **render time** (web reader
   view), not in the sanitiser at ingest — stored content stays canonical (origin URLs), so legacy
   entries are also proxied, secret rotation is harmless, and toggling the proxy off is clean.
-  Default ON. `srcset` rewriting and a server-side image cache are deferred (roadmap A4).
+  Default ON. `srcset` rewriting is deferred; the on-demand server-side image cache was
+  dropped (browser caching of the `immutable` proxy responses already covers it — re-scoped
+  as poll-time prefetch in icebox issue #77).
 - **Feed manager redesign (iter 7):** non-blocking subscribe/refresh (goroutine on
   `context.Background()` + in-memory `inflightSet`), self-polling `GET /feeds/{id}/row` fragment
   (`hx-trigger="every 1500ms"`) with an `hx-swap-oob` group-head count update on completion,
