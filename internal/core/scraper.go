@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -101,7 +102,15 @@ func (p *Scraper) dispatch(ctx context.Context, jobs chan<- *Entry) {
 	due, err := p.store.ListPendingExtractions(ctx, now, p.cfg.Batch)
 	if err != nil {
 		p.log.Error("list pending extractions", "error", err)
-		p.metrics.ErrorObserved(CompArticleScrape, ReasonInternal)
+		if !errors.Is(err, context.Canceled) {
+			// F3: a cancelled dispatch (shutdown) isn't a scrape/dispatch
+			// failure worth counting. F8: a dispatch-level list failure is a
+			// store-layer (db) problem, not an article_scrape attempt —
+			// attributing it to CompArticleScrape would skew the
+			// article_scrape error ratio, a metric meant to track scrape
+			// *attempts*, not dispatch plumbing.
+			p.metrics.ErrorObserved(CompDB, ReasonInternal)
+		}
 		return
 	}
 	for _, e := range due {

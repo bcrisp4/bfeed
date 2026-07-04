@@ -21,18 +21,17 @@ import (
 // every closed enum value, so lint/name assertions see a fully "warmed up"
 // registry.
 func exercise(m *observability.Metrics) {
-	for _, r := range []core.PollResult{
-		core.PollSuccess, core.PollNotModified, core.PollFetchError,
-		core.PollHTTPError, core.PollParseError, core.PollStoreError, core.PollPanic,
-	} {
+	// Range over core's own canonical enum lists (F9) rather than a
+	// hand-duplicated literal slice, so a new PollResult/ScrapeResult value
+	// can't silently be added to the type without this "warmed up" registry
+	// (and NewMetrics's pre-registration, which sources from the same lists)
+	// picking it up.
+	for _, r := range core.AllPollResults {
 		m.FeedPollDone(r)
 	}
 	m.ObserveFeedPoll(1200 * time.Millisecond)
 
-	for _, r := range []core.ScrapeResult{
-		core.ScrapeSuccess, core.ScrapeFetchError, core.ScrapeHTTPError,
-		core.ScrapeExtractError, core.ScrapeRetried, core.ScrapeFailed,
-	} {
+	for _, r := range core.AllScrapeResults {
 		m.ScrapeDone(r)
 	}
 	m.ObserveArticleScrape(800 * time.Millisecond)

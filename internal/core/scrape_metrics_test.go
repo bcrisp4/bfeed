@@ -71,6 +71,17 @@ func TestScrapeEntryEmitsMetricsPerResult(t *testing.T) {
 			wantReason: reasonPtr(core.ReasonHTTP4xx),
 		},
 		{
+			// F2: a 200 response with a non-HTML body (e.g. the entry URL now
+			// serves a PDF) is a content-shape problem, not an HTTP failure — it
+			// must not be mislabeled http_error/http_4xx by the old combined
+			// (status != 200 || !isHTML) guard.
+			name:       "200 + non-HTML content-type is extract_error + parse, not http_4xx",
+			fetcher:    coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "application/pdf", Body: []byte("%PDF-1.4")}},
+			ext:        coretest.StubExtractor{},
+			wantResult: core.ScrapeExtractError,
+			wantReason: reasonPtr(core.ReasonParse),
+		},
+		{
 			name:       "extract error is extract_error + parse",
 			fetcher:    coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>")}},
 			ext:        coretest.StubExtractor{Err: errors.New("boom")},
@@ -155,19 +166,66 @@ func TestScrapeEntrySanitisedEmptyIsExtractError(t *testing.T) {
 	}
 }
 
-// setEntryContentErrStore2 wraps MemStore and fails every SetEntryContent write,
-// simulating a store-layer persist failure during extraction (mirrors
-// setEntryContentErrStore in scrape_test.go, renamed to avoid a duplicate
-// declaration across files in the same package).
-type setEntryContentErrStore2 struct{ *coretest.MemStore }
+// F3: a fetch that fails because the scrape's own ctx was cancelled (shutdown)
+// must not pollute the counters — it isn't a scrape failure worth counting.
+func TestScrapeEntryShutdownCancelSkipsMetricsEmission(t *testing.T) {
+	store := coretest.NewMemStore()
+	e := seedScrapeEntry(t, store)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate shutdown: ctx is already done when Fetch is attempted
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewScrapeService(store, coretest.StubFetcher{Err: context.Canceled}, coretest.StubExtractor{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(),
+		core.ScrapeConfig{MaxAttempts: 3, BaseBackoff: 10 * time.Minute, MaxBackoff: 24 * time.Hour}, nil)
+	m := &coretest.RecordingMetrics{}
+	svc.SetMetrics(m)
 
-func (setEntryContentErrStore2) SetEntryContent(context.Context, core.ID, string) error {
-	return errors.New("disk full")
+	if err := svc.ScrapeEntry(ctx, e); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+
+	if results := m.SnapshotScrapeResults(); len(results) != 0 {
+		t.Fatalf("ScrapeDone = %v, want none (shutdown cancel must not emit)", results)
+	}
+	if errs := m.SnapshotErrors(); len(errs) != 0 {
+		t.Fatalf("ErrorObserved = %v, want none (shutdown cancel must not emit)", errs)
+	}
+	// The retry/backoff must still be persisted (existing failEmit semantics
+	// unaffected — metrics-only suppression).
+	got, _ := store.GetEntry(context.Background(), core.DefaultUserID, e.ID)
+	if got.ExtractAttempts == 0 {
+		t.Fatalf("ExtractAttempts = 0, want > 0 (attempt must still persist even though metrics are suppressed)")
+	}
+}
+
+// F3: a normal (non-shutdown) fetch error must be unaffected — guards against
+// an overly broad ctxShutdownCanceled check skipping emission for unrelated
+// context.Canceled errors.
+func TestScrapeEntryNormalCancelStillEmitsMetrics(t *testing.T) {
+	store := coretest.NewMemStore()
+	e := seedScrapeEntry(t, store)
+	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	svc := core.NewScrapeService(store, coretest.StubFetcher{Err: context.Canceled}, coretest.StubExtractor{}, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(),
+		core.ScrapeConfig{MaxAttempts: 3, BaseBackoff: 10 * time.Minute, MaxBackoff: 24 * time.Hour}, nil)
+	m := &coretest.RecordingMetrics{}
+	svc.SetMetrics(m)
+
+	if err := svc.ScrapeEntry(context.Background(), e); err != nil {
+		t.Fatalf("ScrapeEntry: %v", err)
+	}
+
+	if results := m.SnapshotScrapeResults(); len(results) != 1 || results[0] != core.ScrapeFetchError {
+		t.Fatalf("ScrapeDone = %v, want exactly [fetch_error]", results)
+	}
+	if errs := m.SnapshotErrors(); len(errs) != 1 {
+		t.Fatalf("ErrorObserved = %v, want exactly one entry", errs)
+	}
 }
 
 func TestScrapeEntryPersistFailureIsFailedInternal(t *testing.T) {
 	inner := coretest.NewMemStore()
-	store := setEntryContentErrStore2{inner}
+	// setEntryContentErrStore is defined once in scrape_test.go (same package);
+	// F6 removed this file's own duplicate copy.
+	store := setEntryContentErrStore{inner}
 	e := seedScrapeEntry(t, inner)
 	clk := &coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
 	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>")}}
@@ -221,26 +279,12 @@ func TestScrapeEntryPanicEmitsExactlyOneFailedResult(t *testing.T) {
 	}
 }
 
-// tickClockScrape returns a monotonically increasing sequence of timestamps,
-// advancing by step on every Now() call — proves ObserveArticleScrape's
-// recorded duration reflects real elapsed time, not merely that a fixed clock
-// always yields a zero duration (mirrors tickClock in feed_metrics_test.go,
-// renamed to avoid a duplicate declaration in the same package).
-type tickClockScrape struct {
-	next time.Time
-	step time.Duration
-}
-
-func (c *tickClockScrape) Now() time.Time {
-	t := c.next
-	c.next = c.next.Add(c.step)
-	return t
-}
-
 func TestScrapeEntryObservesDurationExactlyOnce(t *testing.T) {
 	store := coretest.NewMemStore()
 	e := seedScrapeEntry(t, store)
-	clk := &tickClockScrape{next: time.Unix(1_700_000_000, 0).UTC(), step: 250 * time.Millisecond}
+	// tickClock is defined once in feed_metrics_test.go (same package); F6
+	// removed this file's own duplicate copy.
+	clk := &tickClock{next: time.Unix(1_700_000_000, 0).UTC(), step: 250 * time.Millisecond}
 	fetch := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, ContentType: "text/html", Body: []byte("<html>..</html>")}}
 	ext := coretest.StubExtractor{HTML: "<p>extracted</p>"}
 	svc := core.NewScrapeService(store, fetch, ext, coretest.PassSanitizer{}, clk, coretest.DiscardLogger(),

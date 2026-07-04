@@ -48,7 +48,10 @@ func TestPollerTickedEmittedEvenOnStoreError(t *testing.T) {
 	}
 
 	errs := m.SnapshotErrors()
-	want := coretest.RecordedError{C: core.CompFeedPoll, R: core.ReasonInternal}
+	// F8: a dispatch-level list failure is attributed to CompDB (a store-layer
+	// problem), not CompFeedPoll — it isn't a feed_poll attempt, so it must not
+	// skew that metric's error ratio.
+	want := coretest.RecordedError{C: core.CompDB, R: core.ReasonInternal}
 	if len(errs) != 1 || errs[0] != want {
 		t.Fatalf("ErrorObserved = %v, want exactly [%v]", errs, want)
 	}
@@ -59,6 +62,38 @@ func TestPollerTickedEmittedEvenOnStoreError(t *testing.T) {
 type noopPoller struct{}
 
 func (noopPoller) PollFeed(context.Context, *core.Feed) error { return nil }
+
+// canceledDueLister always fails ListDueFeeds with context.Canceled,
+// simulating a dispatch that observes shutdown mid-flight.
+type canceledDueLister struct{}
+
+func (canceledDueLister) ListDueFeeds(context.Context, time.Time, int) ([]*core.Feed, error) {
+	return nil, context.Canceled
+}
+
+// F3: a dispatch-level failure caused by context.Canceled (shutdown) must not
+// be counted — it isn't a poll/dispatch failure worth alerting on.
+func TestPollerDispatchSkipsErrorObservedOnContextCanceled(t *testing.T) {
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	p := core.NewPoller(canceledDueLister{}, noopPoller{}, clk, coretest.DiscardLogger(), core.PollerConfig{Tick: time.Hour, BatchSize: 10, Workers: 1})
+	m := &coretest.RecordingMetrics{}
+	p.SetMetrics(m)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(m.SnapshotPollerTicks()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if errs := m.SnapshotErrors(); len(errs) != 0 {
+		t.Fatalf("ErrorObserved = %v, want none (context.Canceled dispatch error must not emit)", errs)
+	}
+}
 
 // TestPollerInflightTracksBlockingPoll asserts AddPollInflight(1) is emitted
 // before a poll starts and AddPollInflight(-1) after it finishes (via the

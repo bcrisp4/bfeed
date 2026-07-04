@@ -52,29 +52,6 @@ type Metrics struct {
 	buildInfo           *prometheus.GaugeVec
 }
 
-// allPollResults / allScrapeResults are the closed enums pre-registered at
-// construction so the *_total counter vecs never appear to "jump" from
-// absent to non-zero on first use -- rate() and increase() need the zero
-// samples present from t=0.
-var allPollResults = []core.PollResult{
-	core.PollSuccess,
-	core.PollNotModified,
-	core.PollFetchError,
-	core.PollHTTPError,
-	core.PollParseError,
-	core.PollStoreError,
-	core.PollPanic,
-}
-
-var allScrapeResults = []core.ScrapeResult{
-	core.ScrapeSuccess,
-	core.ScrapeFetchError,
-	core.ScrapeHTTPError,
-	core.ScrapeExtractError,
-	core.ScrapeRetried,
-	core.ScrapeFailed,
-}
-
 // NewMetrics builds the registry and every instrument, registers the Go and
 // process collectors, and sets bfeed_build_info{version} to 1.
 func NewMetrics(version string) *Metrics {
@@ -117,11 +94,11 @@ func NewMetrics(version string) *Metrics {
 		}, []string{"component", "reason"}),
 		pollInflight: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bfeed_poll_inflight",
-			Help: "Number of feed polls currently in flight.",
+			Help: "Number of feed polls currently occupying the background poller's worker pool (manual refresh and subscribe resolves are not included).",
 		}),
 		scrapeInflight: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bfeed_scrape_inflight",
-			Help: "Number of article scrapes currently in flight.",
+			Help: "Number of article scrapes currently occupying the background scraper's worker pool (manual/subscribe-triggered extraction is not included).",
 		}),
 		pollerLastTick: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bfeed_poller_last_tick_timestamp_seconds",
@@ -139,10 +116,14 @@ func NewMetrics(version string) *Metrics {
 
 	// Pre-initialize every enum value of the two result vecs (not the
 	// errors matrix) so rate()/increase() see the zero samples from the start.
-	for _, r := range allPollResults {
+	// core.AllPollResults/AllScrapeResults are the canonical enum lists (F9):
+	// sourcing pre-registration from the same slice core's own metrics_test.go
+	// exercises means a new PollResult/ScrapeResult value can't be added to the
+	// type without also appearing here.
+	for _, r := range core.AllPollResults {
 		m.feedPollsTotal.WithLabelValues(string(r))
 	}
-	for _, r := range allScrapeResults {
+	for _, r := range core.AllScrapeResults {
 		m.articleScrapesTotal.WithLabelValues(string(r))
 	}
 	m.buildInfo.WithLabelValues(version).Set(1)
@@ -251,36 +232,60 @@ func (m *Metrics) Handler() http.Handler {
 	return mux
 }
 
-// statsCollector is a custom prometheus.Collector wrapping a StatsCounter.
-// Collect runs each count independently: an error on one count skips just
-// that metric (no partial/garbage value) while the others are still reported.
-type statsCollector struct {
-	c StatsCounter
+// statGauge pairs a gauge's Desc with the count it reports, taking the shared
+// (ctx, now) so backlog counts (which need `now`) and plain totals (which
+// ignore it) fit the same shape.
+type statGauge struct {
+	desc  *prometheus.Desc
+	count func(ctx context.Context, now time.Time, c StatsCounter) (int64, error)
+}
 
-	users         *prometheus.Desc
-	feeds         *prometheus.Desc
-	entries       *prometheus.Desc
-	pollBacklog   *prometheus.Desc
-	scrapeBacklog *prometheus.Desc
+// statsCollector is a custom prometheus.Collector wrapping a StatsCounter.
+// Collect runs each gauge's count independently: an error on one skips just
+// that metric (no partial/garbage value) while the others are still reported.
+// Table-driven (one []statGauge ranged by both Describe and Collect) instead
+// of five parallel struct fields + five hand-written cases in each method.
+type statsCollector struct {
+	c      StatsCounter
+	gauges []statGauge
 }
 
 func newStatsCollector(c StatsCounter) *statsCollector {
 	return &statsCollector{
-		c:             c,
-		users:         prometheus.NewDesc("bfeed_users", "Total number of users.", nil, nil),
-		feeds:         prometheus.NewDesc("bfeed_feeds", "Total number of feeds across all users.", nil, nil),
-		entries:       prometheus.NewDesc("bfeed_entries", "Total number of entries across all users.", nil, nil),
-		pollBacklog:   prometheus.NewDesc("bfeed_poll_backlog", "Number of feeds currently due to be polled.", nil, nil),
-		scrapeBacklog: prometheus.NewDesc("bfeed_scrape_backlog", "Number of entries currently due to be scraped.", nil, nil),
+		c: c,
+		gauges: []statGauge{
+			{
+				prometheus.NewDesc("bfeed_users", "Total number of users.", nil, nil),
+				func(ctx context.Context, _ time.Time, c StatsCounter) (int64, error) { return c.CountUsers(ctx) },
+			},
+			{
+				prometheus.NewDesc("bfeed_feeds", "Total number of feeds across all users.", nil, nil),
+				func(ctx context.Context, _ time.Time, c StatsCounter) (int64, error) { return c.CountFeeds(ctx) },
+			},
+			{
+				prometheus.NewDesc("bfeed_entries", "Total number of entries across all users.", nil, nil),
+				func(ctx context.Context, _ time.Time, c StatsCounter) (int64, error) { return c.CountEntries(ctx) },
+			},
+			{
+				prometheus.NewDesc("bfeed_poll_backlog", "Number of feeds currently due to be polled.", nil, nil),
+				func(ctx context.Context, now time.Time, c StatsCounter) (int64, error) {
+					return c.CountDueFeeds(ctx, now)
+				},
+			},
+			{
+				prometheus.NewDesc("bfeed_scrape_backlog", "Number of entries currently due to be scraped.", nil, nil),
+				func(ctx context.Context, now time.Time, c StatsCounter) (int64, error) {
+					return c.CountDueExtractions(ctx, now)
+				},
+			},
+		},
 	}
 }
 
 func (s *statsCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- s.users
-	ch <- s.feeds
-	ch <- s.entries
-	ch <- s.pollBacklog
-	ch <- s.scrapeBacklog
+	for _, g := range s.gauges {
+		ch <- g.desc
+	}
 }
 
 func (s *statsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -288,20 +293,10 @@ func (s *statsCollector) Collect(ch chan<- prometheus.Metric) {
 	defer cancel()
 	now := time.Now()
 
-	if n, err := s.c.CountUsers(ctx); err == nil {
-		ch <- prometheus.MustNewConstMetric(s.users, prometheus.GaugeValue, float64(n))
-	}
-	if n, err := s.c.CountFeeds(ctx); err == nil {
-		ch <- prometheus.MustNewConstMetric(s.feeds, prometheus.GaugeValue, float64(n))
-	}
-	if n, err := s.c.CountEntries(ctx); err == nil {
-		ch <- prometheus.MustNewConstMetric(s.entries, prometheus.GaugeValue, float64(n))
-	}
-	if n, err := s.c.CountDueFeeds(ctx, now); err == nil {
-		ch <- prometheus.MustNewConstMetric(s.pollBacklog, prometheus.GaugeValue, float64(n))
-	}
-	if n, err := s.c.CountDueExtractions(ctx, now); err == nil {
-		ch <- prometheus.MustNewConstMetric(s.scrapeBacklog, prometheus.GaugeValue, float64(n))
+	for _, g := range s.gauges {
+		if n, err := g.count(ctx, now, s.c); err == nil {
+			ch <- prometheus.MustNewConstMetric(g.desc, prometheus.GaugeValue, float64(n))
+		}
 	}
 }
 

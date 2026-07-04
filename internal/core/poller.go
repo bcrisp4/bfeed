@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -98,7 +99,14 @@ func (p *Poller) dispatch(ctx context.Context, jobs chan<- *Feed) {
 	due, err := p.store.ListDueFeeds(ctx, now, p.cfg.BatchSize)
 	if err != nil {
 		p.log.Error("list due feeds", "error", err)
-		p.metrics.ErrorObserved(CompFeedPoll, ReasonInternal)
+		if !errors.Is(err, context.Canceled) {
+			// F3: a cancelled dispatch (shutdown) isn't a poll/dispatch failure
+			// worth counting. F8: a dispatch-level list failure is a store-layer
+			// (db) problem, not a feed_poll attempt — attributing it to
+			// CompFeedPoll would skew the feed_poll error ratio, a metric meant
+			// to track poll *attempts*, not dispatch plumbing.
+			p.metrics.ErrorObserved(CompDB, ReasonInternal)
+		}
 		return
 	}
 	for _, f := range due {

@@ -132,8 +132,25 @@ func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL 
 // ResolveAndIngest fetches and parses the feed (with HTML discovery), persists a
 // discovered/changed URL, ingests entries, and reschedules. On any failure it
 // records the error on the feed (so a pending row becomes an error row) and
-// returns it. Intended to run in a background goroutine.
-func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error) {
+// returns it. Intended to run in a background goroutine (subscribe) or called
+// synchronously (Subscribe) — both are "direct" entries, so this exported
+// wrapper owns the duration observation for the attempt (F1): unlike PollFeed's
+// HTML self-heal delegation (see resolveAndIngest below), which is not a
+// separate attempt and must not add a second duration sample on top of
+// PollFeed's own.
+func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) error {
+	start := s.clk.Now()
+	defer func() {
+		s.metrics.ObserveFeedPoll(s.clk.Now().Sub(start))
+	}()
+	return s.resolveAndIngest(ctx, f)
+}
+
+// resolveAndIngest is ResolveAndIngest's implementation, without the duration
+// observation — called directly (not through the exported wrapper) by
+// PollFeed's HTML self-heal branch, so a self-healed poll is timed exactly
+// once (by the outer PollFeed's own deferred ObserveFeedPoll), not twice.
+func (s *FeedService) resolveAndIngest(ctx context.Context, f *Feed) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = s.recordPanic(ctx, f, r)
@@ -168,8 +185,16 @@ func (s *FeedService) ResolveAndIngest(ctx context.Context, f *Feed) (err error)
 						"feed_id", int64(f.ID), "url", feedURL, "error", derr)
 					return s.recordError(ctx, f, s.clk.Now(), "already subscribed to this feed", 0, PollStoreError, ReasonInternal)
 				}
-				// Deliberate: the duplicate row is gone, so there is no feed left to
-				// report a poll outcome for. Emits nothing (not a poll attempt).
+				// F1 DECIDED: the duplicate row is gone, so there is no feed left
+				// to report a poll outcome for in the recordSuccess/recordError
+				// sense — but the resolve itself did complete (the "duplicate" was
+				// resolved by deleting it), and the caller (PollFeed's self-heal
+				// delegation, or ResolveAndIngest's own duration wrapper) still
+				// expects exactly one FeedPollDone paired with its one
+				// ObserveFeedPoll. Emit a matching success rather than leaving
+				// this attempt's duration sample uncounted, and rather than
+				// inventing a new PollResult enum value for this rare path.
+				s.metrics.FeedPollDone(PollSuccess)
 				return nil
 			}
 			// SetFeedURL failed for a reason other than a dedupe conflict — a
@@ -299,23 +324,31 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 			err = s.recordPanic(ctx, f, r)
 		}
 	}()
-	now := start
 	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: f.FeedURL, ETag: f.ETag, LastModified: f.LastModified})
 	if err != nil {
-		return s.recordError(ctx, f, now, err.Error(), 0, PollFetchError, ClassifyFetchError(err))
+		if ctxShutdownCanceled(ctx, err) {
+			// F3: the fetch failed because the poll's own ctx (shutdown, or the
+			// subscribe-time budget) was cancelled — persist the error/backoff as
+			// usual, but don't count it: a stopped worker isn't a poll failure.
+			return s.recordErrorEmit(ctx, f, start, err.Error(), 0, PollFetchError, ClassifyFetchError(err), false)
+		}
+		return s.recordError(ctx, f, start, err.Error(), 0, PollFetchError, ClassifyFetchError(err))
 	}
 	if resp.NotModified {
 		s.adoptPermanentRedirect(ctx, f, resp)
-		return s.recordSuccess(ctx, f, now, resp, nil)
-	}
-	if resp.Status == 429 {
-		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), resp.RetryAfter, PollHTTPError, ReasonRateLimited)
-	}
-	if resp.Status >= 500 {
-		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), resp.RetryAfter, PollHTTPError, ReasonHTTP5xx)
+		return s.recordSuccess(ctx, f, start, resp, nil)
 	}
 	if resp.Status != 200 {
-		return s.recordError(ctx, f, now, fmt.Sprintf("http %d", resp.Status), 0, PollHTTPError, ReasonHTTP4xx)
+		// F9: shared ladder with ScrapeEntry's status handling (classifyHTTPStatus
+		// in metrics.go). Retry-After only carries meaning for the rate-limited/5xx
+		// branches; a genuine 4xx (or the internal-bucketed leftover, e.g. a stray
+		// 201/204/300) never sets one.
+		reason := classifyHTTPStatus(resp.Status)
+		var retryAfter time.Duration
+		if reason == ReasonRateLimited || reason == ReasonHTTP5xx {
+			retryAfter = resp.RetryAfter
+		}
+		return s.recordError(ctx, f, start, fmt.Sprintf("http %d", resp.Status), retryAfter, PollHTTPError, reason)
 	}
 	s.adoptPermanentRedirect(ctx, f, resp)
 	// Resolve relative entry links / SiteURL against the post-redirect URL.
@@ -334,13 +367,17 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 		// silently repoint the subscription. A genuinely-stuck feed already carries
 		// errors (its initial resolve failed → recordError), so it still self-heals.
 		if isHTML(resp.ContentType) && f.ErrorCount > 0 {
-			// ResolveAndIngest's own recordSuccess/recordError call emits the terminal
-			// FeedPollDone for this attempt — do not emit again here.
-			return s.ResolveAndIngest(ctx, f)
+			// resolveAndIngest's own recordSuccess/recordError call (or the F1
+			// dup-delete branch's own FeedPollDone) emits the terminal
+			// FeedPollDone for this attempt — do not emit again here. Call the
+			// unexported resolveAndIngest, not the exported ResolveAndIngest: this
+			// is not a separate attempt, so it must not add a second
+			// ObserveFeedPoll on top of this function's own deferred one (F1).
+			return s.resolveAndIngest(ctx, f)
 		}
-		return s.recordError(ctx, f, now, "parse: "+err.Error(), 0, PollParseError, ReasonParse)
+		return s.recordError(ctx, f, start, "parse: "+err.Error(), 0, PollParseError, ReasonParse)
 	}
-	return s.recordSuccess(ctx, f, now, resp, pf)
+	return s.recordSuccess(ctx, f, start, resp, pf)
 }
 
 // adoptPermanentRedirect migrates a feed's stored URL when a poll followed an
@@ -502,14 +539,21 @@ func (s *FeedService) recordSuccess(ctx context.Context, f *Feed, now time.Time,
 }
 
 func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, msg string, retryAfter time.Duration, result PollResult, reason ErrorReason) error {
+	return s.recordErrorEmit(ctx, f, now, msg, retryAfter, result, reason, true)
+}
+
+// recordErrorEmit is recordError's implementation, with an emit flag: F3's
+// shutdown-cancelled fetch path still needs the error persisted (ErrorCount,
+// backoff, LastError — unchanged) so a subsequent real poll starts from
+// correct state, but must not pollute bfeed_feed_polls_total/bfeed_errors_total
+// — a stopped worker isn't a poll failure worth counting or alerting on.
+func (s *FeedService) recordErrorEmit(ctx context.Context, f *Feed, now time.Time, msg string, retryAfter time.Duration, result PollResult, reason ErrorReason, emit bool) error {
 	f.ErrorCount++
 	f.LastError = msg
 	f.CheckedAt = &now
 	f.UpdatedAt = now
 	f.NextCheckAt = PollReschedule(now, s.cfg.Reschedule, f.ErrorCount, retryAfter, s.cfg.Jitter)
 	s.log.Warn("feed poll error", "feed_id", int64(f.ID), "url", f.FeedURL, "error", msg)
-	s.metrics.FeedPollDone(result)
-	s.metrics.ErrorObserved(CompFeedPoll, reason)
 	// When the poll failed *because* ctx was cancelled/expired (the 60s subscribe
 	// budget, or shutdown), reusing it for the write would fail too and the error row
 	// would never be recorded — the pending-row-becomes-error-row UX silently never
@@ -522,7 +566,15 @@ func (s *FeedService) recordError(ctx context.Context, f *Feed, now time.Time, m
 		pctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 	}
-	return s.store.UpdateFeed(pctx, f)
+	werr := s.store.UpdateFeed(pctx, f)
+	// F10: emit after the store write (still emit even when it failed — the
+	// attempt is over either way) so a panic mid-write can't cause a re-entrant
+	// recordPanic → recordError to double-count this attempt's metrics.
+	if emit {
+		s.metrics.FeedPollDone(result)
+		s.metrics.ErrorObserved(CompFeedPoll, reason)
+	}
+	return werr
 }
 
 // recordPanic records a recovered pipeline panic as a feed error (with backoff

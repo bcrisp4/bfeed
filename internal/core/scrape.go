@@ -106,21 +106,33 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 	}()
 	resp, err := s.fetcher.Fetch(ctx, FetchRequest{URL: e.URL})
 	if err != nil {
+		if ctxShutdownCanceled(ctx, err) {
+			// F3: the fetch failed because the scrape's own ctx (shutdown) was
+			// cancelled — persist the retry/backoff state as usual, but don't
+			// count it: a stopped worker isn't a scrape failure.
+			return s.failEmit(ctx, e, "fetch: "+err.Error(), ScrapeFetchError, ClassifyFetchError(err), false)
+		}
 		return s.fail(ctx, e, "fetch: "+err.Error(), ScrapeFetchError, ClassifyFetchError(err))
 	}
-	if resp.Status != 200 || !isHTML(resp.ContentType) {
-		reason := fmt.Sprintf("status %d content-type %q", resp.Status, resp.ContentType)
-		if resp.Status == 429 {
-			// Transient host trouble (rate limit). Reschedule without burning an
-			// attempt and honour Retry-After, mirroring PollFeed's 429/5xx branch — a
-			// full-content backfill burst that trips a rate limit must not convert a
-			// whole feed's backlog to terminal extraction failures (audit B10).
-			return s.retryLater(ctx, e, reason, resp.RetryAfter, ReasonRateLimited)
+	if resp.Status != 200 {
+		// F9: shared ladder with PollFeed's status handling (classifyHTTPStatus in
+		// metrics.go) — 429/5xx retry without burning an attempt (mirrors
+		// PollFeed's 429/5xx branch: a full-content backfill burst that trips a
+		// rate limit must not convert a whole feed's backlog to terminal
+		// extraction failures, audit B10); anything else non-200 burns one.
+		reason := classifyHTTPStatus(resp.Status)
+		msg := fmt.Sprintf("status %d", resp.Status)
+		if reason == ReasonRateLimited || reason == ReasonHTTP5xx {
+			return s.retryLater(ctx, e, msg, resp.RetryAfter, reason)
 		}
-		if resp.Status >= 500 {
-			return s.retryLater(ctx, e, reason, resp.RetryAfter, ReasonHTTP5xx)
-		}
-		return s.fail(ctx, e, reason, ScrapeHTTPError, ReasonHTTP4xx)
+		return s.fail(ctx, e, msg, ScrapeHTTPError, reason)
+	}
+	if !isHTML(resp.ContentType) {
+		// F2: a 200 with a non-HTML body is a content-shape problem (e.g. the
+		// entry URL serves a PDF or an image), not an HTTP-status failure — file
+		// it under extract_error/parse, not the http_error/http_4xx bucket the
+		// combined guard used to give it.
+		return s.fail(ctx, e, fmt.Sprintf("content-type %q", resp.ContentType), ScrapeExtractError, ReasonParse)
 	}
 	// Resolve relative links against the post-redirect URL: fetching e.URL may
 	// have followed redirects (feedproxy, tracking, a moved domain), and the page
@@ -158,16 +170,32 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 // attempt cap is reached it marks the entry as terminally failed; otherwise it
 // schedules a retry with exponential backoff.
 func (s *ScrapeService) fail(ctx context.Context, e *Entry, msg string, result ScrapeResult, reason ErrorReason) error {
-	s.metrics.ScrapeDone(result)
-	s.metrics.ErrorObserved(CompArticleScrape, reason)
+	return s.failEmit(ctx, e, msg, result, reason, true)
+}
+
+// failEmit is fail's implementation, with an emit flag: F3's shutdown-cancelled
+// fetch path still needs the retry/backoff state persisted (unchanged), but
+// must not pollute bfeed_article_scrapes_total/bfeed_errors_total — a stopped
+// worker isn't a scrape failure worth counting or alerting on.
+func (s *ScrapeService) failEmit(ctx context.Context, e *Entry, msg string, result ScrapeResult, reason ErrorReason, emit bool) error {
 	attempts := e.ExtractAttempts + 1
+	var werr error
 	if attempts >= s.cfg.MaxAttempts {
 		s.log.Warn("extraction failed (terminal)", "entry_id", int64(e.ID), "url", e.URL, "reason", msg)
-		return s.store.UpdateExtractState(ctx, e.ID, ExtractFailed, attempts, nil, msg)
+		werr = s.store.UpdateExtractState(ctx, e.ID, ExtractFailed, attempts, nil, msg)
+	} else {
+		next := s.clk.Now().Add(ExtractBackoff(s.cfg, attempts, s.jitter))
+		s.log.Info("extraction retry scheduled", "entry_id", int64(e.ID), "attempt", attempts, "reason", msg)
+		werr = s.store.UpdateExtractState(ctx, e.ID, ExtractPending, attempts, &next, msg)
 	}
-	next := s.clk.Now().Add(ExtractBackoff(s.cfg, attempts, s.jitter))
-	s.log.Info("extraction retry scheduled", "entry_id", int64(e.ID), "attempt", attempts, "reason", msg)
-	return s.store.UpdateExtractState(ctx, e.ID, ExtractPending, attempts, &next, msg)
+	// F10: emit after the store write (still emit even when it failed — the
+	// attempt is over either way) so a panic mid-write can't cause a re-entrant
+	// call to double-count this attempt's metrics.
+	if emit {
+		s.metrics.ScrapeDone(result)
+		s.metrics.ErrorObserved(CompArticleScrape, reason)
+	}
+	return werr
 }
 
 // retryLater reschedules a transient failure (429/5xx) WITHOUT incrementing the
@@ -178,11 +206,13 @@ func (s *ScrapeService) fail(ctx context.Context, e *Entry, msg string, result S
 // Always emits ScrapeDone(ScrapeRetried) + ErrorObserved(reason) — exactly once
 // per call, mirroring fail().
 func (s *ScrapeService) retryLater(ctx context.Context, e *Entry, msg string, retryAfter time.Duration, reason ErrorReason) error {
-	s.metrics.ScrapeDone(ScrapeRetried)
-	s.metrics.ErrorObserved(CompArticleScrape, reason)
 	next := s.clk.Now().Add(min(max(s.cfg.BaseBackoff, retryAfter), s.cfg.MaxBackoff))
 	s.log.Info("extraction deferred (transient)", "entry_id", int64(e.ID), "reason", msg, "retry_after", retryAfter)
-	return s.store.UpdateExtractState(ctx, e.ID, ExtractPending, e.ExtractAttempts, &next, msg)
+	werr := s.store.UpdateExtractState(ctx, e.ID, ExtractPending, e.ExtractAttempts, &next, msg)
+	// F10: emit after the store write, mirroring fail()/failEmit.
+	s.metrics.ScrapeDone(ScrapeRetried)
+	s.metrics.ErrorObserved(CompArticleScrape, reason)
+	return werr
 }
 
 // ExtractBackoff returns BaseBackoff*2^(attempt-1), capped at MaxBackoff, plus

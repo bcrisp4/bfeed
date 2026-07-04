@@ -48,7 +48,10 @@ func TestScraperTickedEmittedEvenOnStoreError(t *testing.T) {
 	}
 
 	errs := m.SnapshotErrors()
-	want := coretest.RecordedError{C: core.CompArticleScrape, R: core.ReasonInternal}
+	// F8: a dispatch-level list failure is attributed to CompDB (a store-layer
+	// problem), not CompArticleScrape — it isn't a scrape attempt, so it must
+	// not skew that metric's error ratio.
+	want := coretest.RecordedError{C: core.CompDB, R: core.ReasonInternal}
 	if len(errs) != 1 || errs[0] != want {
 		t.Fatalf("ErrorObserved = %v, want exactly [%v]", errs, want)
 	}
@@ -59,6 +62,38 @@ func TestScraperTickedEmittedEvenOnStoreError(t *testing.T) {
 type noopScraper struct{}
 
 func (noopScraper) ScrapeEntry(context.Context, *core.Entry) error { return nil }
+
+// canceledPendingLister always fails ListPendingExtractions with
+// context.Canceled, simulating a dispatch that observes shutdown mid-flight.
+type canceledPendingLister struct{}
+
+func (canceledPendingLister) ListPendingExtractions(context.Context, time.Time, int) ([]*core.Entry, error) {
+	return nil, context.Canceled
+}
+
+// F3: a dispatch-level failure caused by context.Canceled (shutdown) must not
+// be counted — it isn't a scrape/dispatch failure worth alerting on.
+func TestScraperDispatchSkipsErrorObservedOnContextCanceled(t *testing.T) {
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	sc := core.NewScraper(canceledPendingLister{}, noopScraper{}, clk, coretest.DiscardLogger(), core.ScraperConfig{Tick: time.Hour, Batch: 10, Workers: 1})
+	m := &coretest.RecordingMetrics{}
+	sc.SetMetrics(m)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { sc.Run(ctx); close(done) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(m.SnapshotScraperTicks()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if errs := m.SnapshotErrors(); len(errs) != 0 {
+		t.Fatalf("ErrorObserved = %v, want none (context.Canceled dispatch error must not emit)", errs)
+	}
+}
 
 // TestScraperInflightTracksBlockingScrape asserts AddScrapeInflight(1) is
 // emitted before a scrape starts and AddScrapeInflight(-1) after it finishes

@@ -80,5 +80,3 @@ func TestRecordingMetricsInflightAccumulatesDeltas(t *testing.T) {
 		t.Fatalf("scrape inflight = %d, want 0", got)
 	}
 }
-
-var _ core.Metrics = (*coretest.RecordingMetrics)(nil)

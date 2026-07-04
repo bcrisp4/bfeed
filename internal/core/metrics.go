@@ -55,6 +55,67 @@ const (
 	ReasonInternal    ErrorReason = "internal"
 )
 
+// AllPollResults enumerates every PollResult value. It is the single source of
+// truth for the enum's members: observability's pre-registration (so
+// bfeed_feed_polls_total's zero samples exist for every result from t=0) and
+// its own lint test range over this slice rather than duplicating the list,
+// so a new PollResult value can't silently be added to the type without also
+// being wired into pre-registration (F9).
+var AllPollResults = []PollResult{
+	PollSuccess,
+	PollNotModified,
+	PollFetchError,
+	PollHTTPError,
+	PollParseError,
+	PollStoreError,
+	PollPanic,
+}
+
+// AllScrapeResults enumerates every ScrapeResult value. See AllPollResults.
+var AllScrapeResults = []ScrapeResult{
+	ScrapeSuccess,
+	ScrapeFetchError,
+	ScrapeHTTPError,
+	ScrapeExtractError,
+	ScrapeRetried,
+	ScrapeFailed,
+}
+
+// classifyHTTPStatus buckets a non-200 HTTP response status into the closed
+// reason enum. Shared by PollFeed's and ScrapeEntry's status ladders (F9) so
+// the two classifications can't drift apart. 429 takes precedence over the
+// generic 4xx bucket (a rate-limited response is a distinct, actionable
+// reason). A status outside both the 4xx and 5xx ranges (e.g. a stray
+// 201/204/206/300, or a Location-less 301) is not an HTTP client/server
+// failure in the usual sense, so it buckets to internal rather than the
+// misleading http_4xx (F2).
+func classifyHTTPStatus(status int) ErrorReason {
+	switch {
+	case status == 429:
+		return ReasonRateLimited
+	case status >= 500:
+		return ReasonHTTP5xx
+	case status >= 400:
+		return ReasonHTTP4xx
+	default:
+		return ReasonInternal
+	}
+}
+
+// ctxShutdownCanceled reports whether err is context.Canceled AND ctx itself
+// (the poll/scrape's own context) has already been cancelled — i.e. this
+// fetch failure is a symptom of the process shutting down (or the request
+// budget being torn down), not a genuine poll/scrape failure worth counting
+// (F3). The ctx.Err() check matters because a fetch can also return
+// context.Canceled from an unrelated *inner* cancellation while the caller's
+// own ctx is still live; that case must still emit normally, so
+// ClassifyFetchError's existing "internal" bucket for non-timeout cancels is
+// left untouched — this is a metrics-emission gate only, not a
+// reclassification.
+func ctxShutdownCanceled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, context.Canceled)
+}
+
 // Metrics is the observability port core services emit into. Implemented by
 // the Prometheus adapter in internal/observability; NopMetrics is the default
 // so services never nil-check. Label values are closed enums only — never
@@ -94,10 +155,6 @@ var _ Metrics = NopMetrics{}
 // Timeout() — classifying it as a timeout rather than a DNS error is an
 // acceptable, deterministic choice.
 func ClassifyFetchError(err error) ErrorReason {
-	if err == nil {
-		return ReasonInternal
-	}
-
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ReasonTimeout
 	}
