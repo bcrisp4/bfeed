@@ -38,12 +38,115 @@ func TestStaticAssetsKeepTheirCacheHeader(t *testing.T) {
 
 func TestLayoutHasBfcacheReloadScript(t *testing.T) {
 	h, _ := newWeb(t)
+	// The bfcache reload guard is externalised to /static/app.js (so the page
+	// CSP can use script-src 'self'): the layout must reference it, and the
+	// asset must carry the pageshow/persisted reload.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	body := rec.Body.String()
-	if !strings.Contains(body, "pageshow") || !strings.Contains(body, "persisted") {
-		t.Fatalf("layout missing pageshow/persisted bfcache reload guard:\n%s", body)
+	if body := rec.Body.String(); !strings.Contains(body, "app.js") {
+		t.Fatalf("layout does not reference app.js:\n%s", body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	js := rec.Body.String()
+	if !strings.Contains(js, "pageshow") || !strings.Contains(js, "persisted") {
+		t.Fatalf("app.js missing pageshow/persisted bfcache reload guard:\n%s", js)
+	}
+}
+
+func TestSecurityHeadersOnDynamicHTML(t *testing.T) {
+	h, _ := newWeb(t)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	wants := map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "no-referrer",
+	}
+	for k, want := range wants {
+		if got := rec.Header().Get(k); got != want {
+			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, frag := range []string{"default-src 'self'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'"} {
+		if !strings.Contains(csp, frag) {
+			t.Errorf("CSP missing %q: %s", frag, csp)
+		}
+	}
+}
+
+func TestHostGuardRejectsForeignHost(t *testing.T) {
+	h, _ := newWebHost(t, "bfeed.example:8080")
+
+	// Matching host passes; case-insensitively (hostnames are case-insensitive).
+	for _, host := range []string{"bfeed.example:8080", "BFEED.example:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Host %q: status %d, want 200", host, rec.Code)
+		}
+	}
+
+	// Foreign host (DNS-rebinding attacker) is rejected — and so is a spoofed
+	// loopback Host on a non-healthz endpoint (same-machine attacker).
+	for _, host := range []string{"evil.example", "127.0.0.1:9999", "localhost:8080"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMisdirectedRequest {
+			t.Fatalf("foreign Host %q: status %d, want 421", host, rec.Code)
+		}
+	}
+
+	// The /healthz path is exempt so the container HEALTHCHECK survives.
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Host = "127.0.0.1:9999"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/healthz via loopback: status %d, want 200", rec.Code)
+	}
+}
+
+func TestHostGuardToleratesDefaultPort(t *testing.T) {
+	// BaseURL host without an explicit port; a client that includes the default
+	// port (or omits it) must still be accepted.
+	h, _ := newWebHost(t, "bfeed.example")
+	for _, host := range []string{"bfeed.example", "bfeed.example:80", "bfeed.example:443"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("Host %q vs expected bfeed.example: status %d, want 200", host, rec.Code)
+		}
+	}
+	// A non-default port is still a distinct authority → rejected.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "bfeed.example:8443"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Errorf("Host with non-default port: status %d, want 421", rec.Code)
+	}
+}
+
+func TestHostGuardDisabledWhenEmpty(t *testing.T) {
+	h, _ := newWeb(t) // expectedHost ""
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "anything.example"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guard should be disabled: status %d, want 200", rec.Code)
 	}
 }
 

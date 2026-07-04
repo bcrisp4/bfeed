@@ -25,7 +25,7 @@ func newWebOver(t *testing.T, store core.Store) http.Handler {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil, 20)
+	return web.New(fs, es, cs, ss, log, nil, nil, 20, "")
 }
 
 var errDB = errors.New("db unavailable")

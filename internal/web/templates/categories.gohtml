@@ -10,7 +10,7 @@
 <div class="entry" id="category-{{.ID}}">
   <h2><a href="/categories/{{.ID}}">{{.Title}}</a> <span class="meta">{{.Unread}} unread</span></h2>
   <div class="actions">
-    <form method="post" action="/categories/{{.ID}}/rename" style="display:inline">
+    <form method="post" action="/categories/{{.ID}}/rename" class="inline-form">
       <input type="text" name="title" value="{{.Title}}" required>
       <button type="submit">Rename</button>
     </form>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -101,7 +102,14 @@ func runServe() int {
 		imgRewrite = signer.ProxyURL
 	}
 
-	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit)
+	// The app's own origin host, used to reject cross-origin (DNS-rebinding)
+	// requests. config.Load has already validated BaseURL is an absolute http(s)
+	// URL with a host, so u.Host is non-empty here.
+	var expectedHost string
+	if u, err := url.Parse(cfg.BaseURL); err == nil {
+		expectedHost = u.Host
+	}
+	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           webHandler,

@@ -52,6 +52,15 @@ section is renamed to the new version and becomes the GitHub Release notes.
 - Feeds advertised only as a JSON Feed (the standard `application/feed+json` type) are now found by address auto-discovery instead of failing with "no feed found at URL".
 - Feed items that arrive without a unique identifier no longer risk collapsing into a single entry (losing the others) when several share the same link and title; distinct items are now kept apart.
 
+### Security
+
+- bfeed now rejects requests whose `Host` header doesn't match its configured address (the `/healthz` endpoint is exempt so container health checks keep working), blocking DNS-rebinding attacks that could let a malicious website you visit read your feeds and drive bfeed from your browser.
+- App pages now send a strict `Content-Security-Policy` (plus `X-Frame-Options`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`), so a flaw in HTML sanitising can no longer be escalated to running scripts on the bfeed origin, and the page can't be framed by another site.
+- Links inside feed articles now carry `rel="noreferrer"`, so clicking one no longer leaks your private bfeed address to the destination site.
+- A malicious or misconfigured feed server can no longer park a feed arbitrarily far in the future via an oversized `Retry-After`; the delay is now capped at bfeed's maximum backoff.
+- Oversized responses are now rejected outright instead of being silently truncated and treated as complete, so a cut-off article or a partially downloaded image is never persisted or served as if whole.
+- The feed fetcher's private/loopback address blocklist (SSRF guard) now also covers several additional non-public IP ranges, and a stalled server can no longer hang a fetch forever now that a default request timeout always applies.
+
 ## [0.7.0] - 2026-06-25
 
 ### Added

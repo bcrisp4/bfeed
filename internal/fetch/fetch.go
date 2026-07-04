@@ -32,7 +32,17 @@ type Client struct {
 	cfg  Config
 	http *http.Client
 	mu   sync.Mutex
-	sems map[string]chan struct{}
+	sems map[string]*hostSem
+}
+
+// hostSem is a per-host concurrency limiter plus a reference count. The count
+// lets us evict the map entry once no fetch is holding or waiting on it, so the
+// map bounds to the set of currently-active hosts rather than every host ever
+// fetched — the keys are attacker-influenced (entry/img URLs from feed content),
+// so an unbounded map is externally drivable memory growth.
+type hostSem struct {
+	ch   chan struct{}
+	refs int
 }
 
 func New(cfg Config) *Client {
@@ -41,6 +51,12 @@ func New(cfg Config) *Client {
 	}
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = 10 << 20
+	}
+	if cfg.Timeout <= 0 {
+		// A zero Config.Timeout yields http.Client{Timeout: 0} (no deadline), so a
+		// stalled server could pin a poller/scraper worker slot and its per-host
+		// token forever. Default it, matching the other field back-fills above.
+		cfg.Timeout = 30 * time.Second
 	}
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	tr := &http.Transport{
@@ -67,7 +83,7 @@ func New(cfg Config) *Client {
 	return &Client{
 		cfg:  cfg,
 		http: &http.Client{Timeout: cfg.Timeout, CheckRedirect: checkRedirect(5), Transport: tr},
-		sems: make(map[string]chan struct{}),
+		sems: make(map[string]*hostSem),
 	}
 }
 
@@ -83,15 +99,39 @@ type redirectKey struct{}
 
 var _ core.Fetcher = (*Client)(nil)
 
-func (c *Client) sem(host string) chan struct{} {
+// acquire blocks until a per-host concurrency token for key is available (or ctx
+// is done), then returns a release func. The map entry is reference-counted: it
+// is created on first waiter and deleted once the last holder releases, so
+// c.sems never accumulates entries for hosts with no in-flight fetch.
+func (c *Client) acquire(ctx context.Context, key string) (func(), error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	s, ok := c.sems[host]
+	s, ok := c.sems[key]
 	if !ok {
-		s = make(chan struct{}, c.cfg.HostConcurrency)
-		c.sems[host] = s
+		s = &hostSem{ch: make(chan struct{}, c.cfg.HostConcurrency)}
+		c.sems[key] = s
 	}
-	return s
+	s.refs++
+	c.mu.Unlock()
+
+	select {
+	case s.ch <- struct{}{}:
+		return func() { <-s.ch; c.unref(key, s) }, nil
+	case <-ctx.Done():
+		// Never took a token; undo the ref without draining the channel.
+		c.unref(key, s)
+		return nil, ctx.Err()
+	}
+}
+
+// unref drops a reference to the per-host sem and evicts the map entry once no
+// fetch holds or waits on it. Callers that took a token must drain it first.
+func (c *Client) unref(key string, s *hostSem) {
+	c.mu.Lock()
+	s.refs--
+	if s.refs == 0 {
+		delete(c.sems, key)
+	}
+	c.mu.Unlock()
 }
 
 func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchResponse, error) {
@@ -105,13 +145,11 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 	// swapping tokens mid-redirect in CheckRedirect would add deadlock surface for
 	// little gain. Normalizing the key (hostKey) at least stops case/default-port
 	// variants of the SAME host getting independent budgets.
-	sem := c.sem(hostKey(u))
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	release, err := c.acquire(ctx, hostKey(u))
+	if err != nil {
+		return nil, err
 	}
+	defer release()
 
 	rt := &redirectTracker{permanent: true}
 	ctx = context.WithValue(ctx, redirectKey{}, rt)
@@ -147,9 +185,16 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 		return out, nil
 	}
 	if resp.StatusCode == http.StatusOK {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.MaxBytes))
+		// Read one byte past the cap so we can tell "exactly MaxBytes" from
+		// "larger than MaxBytes": a body over the cap is rejected rather than
+		// silently truncated and treated as complete (which would persist a
+		// cut-off article / serve a broken image with a year-long cache).
+		body, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.MaxBytes+1))
 		if err != nil {
 			return nil, fmt.Errorf("read body: %w", err)
+		}
+		if int64(len(body)) > c.cfg.MaxBytes {
+			return nil, fmt.Errorf("response body exceeds %d bytes", c.cfg.MaxBytes)
 		}
 		out.Body = body
 		return out, nil
@@ -159,16 +204,29 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 	return out, nil
 }
 
+// maxRetryAfter caps a server-supplied Retry-After. Feed servers are untrusted,
+// so an uncapped value could park a feed far in the future (bypassing backoff)
+// and, for large numeric values, overflow the int64 nanosecond multiply into a
+// garbage duration. Callers additionally clamp to their own MaxBackoff.
+const maxRetryAfter = 24 * time.Hour
+
 func parseRetryAfter(v string) time.Duration {
 	if v == "" {
 		return 0
 	}
 	if secs, err := strconv.Atoi(v); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		// Cap before multiplying so an absurd value can't overflow the duration.
+		if secs > int(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		if d := time.Until(t); d > 0 {
-			return d
+			return min(d, maxRetryAfter)
 		}
 	}
 	return 0
@@ -214,15 +272,24 @@ func isDefaultPort(scheme, port string) bool {
 
 // blockedPrefixes are non-public ranges netip's Is* predicates miss: CGNAT
 // (RFC 6598, used by Tailscale); 0.0.0.0/8 "this network" (RFC 1122, which can
-// route to the local host); reserved Class E (RFC 1112); and the 6to4 (RFC 3056)
+// route to the local host); reserved Class E (RFC 1112); the 6to4 (RFC 3056)
 // and NAT64 (RFC 6052) prefixes, which embed an IPv4 address and so can encode a
-// private/loopback target behind an IPv6 address on a host with such a gateway.
+// private/loopback target behind an IPv6 address on a host with such a gateway;
+// benchmarking (RFC 2544, deployed as internal space on some networks); IETF
+// protocol assignments incl. DS-Lite AFTR (RFC 7335); the deprecated 6to4 relay
+// anycast; deprecated IPv6 site-local (still routable on legacy internal nets);
+// and Teredo (RFC 4380), which like 6to4/NAT64 embeds an IPv4 address.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
 	netip.MustParsePrefix("2002::/16"),
 	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("2001::/32"),
 }
 
 // isBlockedIP reports whether ip is not safely public (SSRF target).
