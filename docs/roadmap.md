@@ -31,8 +31,9 @@
   per-feed interval override (#76), poll-time image prefetch (#77), read/write connection
   split (#78).
 
-Every item stays **additive** — a new table/column/package/route/env var — so shipping one
-never rewrites existing code or data.
+Feature work stays **additive** — a new table/column/package/route/env var — so shipping one
+never rewrites existing data or invalidates existing behaviour. `refactor` issues are the
+exception: they restructure code, but must be behaviour- and data-compatible.
 
 ## Dropped (deliberate)
 
