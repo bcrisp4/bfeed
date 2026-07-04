@@ -60,7 +60,7 @@ type countingCloser struct {
 func (c *countingCloser) Read(p []byte) (int, error) { return c.r.Read(p) }
 func (c *countingCloser) Close() error {
 	if c.closes != nil {
-		*c.closes++
+		(*c.closes)++
 	}
 	return nil
 }
