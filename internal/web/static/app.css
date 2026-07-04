@@ -152,16 +152,16 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
    See docs/superpowers/specs/2026-07-04-full-bleed-reader-design.md. */
 .reader>*{max-inline-size:var(--measure);margin-inline:auto}
 .reader .article figure{margin-inline:0}
-.reader .article :is(figure:has(img),p:has(> img:only-child),div:has(> img:only-child)){
+/* p:has(> img:only-child) deliberately NOT a slot: :only-child ignores text
+   nodes, so a text+img paragraph would bleed its text past the measure.
+   Tables keep block-scroll-at-measure: display:flex/grid on a table splits
+   thead/tbody into separate anonymous table boxes and breaks column
+   alignment (validated by screenshot round 1). */
+.reader .article :is(figure:has(img),div:has(> img:only-child)){
   margin-inline:min(0px,max(50% - var(--measure-wide)/2,50% - 50vw));
   text-align:center}
 .reader .article img{inline-size:auto;max-inline-size:100%;block-size:auto}
 .reader .article figcaption{max-inline-size:var(--measure);margin-inline:auto}
-.reader .article table{
-  margin-inline:min(0px,max(50% - var(--measure-wide)/2,50% - 50vw));
-  display:flex;flex-direction:column;
-  align-items:center;align-items:safe center;
-  overflow-x:auto}
 .cat-heading{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 
 /* settings */
