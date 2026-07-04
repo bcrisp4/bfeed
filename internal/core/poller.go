@@ -21,11 +21,12 @@ type dueLister interface {
 }
 
 type Poller struct {
-	store dueLister
-	poll  FeedPoller
-	clk   Clock
-	log   *slog.Logger
-	cfg   PollerConfig
+	store   dueLister
+	poll    FeedPoller
+	clk     Clock
+	log     *slog.Logger
+	cfg     PollerConfig
+	metrics Metrics
 }
 
 func NewPoller(store dueLister, poll FeedPoller, clk Clock, log *slog.Logger, cfg PollerConfig) *Poller {
@@ -38,7 +39,17 @@ func NewPoller(store dueLister, poll FeedPoller, clk Clock, log *slog.Logger, cf
 	if cfg.Tick <= 0 {
 		cfg.Tick = time.Minute
 	}
-	return &Poller{store: store, poll: poll, clk: clk, log: log, cfg: cfg}
+	return &Poller{store: store, poll: poll, clk: clk, log: log, cfg: cfg, metrics: NopMetrics{}}
+}
+
+// SetMetrics wires the observability port after construction (nil is ignored,
+// leaving the NopMetrics default from NewPoller — the Poller never nil-checks
+// its injected Metrics port).
+func (p *Poller) SetMetrics(m Metrics) {
+	if m == nil {
+		return
+	}
+	p.metrics = m
 }
 
 // Run blocks until ctx is cancelled, dispatching due feeds each tick.
@@ -74,15 +85,20 @@ func (p *Poller) Run(ctx context.Context) {
 // to a logged error rather than killing the worker goroutine (and the process).
 func (p *Poller) pollOne(ctx context.Context, f *Feed) {
 	defer RecoverGuard(p.log, "poll worker", "feed_id", int64(f.ID))
+	p.metrics.AddPollInflight(1)
+	defer p.metrics.AddPollInflight(-1)
 	if err := p.poll.PollFeed(ctx, f); err != nil {
 		p.log.Error("poll feed", "feed_id", int64(f.ID), "error", err)
 	}
 }
 
 func (p *Poller) dispatch(ctx context.Context, jobs chan<- *Feed) {
-	due, err := p.store.ListDueFeeds(ctx, p.clk.Now(), p.cfg.BatchSize)
+	now := p.clk.Now()
+	p.metrics.PollerTicked(now)
+	due, err := p.store.ListDueFeeds(ctx, now, p.cfg.BatchSize)
 	if err != nil {
 		p.log.Error("list due feeds", "error", err)
+		p.metrics.ErrorObserved(CompFeedPoll, ReasonInternal)
 		return
 	}
 	for _, f := range due {
