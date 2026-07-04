@@ -310,7 +310,7 @@ func logging(log *slog.Logger, next http.Handler) http.Handler {
 // images may be remote when the image proxy is disabled (over http on a
 // plain-http tailnet deploy or https), hence img-src http: https: data:;
 // everything else is self-only. The one inline script is externalised to
-// /static/app.js so no 'unsafe-inline' is needed; htmx 2.0.4 needs no eval and
+// /static/app.js so no 'unsafe-inline' is needed; htmx 2.x needs no eval and
 // its inline indicator <style> is disabled via the htmx-config meta in layout.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' http: https: data:; " +

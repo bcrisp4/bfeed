@@ -20,6 +20,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Changed
 
+- Updated the vendored htmx library to 2.0.10 (from 2.0.4), picking up upstream robustness fixes. The interface works the same; note that htmx 2.0.8+ raises the minimum supported browsers to roughly Chrome 124+, Firefox 128+, and Safari 17.4+ (all 2024 releases).
 - Configuration now fails fast at startup when an environment variable is set to a value it can't parse (for example a duration written without a unit), naming the offending variable, instead of silently ignoring it and falling back to the built-in default.
 - List and search pages are faster and lighter on large libraries: entry lists now read only a short preview of each article instead of loading whole full-text articles for every row, the unread and per-feed counts in list headers and self-refreshing feed rows are served by targeted queries instead of a full scan of every entry, and the image proxy streams images through to the browser instead of buffering each one whole in memory.
 - Polling a feed now skips re-processing entries that haven't changed since the last poll, so feeds that don't support conditional requests are cheaper to keep up to date.

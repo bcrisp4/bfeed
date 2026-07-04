@@ -539,7 +539,7 @@ func (h *Handler) editFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderEditError re-renders the edit panel with an inline error message. It
-// returns 200 (like renderSubscribeError): htmx 2.0.4 does not swap 4xx/5xx by
+// returns 200 (like renderSubscribeError): htmx 2.x does not swap 4xx/5xx by
 // default, so a non-2xx status would make the browser silently discard the
 // error fragment and the Save button would appear to do nothing.
 func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id core.ID, cause error) {
