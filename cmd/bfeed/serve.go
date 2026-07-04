@@ -109,7 +109,7 @@ func runServe() int {
 	if u, err := url.Parse(cfg.BaseURL); err == nil {
 		expectedHost = u.Host
 	}
-	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost)
+	webHandler := web.New(feedSvc, entrySvc, catSvc, searchSvc, log, imgHandler, imgRewrite, cfg.FeedErrorLimit, expectedHost, nil, nil)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           webHandler,

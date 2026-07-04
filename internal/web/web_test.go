@@ -33,7 +33,7 @@ func newWebHost(t *testing.T, expectedHost string) (http.Handler, *coretest.MemS
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil, 20, expectedHost), store
+	return web.New(fs, es, cs, ss, log, nil, nil, 20, expectedHost, nil, nil), store
 }
 
 func TestUnreadListRenders(t *testing.T) {
@@ -535,7 +535,7 @@ func TestSubscribeFullContentCheckboxAndToggle(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	srv := web.New(fs, es, cs, ss, log, nil, nil, 20, "")
+	srv := web.New(fs, es, cs, ss, log, nil, nil, 20, "", nil, nil)
 
 	// Subscribe with full_content checkbox checked.
 	form := url.Values{"url": {"https://x.example/feed"}, "full_content": {"on"}}
@@ -729,7 +729,7 @@ func TestReaderRewritesImagesWhenProxyOn(t *testing.T) {
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
 	rewrite := func(u string) string { return "/img?u=" + u }
-	h := web.New(fs, es, cs, ss, log, nil, rewrite, 20, "")
+	h := web.New(fs, es, cs, ss, log, nil, rewrite, 20, "", nil, nil)
 
 	ctx := context.Background()
 	fid, _ := store.CreateFeed(ctx, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://b.test/f", Title: "Blog", NextCheckAt: time.Unix(1, 0), CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)})
@@ -769,7 +769,7 @@ func TestFeedsPageShowsStalledBadge(t *testing.T) {
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	h := web.New(fs, es, cs, ss, log, nil, nil, 3, "") // error limit = 3
+	h := web.New(fs, es, cs, ss, log, nil, nil, 3, "", nil, nil) // error limit = 3
 
 	ctx := context.Background()
 	now := time.Unix(1, 0)

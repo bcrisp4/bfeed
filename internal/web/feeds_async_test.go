@@ -24,7 +24,7 @@ func newTestHandler(t *testing.T, fetcher core.Fetcher) (http.Handler, *coretest
 	es := core.NewEntryService(store, log)
 	cs := core.NewCategoryService(store, log)
 	ss := core.NewSearchService(store, log)
-	return web.New(fs, es, cs, ss, log, nil, nil, 20, ""), store
+	return web.New(fs, es, cs, ss, log, nil, nil, 20, "", nil, nil), store
 }
 
 // seedFeed inserts a feed that has been checked at least once (CheckedAt set),
