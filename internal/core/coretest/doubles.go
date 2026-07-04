@@ -87,7 +87,7 @@ type StubExtractor struct {
 	Err  error
 }
 
-func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte) (string, error) {
+func (e StubExtractor) Extract(_ context.Context, _ string, _ []byte, _ string) (string, error) {
 	return e.HTML, e.Err
 }
 

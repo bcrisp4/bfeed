@@ -37,12 +37,14 @@ func TestScrapeEntrySuccessWritesContentAndMarksDone(t *testing.T) {
 // the test can assert the post-redirect FinalURL (not the pre-redirect entry URL)
 // is used to absolutize relative links.
 type recordingExtractor struct {
-	html    string
-	pageURL string
+	html        string
+	pageURL     string
+	contentType string
 }
 
-func (e *recordingExtractor) Extract(_ context.Context, pageURL string, _ []byte) (string, error) {
+func (e *recordingExtractor) Extract(_ context.Context, pageURL string, _ []byte, contentType string) (string, error) {
 	e.pageURL = pageURL
+	e.contentType = contentType
 	return e.html, nil
 }
 
@@ -71,6 +73,9 @@ func TestScrapeEntryUsesFinalURLAsBase(t *testing.T) {
 	}
 	if ext.pageURL != finalURL {
 		t.Errorf("Extract base = %q, want final URL %q", ext.pageURL, finalURL)
+	}
+	if ext.contentType != "text/html" {
+		t.Errorf("Extract contentType = %q, want %q", ext.contentType, "text/html")
 	}
 	if san.baseURL != finalURL {
 		t.Errorf("Sanitize base = %q, want final URL %q", san.baseURL, finalURL)

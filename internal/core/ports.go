@@ -67,8 +67,10 @@ type Sanitizer interface {
 }
 
 // Extractor pulls main-article HTML from a fetched page (Readability-style).
+// contentType is the HTTP Content-Type of the fetched page (may be empty or
+// lack a charset); the adapter uses it to decode the page to UTF-8.
 type Extractor interface {
-	Extract(ctx context.Context, pageURL string, page []byte) (html string, err error)
+	Extract(ctx context.Context, pageURL string, page []byte, contentType string) (html string, err error)
 }
 
 type FeedStore interface {
