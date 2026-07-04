@@ -99,20 +99,22 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 // its encoding, encoding/xml would re-invoke gofeed's CharsetReader on the
 // now-UTF-8 stream and double-transcode it into mojibake.
 //
-// The windows-1252 exception mirrors the scrape path (extract.decodeReader,
-// #96/#99): the sniff sees only the first 1024 bytes and its UTF-8 autodetect
-// needs a high byte in that window, so an ASCII-heavy prefix yields the
-// uncertain windows-1252 fallback and would mojibake multibyte runes further
-// down. When that uncertain answer disagrees with a full body of valid UTF-8,
-// keep UTF-8. Genuine cp1252 high bytes (0x80–0x9F punctuation) are bare UTF-8
-// continuation bytes, so utf8.Valid rejects real cp1252 text and its fallback
-// transcode still happens; only mislabeled UTF-8 is overridden.
+// Uncertain answers (no BOM, no header charset) lose to a full body of valid
+// UTF-8: XML with no in-band declaration is UTF-8 by spec, and the sniff's
+// guesses — it examines only the first 1024 bytes, so an ASCII-only prefix
+// yields its windows-1252 fallback, and a stray `<meta charset=…>` token in
+// feed content can name anything — would mojibake multibyte runes further
+// down (#99, the feed-path twin of #96). Genuine legacy-encoded text fails
+// utf8.Valid (cp1252 &co high bytes are bare UTF-8 continuation bytes), so
+// the sniffed fallback still transcodes it. Deliberately broader than
+// extract.decodeReader's windows-1252-only exception: HTML honors <meta>
+// declarations, XML does not — don't "align" the two guards.
 func decodeReader(data []byte, contentType string) io.Reader {
 	if hasXMLEncodingDecl(data) {
 		return bytes.NewReader(data)
 	}
-	enc, name, certain := charset.DetermineEncoding(data, contentType)
-	if certain || name != "windows-1252" || !utf8.Valid(data) {
+	enc, _, certain := charset.DetermineEncoding(data, contentType)
+	if certain || !utf8.Valid(data) {
 		return transform.NewReader(bytes.NewReader(data), enc.NewDecoder())
 	}
 	return bytes.NewReader(data)

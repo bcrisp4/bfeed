@@ -129,7 +129,35 @@ func TestParseUndeclaredValidUTF8StaysUTF8(t *testing.T) {
 	}
 	sum := pf.Entries[0].Summary
 	if !strings.Contains(sum, "It’s past the window — with multibyte punctuation.") {
-		t.Fatalf("multibyte text mojibaked; summary tail = %q", sum[len(sum)-80:])
+		tail := sum
+		if len(tail) > 80 {
+			tail = tail[len(tail)-80:]
+		}
+		t.Fatalf("multibyte text mojibaked; summary tail = %q", tail)
+	}
+}
+
+// #99: the uncertain-sniff override must not key on which encoding the sniff
+// guessed. A stray <meta charset=…> token inside feed content makes the sniff
+// return that label (uncertain) instead of its windows-1252 fallback; a
+// valid-UTF-8 feed must still stay UTF-8 — XML without an in-band declaration
+// is UTF-8 by spec regardless of the sniff's guess.
+func TestParseUndeclaredValidUTF8IgnoresStrayMetaCharset(t *testing.T) {
+	pad := strings.Repeat("all ascii filler text pushing the interesting bytes past the sniff window. ", 20)
+	body := []byte(`<rss version="2.0"><channel><title>t</title>` +
+		`<meta charset="windows-1251"/>` +
+		`<item><title>i</title><description>` +
+		pad + `It’s past the window — with multibyte punctuation.` +
+		`</description></item></channel></rss>`)
+	pf, err := New().Parse(body, "application/rss+xml", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pf.Entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(pf.Entries))
+	}
+	if !strings.Contains(pf.Entries[0].Summary, "It’s past the window — with multibyte punctuation.") {
+		t.Fatalf("stray meta charset label transcoded a valid-UTF-8 feed")
 	}
 }
 
