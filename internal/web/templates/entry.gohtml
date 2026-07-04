@@ -1,4 +1,5 @@
 {{define "content"}}
+<div class="reader">
 <p class="meta"><a href="/feeds/{{.Entry.FeedID}}">{{.Entry.FeedTitle}}</a> · <time datetime="{{.Entry.PublishedAttr}}" title="{{.Entry.PublishedFull}}">{{.Entry.Published}}</time>{{if .ReadingTime}} · {{.ReadingTime}}{{end}}</p>
 <h1>{{.Entry.Title}}</h1>
 {{if .Entry.Author}}<p class="meta">by {{.Entry.Author}}</p>{{end}}
@@ -14,6 +15,7 @@
 </div>
 {{if .Entry.ExtractFailed}}<p class="extract-note">Full-text extraction failed{{if .Entry.ExtractError}} ({{.Entry.ExtractError}}){{end}} — showing the feed's own content.</p>{{end}}
 <article class="article">{{.Entry.Content}}</article>
+</div>
 {{end}}
 
 {{define "readerstar"}}
