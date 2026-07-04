@@ -316,8 +316,14 @@ func (s *FeedService) Refresh(ctx context.Context, userID, feedID ID) error {
 // Fetch/parse errors are recorded on the feed and swallowed (background workers continue).
 func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 	start := s.clk.Now()
+	// counted mirrors the FeedPollDone suppression below: an attempt that is not
+	// counted must not add a duration sample either, or the counter and the
+	// histogram's _count drift apart (the pairing the dashboards divide by).
+	counted := true
 	defer func() {
-		s.metrics.ObserveFeedPoll(s.clk.Now().Sub(start))
+		if counted {
+			s.metrics.ObserveFeedPoll(s.clk.Now().Sub(start))
+		}
 	}()
 	defer func() {
 		if r := recover(); r != nil {
@@ -330,6 +336,7 @@ func (s *FeedService) PollFeed(ctx context.Context, f *Feed) (err error) {
 			// F3: the fetch failed because the poll's own ctx (shutdown, or the
 			// subscribe-time budget) was cancelled — persist the error/backoff as
 			// usual, but don't count it: a stopped worker isn't a poll failure.
+			counted = false
 			return s.recordErrorEmit(ctx, f, start, err.Error(), 0, PollFetchError, ClassifyFetchError(err), false)
 		}
 		return s.recordError(ctx, f, start, err.Error(), 0, PollFetchError, ClassifyFetchError(err))

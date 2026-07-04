@@ -401,6 +401,9 @@ func TestPollFeedShutdownCancelSkipsMetricsEmission(t *testing.T) {
 	if errs := m.SnapshotErrors(); len(errs) != 0 {
 		t.Fatalf("ErrorObserved = %v, want none (shutdown cancel must not emit)", errs)
 	}
+	if durs := m.SnapshotPollDurations(); len(durs) != 0 {
+		t.Fatalf("ObserveFeedPoll = %v, want none (an uncounted attempt must not add a duration sample either)", durs)
+	}
 	// The error must still be persisted (existing recordError semantics
 	// unaffected — metrics-only suppression).
 	got, _ := store.GetFeed(context.Background(), core.DefaultUserID, f.ID)

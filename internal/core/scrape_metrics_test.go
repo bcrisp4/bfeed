@@ -189,6 +189,9 @@ func TestScrapeEntryShutdownCancelSkipsMetricsEmission(t *testing.T) {
 	if errs := m.SnapshotErrors(); len(errs) != 0 {
 		t.Fatalf("ErrorObserved = %v, want none (shutdown cancel must not emit)", errs)
 	}
+	if durs := m.SnapshotScrapeDurations(); len(durs) != 0 {
+		t.Fatalf("ObserveArticleScrape = %v, want none (an uncounted attempt must not add a duration sample either)", durs)
+	}
 	// The retry/backoff must still be persisted (existing failEmit semantics
 	// unaffected — metrics-only suppression).
 	got, _ := store.GetEntry(context.Background(), core.DefaultUserID, e.ID)

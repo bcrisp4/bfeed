@@ -91,8 +91,14 @@ func (s *ScrapeService) SetMetrics(m Metrics) {
 // feed-provided content either way.
 func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 	start := s.clk.Now()
+	// counted mirrors the ScrapeDone suppression below: an attempt that is not
+	// counted must not add a duration sample either, or the counter and the
+	// histogram's _count drift apart.
+	counted := true
 	defer func() {
-		s.metrics.ObserveArticleScrape(s.clk.Now().Sub(start))
+		if counted {
+			s.metrics.ObserveArticleScrape(s.clk.Now().Sub(start))
+		}
 	}()
 	defer func() {
 		if r := recover(); r != nil {
@@ -110,6 +116,7 @@ func (s *ScrapeService) ScrapeEntry(ctx context.Context, e *Entry) (err error) {
 			// F3: the fetch failed because the scrape's own ctx (shutdown) was
 			// cancelled — persist the retry/backoff state as usual, but don't
 			// count it: a stopped worker isn't a scrape failure.
+			counted = false
 			return s.failEmit(ctx, e, "fetch: "+err.Error(), ScrapeFetchError, ClassifyFetchError(err), false)
 		}
 		return s.fail(ctx, e, "fetch: "+err.Error(), ScrapeFetchError, ClassifyFetchError(err))
