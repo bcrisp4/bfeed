@@ -21,8 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      # write: the code-review plugin posts findings as inline PR review
+      # comments (and top-level PR comments, which are issue comments) —
+      # read-only perms made every review silently vanish into the job log.
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
