@@ -13,6 +13,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Added
 
+- Reader view: wide images and figures now bleed past the text column — up to a comfortable width (about 1.6x the reading measure) on large screens, edge-to-edge on phones. Small images keep their natural size, captions stay at the reading measure, and article text never leaves its column.
+
 - Optional Prometheus metrics: set `BFEED_METRICS_ADDR` to a bind address (e.g. `:9090`) to expose feed-poll, article-scrape, HTTP request, error, and backlog metrics at `/metrics` on that separate listener, alongside its own `/healthz`. Metrics stay off by default (no bind configured, no listener started).
 - `GET /readyz` readiness probe alongside the existing `/healthz` liveness check, so orchestrators can distinguish "process is up" from "database is reachable".
 
