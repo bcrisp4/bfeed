@@ -77,7 +77,7 @@ MVP strips trackers/pixels but **images load from origin** (leaks reader IP). Ac
 
 | Capability | Ref | Adds | Notes / deps | Status |
 |---|---|---|---|---|
-| FTS5 search over entries | §15 | `entries_fts` virtual table (external-content) + 3 sync triggers; `SearchIndex` port; `SearchService` | | done (iter 3) |
+| FTS5 search over entries | §15 | `entries_fts` virtual table (external-content) + 3 sync triggers; `SearchIndex` port; `SearchService` | Restructured by audit B12 (migration `0013`): FTS now indexes plain-text projections (`title` + `content_text`/`summary_text`), with 2 triggers in the migration and `entries_au` created in Go after the backfill/rebuild | done (iter 3) |
 | Search UI + route | §18 | `/search?q=` view | Needs FTS | done (iter 3) |
 | Porter stemming option | §28 | `tokenize='porter'` config flag | Default stays `unicode61` | deferred |
 
@@ -158,27 +158,37 @@ MVP is **slog only**.
 So a future iteration can see at a glance what it adds.
 
 ### B1. Schema additions (additive migrations)
-- Tables: `categories`, `api_tokens`, `sessions`, `app_settings`, `entries_fts` (+ 3 triggers).
+Still to add:
+- Tables: `api_tokens`, `sessions`.
 - Columns: `users.password_hash`, `users.is_admin`, `users.entry_ttl_days`;
-  `feeds.category_id`, `feeds.fetch_full_content`; per-feed interval-override columns.
-- Indexes: `idx_categories_user`, `idx_api_tokens_user`, `idx_sessions_user`,
-  `idx_tombstones_age`, `idx_entries_ttl`.
-  (`idx_entries_readhist` shipped in iter 2 with the history view.)
+  per-feed interval-override columns.
+- Indexes: `idx_api_tokens_user`, `idx_sessions_user`, `idx_tombstones_age`, `idx_entries_ttl`.
+
+Shipped: `idx_entries_readhist` (iter 2); `categories` + `idx_categories_user` +
+`feeds.category_id` (iter 3); `entries_fts` + triggers (iter 3; restructured onto plain-text
+projections by audit B12, migration `0013`); `feeds.fetch_full_content` (iter 4);
+`app_settings` (iter 5); `feeds.ttl_seconds` (iter 6); `feeds.user_title` (iter 7).
 
 ### B2. Config (env) additions
-- Scheduling: `BFEED_BATCH_SIZE`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`,
-  `BFEED_SCHED_FACTOR`, `BFEED_FEED_ERROR_LIMIT`.
+Still to add:
 - Politeness: `BFEED_HOST_RATE_PER_SEC`, `BFEED_HOST_BURST`.
-- Scrape: `BFEED_SCRAPE_WORKERS`, `BFEED_BACKFILL_PER_HOST_PER_CYCLE`.
+- Scrape: `BFEED_BACKFILL_PER_HOST_PER_CYCLE`.
 - Retention: `BFEED_DEFAULT_ENTRY_TTL_DAYS`, `BFEED_CLEANUP_INTERVAL`.
 - Auth: `BFEED_SESSION_TTL`, `BFEED_ADMIN_USERNAME`, `BFEED_ADMIN_PASSWORD`.
-- Privacy: `BFEED_IMAGE_PROXY`, `BFEED_IMAGE_PROXY_SECRET`, `BFEED_IMAGE_CACHE_DIR`,
-  `BFEED_IMAGE_CACHE_MAX_BYTES`, `BFEED_IMAGE_MAX_BYTES`.
+- Privacy: `BFEED_IMAGE_CACHE_DIR`, `BFEED_IMAGE_CACHE_MAX_BYTES`, `BFEED_IMAGE_MAX_BYTES`.
 - Metrics: `BFEED_METRICS_ADDR`.
 
+Shipped: `BFEED_SCRAPE_WORKERS` (+ `BFEED_SCRAPE_TICK`/`_BATCH`/`_MAX_ATTEMPTS`, iter 4);
+`BFEED_IMAGE_PROXY`, `BFEED_IMAGE_PROXY_SECRET` (iter 5); `BFEED_BATCH_SIZE`,
+`BFEED_SCHED_MIN_INTERVAL`/`_MAX_INTERVAL`/`_FACTOR`, `BFEED_FEED_ERROR_LIMIT` (iter 6).
+Full current env surface: `internal/config`.
+
 ### B3. Package additions
-`api/`, `extract/`, `imgproxy/`, plus core `search.go`, `cleaner.go`, `user.go`,
-`schedule.go`, and the auth/session/token/category/maintenance store sub-interfaces.
+Still to add: `api/`, plus core `cleaner.go`, `user.go`, and the
+auth/session/token/maintenance store sub-interfaces.
+
+Shipped: core `search.go` + category store (iter 3), `extract/` (iter 4), `imgproxy/`
+(iter 5), core `schedule.go` (iter 6).
 
 ### B4. CLI additions
 `bfeed user …`, `bfeed token …`, `bfeed import …`, `bfeed export …`.
@@ -197,18 +207,21 @@ Order chosen to unblock the most daily-driver value first; each iteration is add
 
 | Iter | Theme | Items |
 |---|---|---|
-| 1 (MVP) | Core loop | see `mvp-design.md` |
-| 2 | Reading polish | History view, bulk mark-all-read, feed enable/disable UI, theme toggle, PWA add-to-home |
+| 1 (MVP) | Core loop | see `mvp-design.md` — ✓ done |
+| 2 | Reading polish | History view ✓ done (iter 2); theme toggle ✓ done (iter 3); bulk mark-all-read ✓ done (iter 4, feed-page button — global/category button still open); feed enable/disable UI + PWA add-to-home **still open** |
 | 3 | Find things | Categories ✓ done (iter 3); FTS5 search + UI ✓ done (iter 3) |
-| 4 | Content quality | Full-content scrape (extract + scrape pool + backfill cap) ✓ done (iter 4) |
+| 4 | Content quality | Full-content scrape (extract + scrape pool) ✓ done (iter 4); backfill cap deferred |
 | 5 | Privacy | Image proxy: signed `/img` endpoint, render-time rewrite, SSRF-guarded fetch, `app_settings`-backed HMAC secret ✓ done (iter 5); image cache deferred |
-| 6 | Smarter polling | Adaptive interval + weekly count; token-bucket limiter; error-limit; robots Crawl-Delay |
-| 7 | Housekeeping | TTL cleaner + per-user TTL + tombstone pruning + WAL maintenance |
-| 8 | Integrations | REST API + bearer tokens; OPML import/export |
-| 9 | Multi-user | Auth (sessions/CSRF/argon2id) → multi-user → admin → settings page |
-| 10 | Operability | Prometheus metrics + `/metrics` |
+| 6 | Smarter polling | Adaptive interval + weekly count + publisher TTL ✓ done (iter 6); error-limit dropped (won't do); token-bucket limiter + robots Crawl-Delay still open |
+| 7 | Feed management (unplanned — displaced Housekeeping) | Rename feed / `user_title` + unified inline edit + background subscribe/refresh ✓ done (iter 7) |
+| 8 | Housekeeping | TTL cleaner + per-user TTL + tombstone pruning + WAL maintenance |
+| 9 | Integrations | REST API + bearer tokens; OPML import/export |
+| 10 | Multi-user | Auth (sessions/CSRF/argon2id) → multi-user → admin → DB-backed user prefs |
+| 11 | Operability | Prometheus metrics + `/metrics` |
 
-Sequence is a guide, not a contract — reorder by what hurts most in daily use.
+Sequence is a guide, not a contract — reorder by what hurts most in daily use. (The 2026-07
+audit remediation (batches B1–B13, issues #26–#38) ran as a separate hardening track between
+iters 7 and 8 — bugfixes, not roadmap features; see `docs/audit-2026-07.md`.)
 
 ---
 
@@ -227,3 +240,4 @@ _(Move shipped items here with their iteration number.)_
 - Bulk mark-all-read backend (`MarkReadByFilter`, feed/category/all scoped) + feed-page button — iter 4. Global/category mark-all UI button still deferred.
 - License chosen: Apache-2.0 (`LICENSE`).
 - Adaptive feed-poll scheduling (`COUNT`-in-window weekly count + ingest-time fallback, cold-start at min, capped publisher `<ttl>`/`sy:*`, success-interval jitter; `BFEED_SCHED_*` replace `BFEED_POLL_INTERVAL`) + Feeds-page "stalled" badge (`BFEED_FEED_ERROR_LIMIT`) — iter 6. Hard error-limit dispatch exclusion deliberately dropped; token-bucket limiter, robots Crawl-Delay, per-feed override still deferred.
+- Rename feed / custom title (`feeds.user_title` + `Feed.DisplayTitle()`), unified inline feed edit (`EditFeed`: title/URL/category/full-content), background subscribe/refresh with self-polling feed rows — iter 7.
