@@ -2,14 +2,16 @@
 
 A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binary backed by one SQLite file, with a minimal, mobile-first, content-first htmx UI. Inspired by [Miniflux](https://miniflux.app/). Built to run comfortably on Raspberry Pi–class hardware for one to a handful of users.
 
-- Subscribe to feeds (with feed auto-discovery), read them in a clean single-column UI
-- Polite background polling: conditional GET (ETag / 304), per-host concurrency caps, exponential backoff
-- HTML sanitised before storage; trackers and tracking pixels stripped
-- Mark read/unread, star, delete; keyset pagination
+- Subscribe with feed auto-discovery; organise feeds into categories
+- Clean single-column reader — mobile-first, Light/Sepia/Dark themes, reading-time estimate, settings page
+- Unread / Starred / History / per-feed / per-category views; full-text search (SQLite FTS5)
+- Opt-in per-feed **full-content extraction** (readability) for feeds that only ship summaries
+- Privacy by default: HTML sanitised before storage, trackers and tracking pixels stripped, images served through a signed same-origin proxy, strict CSP
+- Polite **adaptive polling**: per-feed interval derived from publish rate, conditional GET (ETag / 304), per-host concurrency caps, exponential backoff, publisher TTL honoured
 
 ## Status: 🚧 work in progress
 
-The core loop — subscribe → poll → read → mark-read/star — plus categories, full-text search, opt-in full-content scraping, a privacy image proxy, and adaptive polling are built. Still **single user with no in-app login** (designed to sit behind a private network such as Tailscale).
+Daily-drivable as a single-user reader — the full subscribe → poll → read loop plus everything listed above. **No in-app login yet**: it is designed to sit behind a private network such as Tailscale.
 
 Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import/export, retention cleanup, and Prometheus metrics, among others.
 
@@ -21,6 +23,7 @@ License: [Apache-2.0](LICENSE).
 - [`docs/mvp-design.md`](docs/mvp-design.md) — the scope that is **actually built today**. When the code and `design.md` differ, this explains why.
 - [GitHub issues & milestones](https://github.com/bcrisp4/bfeed/milestones) — the remaining work, one session-sized issue at a time. [`docs/roadmap.md`](docs/roadmap.md) keeps the tracking conventions and shipped history.
 - [`docs/releasing.md`](docs/releasing.md) — how to cut a release (annotated semver tag → goreleaser).
+- [`CHANGELOG.md`](CHANGELOG.md) — user-facing changes per release ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/); policy in [`docs/changelog.md`](docs/changelog.md)).
 - [`CLAUDE.md`](CLAUDE.md) — contributor/architecture notes (ports-and-adapters layout, invariants, sqlc workflow, test conventions).
 
 ## Build, test, run
