@@ -584,8 +584,8 @@ func orKeep(newv, old string) string {
 // feedTitle guarantees a feed always has a non-empty display name. Some feeds
 // ship a blank <title> but still have entries, so we fall back to the feed URL
 // — an empty Title leaves the manage-page link with no clickable text. This is
-// the best *automatic* name; a future user override (see roadmap A7) would sit
-// on top of it.
+// the best *automatic* name; the user override (feeds.user_title via
+// Feed.DisplayTitle) sits on top of it.
 func feedTitle(title, feedURL string) string {
 	if t := strings.TrimSpace(title); t != "" {
 		return t

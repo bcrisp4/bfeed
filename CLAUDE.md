@@ -9,7 +9,7 @@ bfeed — self-hosted RSS/Atom/JSON feed reader: one pure-Go binary (`CGO_ENABLE
 Design documented + authoritative — read before non-trivial work:
 - `docs/design.md` — full north-star spec (long-term target).
 - `docs/mvp-design.md` — scope **actually built** now (iteration 1). When code and `design.md` disagree, this is why.
-- `docs/roadmap.md` — everything deferred, with additive path back.
+- **Future work: GitHub issues + milestones are the source of truth** (session-sized issues; `blocked` label = unmet dependency, `icebox` = revisit-when-it-hurts). `docs/roadmap.md` keeps only tracking conventions + shipped history.
 - `docs/releasing.md` — how to cut release (annotated semver tag → goreleaser).
 - `docs/changelog.md` — changelog policy (what, when, how CI enforces).
 - `docs/audit-2026-07.md` — 2026-07 codebase audit (84 verified findings) by remediation batch; `docs/prompts/remediation-batch.md` is copy-paste kickoff prompt for one batch (milestone "Fable audit remediation", issues #26–#38, one PR per batch).
