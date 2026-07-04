@@ -39,6 +39,20 @@ func htmlToText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// trimScanWindow makes a (possibly byte-truncated) scan window safe for htmlToText:
+// it drops an unterminated trailing tag (a '<' with no following '>', which tagRE
+// cannot strip so it would leak as literal text or inflate goodPreview's link
+// density) and any trailing invalid UTF-8 (a rune split by the cut). Stored content
+// is always sanitised, so a raw '<' is always a tag-opener, never literal text —
+// trimming from the last unbalanced '<' can't eat real prose. '<' (0x3C) is never a
+// UTF-8 continuation byte, so the two steps are order-independent.
+func trimScanWindow(s string) string {
+	if lt := strings.LastIndexByte(s, '<'); lt > strings.LastIndexByte(s, '>') {
+		s = s[:lt]
+	}
+	return strings.ToValidUTF8(s, "")
+}
+
 // goodPreview reports whether plain text reads as real prose worth showing as a
 // list blurb — not a link/URL dump and not a bare "read more" stub. It judges
 // the text itself, not the source feed, so it generalises across sites.
@@ -70,6 +84,10 @@ func summaryText(e *core.Entry) string {
 		if len(scan) > maxSummaryScan {
 			scan = scan[:maxSummaryScan]
 		}
+		// Applied unconditionally: the source may already arrive cut at a byte
+		// boundary from the store's substr(content,1,2048) list projection, so a
+		// dangling tag/rune can be present even when we didn't slice here.
+		scan = trimScanWindow(scan)
 		if text := htmlToText(scan); goodPreview(text) {
 			return truncatePreview(text)
 		}

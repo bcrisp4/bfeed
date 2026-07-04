@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -246,5 +247,55 @@ func TestPerHostConcurrencyCap(t *testing.T) {
 	wg.Wait()
 	if atomic.LoadInt32(&max) > 2 {
 		t.Fatalf("per-host concurrency exceeded cap: peak=%d", max)
+	}
+}
+
+func TestFetchStreamReturnsBodyAndReleasesToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write([]byte("PNGDATA"))
+	}))
+	defer srv.Close()
+	c := testClient()
+	resp, err := c.FetchStream(context.Background(), core.FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatalf("FetchStream: %v", err)
+	}
+	if resp.Status != 200 || resp.ContentType != "image/png" {
+		t.Fatalf("status=%d ct=%q", resp.Status, resp.ContentType)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != "PNGDATA" {
+		t.Fatalf("stream body=%q err=%v", body, err)
+	}
+	// Token still held until Close.
+	c.mu.Lock()
+	held := len(c.sems)
+	c.mu.Unlock()
+	if held == 0 {
+		t.Fatal("host token released before Body.Close")
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Idempotent close must not double-release / panic.
+	_ = resp.Body.Close()
+	c.mu.Lock()
+	held = len(c.sems)
+	c.mu.Unlock()
+	if held != 0 {
+		t.Fatalf("host token not released after Close: %d entries", held)
+	}
+}
+
+func TestFetchStreamBlocksPrivateByDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("img"))
+	}))
+	defer srv.Close()
+	c := New(Config{BlockPrivateNetworks: true, Timeout: 5 * time.Second})
+	if _, err := c.FetchStream(context.Background(), core.FetchRequest{URL: srv.URL}); err == nil {
+		t.Fatal("expected SSRF block for loopback address on stream path, got nil")
 	}
 }

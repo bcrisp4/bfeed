@@ -893,3 +893,68 @@ func TestRecordErrorSurvivesCancelledContext(t *testing.T) {
 		t.Fatalf("error state not persisted under cancelled ctx: count=%d err=%q", got.ErrorCount, got.LastError)
 	}
 }
+
+// countingSanitizer counts Sanitize calls so a test can prove the poll pipeline
+// sanitises only genuinely new or hash-changed entries (F1).
+type countingSanitizer struct{ n int }
+
+func (s *countingSanitizer) Sanitize(html, _ string) string { s.n++; return html }
+
+func TestPollDefersSanitizeToNewOrChangedEntries(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	pe := core.ParsedEntry{GUID: "g1", URL: "https://f.test/1", Title: "T", Content: "<p>c</p>", Summary: "<p>s</p>", Hash: "h1"}
+	pf := &core.ParsedFeed{Title: "B", Entries: []core.ParsedEntry{pe}}
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: pf}
+	san := &countingSanitizer{}
+	clk := coretest.StubClock{T: time.Unix(1_700_000_000, 0).UTC()}
+	cfg := core.FeedServiceConfig{
+		Schedule:   core.ScheduleConfig{MinInterval: 15 * time.Minute, MaxInterval: 24 * time.Hour, Factor: 1},
+		Reschedule: core.RescheduleConfig{Interval: 15 * time.Minute, MaxBackoff: 24 * time.Hour},
+		Jitter:     func(time.Duration) time.Duration { return 0 },
+	}
+	svc := core.NewFeedService(store, fetcher, parser, san, clk, coretest.DiscardLogger(), cfg)
+	fid := seedFeed(t, store, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://f.test/x", Title: "B"})
+	poll := func() {
+		f, _ := store.GetFeed(ctx, core.DefaultUserID, fid)
+		if err := svc.PollFeed(ctx, f); err != nil {
+			t.Fatalf("PollFeed: %v", err)
+		}
+	}
+
+	// New entry: sanitise Content + Summary = 2 calls.
+	poll()
+	if san.n != 2 {
+		t.Fatalf("first poll sanitise calls = %d, want 2", san.n)
+	}
+
+	// Unchanged (same hash): sanitise nothing.
+	san.n = 0
+	poll()
+	if san.n != 0 {
+		t.Fatalf("unchanged entry re-sanitised %d times, want 0", san.n)
+	}
+
+	// Changed hash: sanitise Content + Summary again.
+	san.n = 0
+	pf.Entries[0].Hash = "h2"
+	poll()
+	if san.n != 2 {
+		t.Fatalf("changed entry sanitise calls = %d, want 2", san.n)
+	}
+
+	// Tombstoned (deleted) guid reappears: sanitise nothing (dropped pre-sanitise).
+	list, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{Limit: 10})
+	if len(list) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(list))
+	}
+	if err := store.DeleteEntry(ctx, core.DefaultUserID, list[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	san.n = 0
+	poll()
+	if san.n != 0 {
+		t.Fatalf("tombstoned guid re-sanitised %d times, want 0", san.n)
+	}
+}

@@ -42,7 +42,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, arg DeleteEntryParams) (int64
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error FROM entries WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text FROM entries WHERE id = ? AND user_id = ?
 `
 
 type GetEntryParams struct {
@@ -73,6 +73,8 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 		&i.ExtractAttempts,
 		&i.NextExtractAt,
 		&i.ExtractError,
+		&i.ContentText,
+		&i.SummaryText,
 	)
 	return i, err
 }
@@ -116,8 +118,9 @@ func (q *Queries) GetFeedFullContent(ctx context.Context, id int64) (int64, erro
 
 const insertEntry = `-- name: InsertEntry :one
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
+  content_text, summary_text,
   published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -130,6 +133,8 @@ type InsertEntryParams struct {
 	Author        string
 	Content       string
 	Summary       string
+	ContentText   string
+	SummaryText   string
 	PublishedAt   int64
 	CreatedAt     int64
 	Hash          string
@@ -137,6 +142,9 @@ type InsertEntryParams struct {
 	NextExtractAt sql.NullInt64
 }
 
+// content_text/summary_text are plain-text projections (tags/entities stripped) that
+// the FTS index reads, so searches match visible words, not markup. The store fills
+// them via core.PlainText from the already-sanitised content/summary.
 func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, insertEntry,
 		arg.UserID,
@@ -147,6 +155,8 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (int64
 		arg.Author,
 		arg.Content,
 		arg.Summary,
+		arg.ContentText,
+		arg.SummaryText,
 		arg.PublishedAt,
 		arg.CreatedAt,
 		arg.Hash,
@@ -175,7 +185,7 @@ func (q *Queries) InsertTombstone(ctx context.Context, arg InsertTombstoneParams
 }
 
 const listPendingExtractions = `-- name: ListPendingExtractions :many
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error FROM entries
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
 ORDER BY published_at DESC, id DESC LIMIT ?
 `
@@ -214,6 +224,8 @@ func (q *Queries) ListPendingExtractions(ctx context.Context, arg ListPendingExt
 			&i.ExtractAttempts,
 			&i.NextExtractAt,
 			&i.ExtractError,
+			&i.ContentText,
+			&i.SummaryText,
 		); err != nil {
 			return nil, err
 		}
@@ -248,13 +260,14 @@ func (q *Queries) MarkFeedEntriesPending(ctx context.Context, arg MarkFeedEntrie
 }
 
 const setEntryContent = `-- name: SetEntryContent :exec
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
+UPDATE entries SET content = ?, content_text = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
 WHERE id = ? AND extract_state = 'pending'
 `
 
 type SetEntryContentParams struct {
-	Content string
-	ID      int64
+	Content     string
+	ContentText string
+	ID          int64
 }
 
 // extract_state = 'pending' in the WHERE is a compare-and-swap guard against
@@ -265,7 +278,7 @@ type SetEntryContentParams struct {
 // awaiting extraction (the common case). The normal scrape path leaves the row
 // 'pending' until this write, so it is unaffected. (audit B7)
 func (q *Queries) SetEntryContent(ctx context.Context, arg SetEntryContentParams) error {
-	_, err := q.db.ExecContext(ctx, setEntryContent, arg.Content, arg.ID)
+	_, err := q.db.ExecContext(ctx, setEntryContent, arg.Content, arg.ContentText, arg.ID)
 	return err
 }
 
@@ -287,6 +300,7 @@ func (q *Queries) TombstoneExists(ctx context.Context, arg TombstoneExistsParams
 
 const updateEntryContent = `-- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
+  content_text = ?, summary_text = ?,
   published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?
 `
 
@@ -295,6 +309,8 @@ type UpdateEntryContentParams struct {
 	Author      string
 	Content     string
 	Summary     string
+	ContentText string
+	SummaryText string
 	PublishedAt int64
 	Url         string
 	Hash        string
@@ -308,6 +324,8 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 		arg.Author,
 		arg.Content,
 		arg.Summary,
+		arg.ContentText,
+		arg.SummaryText,
 		arg.PublishedAt,
 		arg.Url,
 		arg.Hash,

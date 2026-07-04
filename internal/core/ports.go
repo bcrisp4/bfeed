@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -28,6 +29,17 @@ type FetchResponse struct {
 
 type Fetcher interface {
 	Fetch(ctx context.Context, req FetchRequest) (*FetchResponse, error)
+}
+
+// FetchStreamResponse is a fetched response whose body is streamed rather than
+// buffered — the image proxy copies it straight to the client so it never holds a
+// whole image in memory. The consumer MUST Close Body (which also releases the
+// fetcher's per-host token). ContentLength is -1 when the upstream did not declare one.
+type FetchStreamResponse struct {
+	Status        int
+	ContentType   string
+	ContentLength int64
+	Body          io.ReadCloser
 }
 
 type ParsedFeed struct {
@@ -78,6 +90,11 @@ type FeedStore interface {
 	// and moves next_check_at to now so the Poller re-fetches the new URL promptly.
 	SetFeedURL(ctx context.Context, userID, feedID ID, url string, now time.Time) error
 	EntryStatsByFeed(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error)
+	// UnreadCount is the user's total unread entries (index-covered COUNT); FeedEntryStatsByID
+	// is total/unread for one feed. Both avoid the O(all-entries) EntryStatsByFeed GROUP BY
+	// on the hot list-header / feed-row-poll paths.
+	UnreadCount(ctx context.Context, userID ID) (int, error)
+	FeedEntryStatsByID(ctx context.Context, userID, feedID ID) (FeedEntryStats, error)
 	// WeeklyEntryCount counts entries for a feed in [now-week, now], using the
 	// entry's published_at when present and falling back to ingest time
 	// (created_at) when the publisher omitted a date. System/feed-scoped (no
@@ -87,7 +104,15 @@ type FeedStore interface {
 
 type EntryStore interface {
 	UpsertEntries(ctx context.Context, feedID ID, entries []*Entry) (inserted []*Entry, err error)
+	// EntryDedup reports, for a batch of GUIDs within a feed, which already exist
+	// (guid→content hash) and which are tombstoned, so ingest can sanitise only
+	// genuinely new or hash-changed entries. UpsertEntries still re-checks both
+	// inside its own transaction, so this is a pure pre-filter optimisation.
+	EntryDedup(ctx context.Context, feedID ID, guids []string) (existing map[string]string, tombstoned map[string]bool, err error)
 	GetEntry(ctx context.Context, userID, entryID ID) (*Entry, error)
+	// ListEntries returns entries with Content/Summary truncated to a list-preview
+	// length (list rows render only a short blurb); the full body is available only
+	// via GetEntry (reader view).
 	ListEntries(ctx context.Context, userID ID, f EntryFilter) ([]*Entry, *Cursor, error)
 	SetStatus(ctx context.Context, userID ID, ids []ID, s EntryStatus) error
 	SetStarred(ctx context.Context, userID ID, ids []ID, starred bool) error
@@ -108,6 +133,8 @@ type CategoryStore interface {
 }
 
 type SearchIndex interface {
+	// Search returns entries with Content/Summary truncated to a list-preview length
+	// (results render as a list); the full body is available only via GetEntry.
 	Search(ctx context.Context, userID ID, query string, f EntryFilter) ([]*Entry, *Cursor, error)
 }
 

@@ -116,6 +116,33 @@ func (q *Queries) EntryStatsByFeed(ctx context.Context, userID int64) ([]EntrySt
 	return items, nil
 }
 
+const feedEntryStatsByID = `-- name: FeedEntryStatsByID :one
+SELECT
+  COUNT(*)                                  AS total,
+  COUNT(*) FILTER (WHERE status = 'unread') AS unread
+FROM entries WHERE user_id = ? AND feed_id = ?
+`
+
+type FeedEntryStatsByIDParams struct {
+	UserID int64
+	FeedID int64
+}
+
+type FeedEntryStatsByIDRow struct {
+	Total  int64
+	Unread int64
+}
+
+// Two counts for ONE feed (feed row self-poll / edit form), seeking idx_entries_feed_pub
+// on feed_id with no GROUP BY (no temp B-tree): cheap enough for the 1500ms row poll,
+// unlike the O(all-entries) EntryStatsByFeed it replaces there.
+func (q *Queries) FeedEntryStatsByID(ctx context.Context, arg FeedEntryStatsByIDParams) (FeedEntryStatsByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, feedEntryStatsByID, arg.UserID, arg.FeedID)
+	var i FeedEntryStatsByIDRow
+	err := row.Scan(&i.Total, &i.Unread)
+	return i, err
+}
+
 const getFeed = `-- name: GetFeed :one
 SELECT id, user_id, feed_url, site_url, title, description, etag, last_modified, disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id, fetch_full_content, ttl_seconds, user_title FROM feeds WHERE id = ? AND user_id = ?
 `
@@ -342,6 +369,20 @@ func (q *Queries) SetFeedUserTitle(ctx context.Context, arg SetFeedUserTitlePara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const unreadCount = `-- name: UnreadCount :one
+SELECT COUNT(*) FROM entries WHERE user_id = ? AND status = 'unread'
+`
+
+// Index-covered COUNT for the list-header total: idx_entries_user_status_pub leads
+// with (user_id, status), so no table rows or temp B-tree. Replaces summing the
+// full per-feed GROUP BY just to print "N unread".
+func (q *Queries) UnreadCount(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, unreadCount, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const updateFeed = `-- name: UpdateFeed :exec

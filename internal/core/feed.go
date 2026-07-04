@@ -360,8 +360,28 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 	// reflect a concurrent full-content toggle rather than the poll-time snapshot
 	// (audit B7).
 	now := s.clk.Now()
+	// Sanitisation (html.Parse + render + bluemonday, twice per entry) is the poll's
+	// dominant steady-state CPU cost. Pre-check which GUIDs already exist unchanged or
+	// are tombstoned so we sanitise only genuinely new or hash-changed entries — the
+	// hash is derived from RAW parsed text (parse.EntryHash), identical to the stored
+	// hash, so deferral is semantically transparent. UpsertEntries re-checks both
+	// inside its transaction, so a race between this pre-check and the write is safe.
+	guids := make([]string, len(pf.Entries))
+	for i, pe := range pf.Entries {
+		guids[i] = pe.GUID
+	}
+	existing, tombstoned, err := s.store.EntryDedup(ctx, f.ID, guids)
+	if err != nil {
+		return err
+	}
 	entries := make([]*Entry, 0, len(pf.Entries))
 	for _, pe := range pf.Entries {
+		if tombstoned[pe.GUID] {
+			continue // never resurrect a deleted entry; skip before sanitising
+		}
+		if h, ok := existing[pe.GUID]; ok && h == pe.Hash {
+			continue // unchanged: UpsertEntries would no-op it anyway
+		}
 		// Undated items (parser leaves PublishedAt zero) would persist as year-1
 		// and sink to the permanent bottom of every published-desc list. Fall back
 		// to first-seen (ingest) time so ordering matches other feed readers.
@@ -377,7 +397,7 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 			Hash: pe.Hash,
 		})
 	}
-	_, err := s.store.UpsertEntries(ctx, f.ID, entries)
+	_, err = s.store.UpsertEntries(ctx, f.ID, entries)
 	return err
 }
 
@@ -544,9 +564,21 @@ func sameID(a, b *ID) bool {
 	return *a == *b
 }
 
-// EntryStats returns per-feed total and unread counts for the user.
+// EntryStats returns per-feed total and unread counts for the user. Use only where
+// every feed's counts are needed (the feeds index page); the list header and single
+// feed rows use UnreadCount / FeedStats to avoid an O(all-entries) aggregate.
 func (s *FeedService) EntryStats(ctx context.Context, userID ID) (map[ID]FeedEntryStats, error) {
 	return s.store.EntryStatsByFeed(ctx, userID)
+}
+
+// UnreadCount returns the user's total unread entries (list-header total).
+func (s *FeedService) UnreadCount(ctx context.Context, userID ID) (int, error) {
+	return s.store.UnreadCount(ctx, userID)
+}
+
+// FeedStats returns total/unread counts for a single feed.
+func (s *FeedService) FeedStats(ctx context.Context, userID, feedID ID) (FeedEntryStats, error) {
+	return s.store.FeedEntryStatsByID(ctx, userID, feedID)
 }
 
 func orKeep(newv, old string) string {

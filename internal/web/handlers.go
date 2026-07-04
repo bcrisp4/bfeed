@@ -188,23 +188,18 @@ func (h *Handler) renderList(w http.ResponseWriter, r *http.Request, title, path
 func (h *Handler) headerCount(ctx context.Context, f core.EntryFilter) (string, bool) {
 	switch {
 	case listActive(f) == "unread":
-		stats, err := h.feeds.EntryStats(ctx, uid)
+		n, err := h.feeds.UnreadCount(ctx, uid)
 		if err != nil {
 			h.log.Warn("header unread count", "error", err)
 			return "", false
 		}
-		total := 0
-		for _, s := range stats {
-			total += s.Unread
-		}
-		return fmt.Sprintf("%d unread", total), true
+		return fmt.Sprintf("%d unread", n), true
 	case f.FeedID != nil:
-		stats, err := h.feeds.EntryStats(ctx, uid)
+		s, err := h.feeds.FeedStats(ctx, uid, *f.FeedID)
 		if err != nil {
 			h.log.Warn("header feed count", "feed_id", int64(*f.FeedID), "error", err)
 			return "", false
 		}
-		s := stats[*f.FeedID]
 		return fmt.Sprintf("%d unread · %d total", s.Unread, s.Total), true
 	default:
 		return "", false
@@ -483,11 +478,11 @@ func (h *Handler) feedEditForm(w http.ResponseWriter, r *http.Request) {
 		h.notFoundOr500(w, r, err, "get feed for edit")
 		return
 	}
-	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	st, statsErr := h.feeds.FeedStats(ctx, uid, id)
 	if statsErr != nil {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
-	row := h.buildFeedRow(f, stats[id], time.Now())
+	row := h.buildFeedRow(f, st, time.Now())
 	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror listFeeds)
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
@@ -546,11 +541,11 @@ func (h *Handler) renderEditError(w http.ResponseWriter, r *http.Request, id cor
 		h.notFoundOr500(w, r, gerr, "get feed for edit error")
 		return
 	}
-	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	st, statsErr := h.feeds.FeedStats(ctx, uid, id)
 	if statsErr != nil {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
-	row := h.buildFeedRow(f, stats[id], time.Now())
+	row := h.buildFeedRow(f, st, time.Now())
 	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror feedEditForm)
 	row.Editing = true
 	row.Cats = h.catOptions(ctx, f.CategoryID)
@@ -622,12 +617,14 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return
 	}
-	stats, statsErr := h.feeds.EntryStats(ctx, uid)
+	// One feed's counts for the row itself — the 1500ms self-poll hits this on every
+	// in-flight tick, so it must not run the O(all-entries) EntryStatsByFeed aggregate.
+	st, statsErr := h.feeds.FeedStats(ctx, uid, id)
 	if statsErr != nil {
 		h.log.Warn("feed entry stats", "error", statsErr)
 	}
 	now := time.Now()
-	row := h.buildFeedRow(f, stats[id], now)
+	row := h.buildFeedRow(f, st, now)
 	row.ShowCounts = statsErr == nil // hide fabricated zeros on a stats error (mirror listFeeds)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl["feedrow"].ExecuteTemplate(w, "feedrow", row); err != nil {
@@ -635,7 +632,15 @@ func (h *Handler) renderFeedRow(w http.ResponseWriter, r *http.Request, id core.
 		return
 	}
 	if !row.Refreshing && !row.Pending {
-		h.writeGroupHeadOOB(ctx, w, f, stats, statsErr == nil)
+		// Completion tick (runs once per background op, not per 1500ms poll): the OOB
+		// group head sums unread across every feed in the category, so it needs the
+		// full per-feed map, not this one feed's counts.
+		stats, gerr := h.feeds.EntryStats(ctx, uid)
+		if gerr != nil {
+			h.log.Warn("feed entry stats (group head)", "error", gerr)
+			return
+		}
+		h.writeGroupHeadOOB(ctx, w, f, stats, true)
 	}
 }
 

@@ -5,13 +5,18 @@ SELECT id, hash FROM entries WHERE feed_id = ? AND guid = ?;
 SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?;
 
 -- name: InsertEntry :one
+-- content_text/summary_text are plain-text projections (tags/entities stripped) that
+-- the FTS index reads, so searches match visible words, not markup. The store fills
+-- them via core.PlainText from the already-sanitised content/summary.
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
+  content_text, summary_text,
   published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
+  content_text = ?, summary_text = ?,
   published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?;
 
 -- name: GetEntry :one
@@ -37,7 +42,7 @@ ORDER BY published_at DESC, id DESC LIMIT ?;
 -- 'pending' makes that write a no-op whenever the recycled row isn't itself
 -- awaiting extraction (the common case). The normal scrape path leaves the row
 -- 'pending' until this write, so it is unaffected. (audit B7)
-UPDATE entries SET content = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
+UPDATE entries SET content = ?, content_text = ?, extract_state = 'done', next_extract_at = NULL, extract_error = ''
 WHERE id = ? AND extract_state = 'pending';
 
 -- name: GetFeedFullContent :one

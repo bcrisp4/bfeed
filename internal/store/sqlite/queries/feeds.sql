@@ -49,6 +49,21 @@ SELECT feed_id,
   COUNT(*) FILTER (WHERE status = 'unread') AS unread
 FROM entries WHERE user_id = ? GROUP BY feed_id;
 
+-- name: UnreadCount :one
+-- Index-covered COUNT for the list-header total: idx_entries_user_status_pub leads
+-- with (user_id, status), so no table rows or temp B-tree. Replaces summing the
+-- full per-feed GROUP BY just to print "N unread".
+SELECT COUNT(*) FROM entries WHERE user_id = ? AND status = 'unread';
+
+-- name: FeedEntryStatsByID :one
+-- Two counts for ONE feed (feed row self-poll / edit form), seeking idx_entries_feed_pub
+-- on feed_id with no GROUP BY (no temp B-tree): cheap enough for the 1500ms row poll,
+-- unlike the O(all-entries) EntryStatsByFeed it replaces there.
+SELECT
+  COUNT(*)                                  AS total,
+  COUNT(*) FILTER (WHERE status = 'unread') AS unread
+FROM entries WHERE user_id = ? AND feed_id = ?;
+
 -- name: SetFeedUserTitle :execrows
 UPDATE feeds SET user_title = ? WHERE id = ? AND user_id = ?;
 
