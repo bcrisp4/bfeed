@@ -10,6 +10,30 @@ import (
 	"database/sql"
 )
 
+const countDueFeeds = `-- name: CountDueFeeds :one
+SELECT COUNT(*) FROM feeds WHERE disabled = 0 AND next_check_at <= ?
+`
+
+// Mirrors ListDueFeeds's WHERE clause exactly (ignoring ORDER BY/LIMIT), so it
+// counts precisely the backlog ListDueFeeds would dispatch on this tick.
+func (q *Queries) CountDueFeeds(ctx context.Context, nextCheckAt int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDueFeeds, nextCheckAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countFeeds = `-- name: CountFeeds :one
+SELECT COUNT(*) FROM feeds
+`
+
+func (q *Queries) CountFeeds(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countFeeds)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createFeed = `-- name: CreateFeed :one
 INSERT INTO feeds (user_id, feed_url, site_url, title, description, etag, last_modified,
   disabled, checked_at, next_check_at, error_count, last_error, created_at, updated_at, category_id,

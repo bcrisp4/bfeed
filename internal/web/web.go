@@ -9,11 +9,19 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CAFxX/httpcompression"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
+
+// HTTPMetrics is the consumer-owned port for HTTP request instrumentation —
+// satisfied by *observability.Metrics (wired in cmd/bfeed) without web ever
+// importing prometheus. A nil HTTPMetrics disables instrumentation entirely.
+type HTTPMetrics interface {
+	HTTPRequest(route, method string, status int, d time.Duration)
+}
 
 // compressibleTypes is the allowlist of response content types worth
 // compressing. Everything else (notably already-compressed woff2 fonts and
@@ -56,7 +64,7 @@ type Handler struct {
 // New constructs a fully-routed *Handler for the bfeed web UI. The returned
 // value implements http.Handler; callers that need to drain in-flight
 // background feed ops on shutdown hold onto the concrete type to call Drain.
-func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int, expectedHost string) *Handler {
+func New(feeds *core.FeedService, entries *core.EntryService, cats *core.CategoryService, search *core.SearchService, log *slog.Logger, imgHandler http.Handler, imgRewrite func(string) string, errorLimit int, expectedHost string, metrics HTTPMetrics, ready func(context.Context) error) *Handler {
 	h := &Handler{feeds: feeds, entries: entries, cats: cats, search: search, log: log, tmpl: parseTemplates(), imgRewrite: imgRewrite, errorLimit: errorLimit, busy: newInflightSet()}
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.FileServer(http.FS(staticFS))))
@@ -64,6 +72,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 		mux.Handle("GET /img", imgHandler)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /readyz", readyzHandler(ready))
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
 	mux.HandleFunc("GET /feeds/{id}", h.feedEntries)
@@ -97,8 +106,108 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 		// Only static, valid options are passed, so this can never fail at runtime.
 		panic("web: compression adapter: " + err.Error())
 	}
-	h.router = compress(logging(log, hostGuard(expectedHost, securityHeaders(noStore(mux)))))
+	var inner http.Handler = mux
+	if metrics != nil {
+		inner = instrument(metrics, mux)
+	}
+	h.router = compress(logging(log, hostGuard(expectedHost, securityHeaders(noStore(inner)))))
 	return h
+}
+
+// readyzHandler builds the GET /readyz handler. A nil ready probe (no
+// readiness check configured) always reports ready; otherwise the probe runs
+// with a bounded timeout so a hung dependency can't wedge the endpoint.
+func readyzHandler(ready func(context.Context) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ready == nil {
+			_, _ = w.Write([]byte("ok"))
+			return
+		}
+		// 5s, not a tighter bound: the store's single-writer SQLite pool
+		// (SetMaxOpenConns(1)) means PingContext can legitimately queue behind a
+		// slow writer (e.g. a large batch UpsertEntries during a poll) rather
+		// than failing outright — a 2s bound flapped /readyz under ordinary
+		// write contention (F5). Still bounded so a genuinely wedged DB fails
+		// the probe rather than hanging it forever.
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := ready(ctx); err != nil {
+			http.Error(w, "unready", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}
+}
+
+// httpMethods is the closed allowlist of method labels recorded by instrument
+// — anything else (WebDAV verbs, typos, probes) collapses to "other" so the
+// method label can't blow up metric cardinality.
+var httpMethods = map[string]bool{
+	http.MethodGet:     true,
+	http.MethodPost:    true,
+	http.MethodHead:    true,
+	http.MethodPut:     true,
+	http.MethodDelete:  true,
+	http.MethodOptions: true,
+	http.MethodPatch:   true,
+}
+
+// methodLabel maps a request method to its metric label, collapsing anything
+// outside the allowlist to "other".
+func methodLabel(method string) string {
+	if httpMethods[method] {
+		return method
+	}
+	return "other"
+}
+
+// statusRecorder wraps a ResponseWriter to capture the status code the
+// handler actually sent. status is seeded to 200 (the http.ResponseWriter
+// default) at construction — the single source of the default — so neither
+// Write nor instrument need their own fallback for the write-without-
+// WriteHeader case.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (sr *statusRecorder) WriteHeader(status int) {
+	if !sr.written {
+		sr.status = status
+		sr.written = true
+	}
+	sr.ResponseWriter.WriteHeader(status)
+}
+
+func (sr *statusRecorder) Write(b []byte) (int, error) {
+	sr.written = true
+	return sr.ResponseWriter.Write(b)
+}
+
+// Unwrap exposes the underlying ResponseWriter for http.ResponseController
+// (e.g. Flush/Hijack/SetReadDeadline callers that type-assert through it).
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
+}
+
+// instrument records per-request HTTP metrics. It wraps the mux directly (the
+// innermost layer of the chain) so the recorded route/status reflect exactly
+// what the mux dispatched and returned, before hostGuard/securityHeaders/
+// noStore/compress/logging touch the response.
+func instrument(m HTTPMetrics, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sr := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sr, r)
+		// Go's ServeMux sets r.Pattern in place during ServeHTTP; read it only
+		// after the handler has run. An unmatched request (404) leaves it empty.
+		route := r.Pattern
+		if route == "" {
+			route = "unmatched"
+		}
+		m.HTTPRequest(route, methodLabel(r.Method), sr.status, time.Since(start))
+	})
 }
 
 // ServeHTTP delegates to the composed middleware chain so *Handler satisfies
@@ -231,14 +340,15 @@ func securityHeaders(next http.Handler) http.Handler {
 // origin, defeating DNS-rebinding: an attacker page that re-resolves its name to
 // the bfeed tailnet IP still sends its own name in Host, so its same-origin
 // fetches (and cross-origin mutating POSTs) are refused. The comparison is
-// case-insensitive because hostnames are. Only the /healthz path is exempt — so
-// the container HEALTHCHECK (GET 127.0.0.1/healthz) works without opening the
-// rest of the app to a same-machine attacker who can spoof a loopback Host on a
-// mutating endpoint. An empty expectedHost disables the check (used by tests).
+// case-insensitive because hostnames are. Only the /healthz and /readyz paths
+// are exempt — so the container HEALTHCHECK/readiness probe (GET
+// 127.0.0.1/healthz|/readyz) works without opening the rest of the app to a
+// same-machine attacker who can spoof a loopback Host on a mutating endpoint.
+// An empty expectedHost disables the check (used by tests).
 func hostGuard(expectedHost string, next http.Handler) http.Handler {
 	expected := normalizeAuthority(expectedHost)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if expectedHost != "" && r.URL.Path != "/healthz" && normalizeAuthority(r.Host) != expected {
+		if expectedHost != "" && r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && normalizeAuthority(r.Host) != expected {
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}

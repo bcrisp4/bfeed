@@ -11,6 +11,11 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Optional Prometheus metrics: set `BFEED_METRICS_ADDR` to a bind address (e.g. `:9090`) to expose feed-poll, article-scrape, HTTP request, error, and backlog metrics at `/metrics` on that separate listener, alongside its own `/healthz`. Metrics stay off by default (no bind configured, no listener started).
+- `GET /readyz` readiness probe alongside the existing `/healthz` liveness check, so orchestrators can distinguish "process is up" from "database is reachable".
+
 ### Changed
 
 - Configuration now fails fast at startup when an environment variable is set to a value it can't parse (for example a duration written without a unit), naming the offending variable, instead of silently ignoring it and falling back to the built-in default.

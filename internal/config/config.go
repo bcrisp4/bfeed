@@ -35,6 +35,7 @@ type Config struct {
 	ImageProxySecret     string
 	BlockPrivateNetworks bool
 	AllowPrivateCIDRs    []netip.Prefix
+	MetricsAddr          string
 }
 
 // LoadMinimal reads only the handful of settings the migrate and healthcheck
@@ -75,6 +76,7 @@ func Load() (Config, error) {
 		ImageProxy:           l.boolean("BFEED_IMAGE_PROXY", true),
 		ImageProxySecret:     env("BFEED_IMAGE_PROXY_SECRET", ""),
 		BlockPrivateNetworks: l.boolean("BFEED_BLOCK_PRIVATE_NETWORKS", true),
+		MetricsAddr:          env("BFEED_METRICS_ADDR", ""),
 	}
 	// A set-but-unparseable value is a misconfiguration: fail fast naming the
 	// offending variable rather than silently starting on the built-in default.

@@ -114,6 +114,148 @@ func (f blockingFetcher) Fetch(ctx context.Context, _ core.FetchRequest) (*core.
 	return nil, errors.New("released")
 }
 
+// RecordingMetrics is a mutex-guarded core.Metrics fake that records every
+// call so tests can assert on emitted results/durations/errors/ticks without
+// standing up a real metrics backend. Use the Snapshot*/Get* methods rather
+// than touching fields directly — recording happens from background
+// goroutines (poller/scraper workers) concurrently with test assertions.
+type RecordingMetrics struct {
+	mu sync.Mutex
+
+	pollResults     []core.PollResult
+	scrapeResults   []core.ScrapeResult
+	errors          []RecordedError
+	pollDurations   []time.Duration
+	scrapeDurations []time.Duration
+	pollInflight    int
+	scrapeInflight  int
+	pollerTicks     []time.Time
+	scraperTicks    []time.Time
+}
+
+// RecordedError pairs the component and reason passed to ErrorObserved.
+type RecordedError struct {
+	C core.ErrorComponent
+	R core.ErrorReason
+}
+
+func (m *RecordingMetrics) FeedPollDone(result core.PollResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pollResults = append(m.pollResults, result)
+}
+
+func (m *RecordingMetrics) ObserveFeedPoll(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pollDurations = append(m.pollDurations, d)
+}
+
+func (m *RecordingMetrics) ScrapeDone(result core.ScrapeResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scrapeResults = append(m.scrapeResults, result)
+}
+
+func (m *RecordingMetrics) ObserveArticleScrape(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scrapeDurations = append(m.scrapeDurations, d)
+}
+
+func (m *RecordingMetrics) ErrorObserved(c core.ErrorComponent, r core.ErrorReason) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.errors = append(m.errors, RecordedError{C: c, R: r})
+}
+
+func (m *RecordingMetrics) AddPollInflight(delta int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pollInflight += delta
+}
+
+func (m *RecordingMetrics) AddScrapeInflight(delta int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scrapeInflight += delta
+}
+
+func (m *RecordingMetrics) PollerTicked(t time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pollerTicks = append(m.pollerTicks, t)
+}
+
+func (m *RecordingMetrics) ScraperTicked(t time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scraperTicks = append(m.scraperTicks, t)
+}
+
+// SnapshotPollResults returns a copy of every result recorded via FeedPollDone, in order.
+func (m *RecordingMetrics) SnapshotPollResults() []core.PollResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]core.PollResult(nil), m.pollResults...)
+}
+
+// SnapshotScrapeResults returns a copy of every result recorded via ScrapeDone, in order.
+func (m *RecordingMetrics) SnapshotScrapeResults() []core.ScrapeResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]core.ScrapeResult(nil), m.scrapeResults...)
+}
+
+// SnapshotErrors returns a copy of every (component, reason) recorded via ErrorObserved, in order.
+func (m *RecordingMetrics) SnapshotErrors() []RecordedError {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]RecordedError(nil), m.errors...)
+}
+
+// SnapshotPollDurations returns a copy of every duration recorded via ObserveFeedPoll, in order.
+func (m *RecordingMetrics) SnapshotPollDurations() []time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]time.Duration(nil), m.pollDurations...)
+}
+
+// SnapshotScrapeDurations returns a copy of every duration recorded via ObserveArticleScrape, in order.
+func (m *RecordingMetrics) SnapshotScrapeDurations() []time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]time.Duration(nil), m.scrapeDurations...)
+}
+
+// PollInflight returns the current inflight-poll count (sum of all AddPollInflight deltas).
+func (m *RecordingMetrics) PollInflight() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pollInflight
+}
+
+// ScrapeInflight returns the current inflight-scrape count (sum of all AddScrapeInflight deltas).
+func (m *RecordingMetrics) ScrapeInflight() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.scrapeInflight
+}
+
+// SnapshotPollerTicks returns a copy of every timestamp recorded via PollerTicked, in order.
+func (m *RecordingMetrics) SnapshotPollerTicks() []time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]time.Time(nil), m.pollerTicks...)
+}
+
+// SnapshotScraperTicks returns a copy of every timestamp recorded via ScraperTicked, in order.
+func (m *RecordingMetrics) SnapshotScraperTicks() []time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]time.Time(nil), m.scraperTicks...)
+}
+
 var (
 	_ core.Fetcher    = StubFetcher{}
 	_ core.FeedParser = StubParser{}
@@ -121,4 +263,5 @@ var (
 	_ core.Clock      = StubClock{}
 	_ core.Extractor  = StubExtractor{}
 	_ core.Fetcher    = blockingFetcher{}
+	_ core.Metrics    = (*RecordingMetrics)(nil)
 )
