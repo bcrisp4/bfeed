@@ -84,7 +84,7 @@ BFEED_LISTEN_ADDR=:8080 BFEED_BASE_URL=http://localhost:8080 BFEED_LOG_FORMAT=te
 ```
 Subcommands: `serve` (default), `migrate`, `healthcheck` (for container HEALTHCHECK), `version`.
 
-`BFEED_LISTEN_ADDR` (bind, default `:8080`) and `BFEED_BASE_URL` (external URL for links/cookies/User-Agent, **required**) intentionally distinct — setting only `BASE_URL` does **not** change bind port. Other env: `BFEED_DATABASE_PATH`, `BFEED_POLL_TICK`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`, `BFEED_SCHED_FACTOR`, `BFEED_FEED_ERROR_LIMIT`, `BFEED_FEED_WORKERS`, `BFEED_HOST_CONCURRENCY` (see `internal/config`).
+`BFEED_LISTEN_ADDR` (bind, default `:8080`) and `BFEED_BASE_URL` (external URL for links/cookies/User-Agent, **required**) intentionally distinct — setting only `BASE_URL` does **not** change bind port. Other env: `BFEED_DATABASE_PATH`, `BFEED_POLL_TICK`, `BFEED_SCHED_MIN_INTERVAL`, `BFEED_SCHED_MAX_INTERVAL`, `BFEED_SCHED_FACTOR`, `BFEED_FEED_ERROR_LIMIT`, `BFEED_FEED_WORKERS`, `BFEED_HOST_CONCURRENCY`, `BFEED_METRICS_ADDR` (optional separate bind for `/metrics` + `/healthz`; empty/unset — the default — disables the metrics listener entirely) (see `internal/config`).
 
 **SSRF guard (B11) blocks loopback/private fetch targets:** subscribing to a `localhost`/`127.0.0.1`/`::1` feed fails "ssrf guard: blocked address", so you **can't** e2e-test feed ingest against a local `python3 -m http.server`. Rely on unit tests (fake `Fetcher`) for the ingest pipeline; a running `serve` only confirms wiring/migration, not real fetch.
 

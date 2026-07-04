@@ -875,26 +875,51 @@ requirement to use logs for high-cardinality/low-level detail:
 
 **Errors are a single counter with closed-enum labels** (Prometheus best practice — avoid
 metric-name proliferation): `bfeed_errors_total{component, reason}` where
-`component ∈ {feed_poll, article_scrape, db, http_server, auth, image_proxy}` and
+`component ∈ {feed_poll, article_scrape, db, http_server, image_proxy}` and
 `reason ∈ {timeout, dns, tls, http_4xx, http_5xx, rate_limited, parse, internal}`. Raw error
 strings are bucketed into these in code — **never** label by feed/host/url/user (cardinality
-bomb). Paired attempt counters enable error-ratio queries.
+bomb). A 429 response classifies as `rate_limited`, taking precedence over the generic
+`http_4xx` bucket. Paired attempt counters enable error-ratio queries.
+
+Attempt counters carry their own closed result enums, one label update per attempt (never
+double-counted): `bfeed_feed_polls_total{result}` with
+`result ∈ {success, not_modified, fetch_error, http_error, parse_error, store_error, panic}`,
+and `bfeed_article_scrapes_total{result}` with
+`result ∈ {success, fetch_error, http_error, extract_error, retried, failed}` — a scrape
+attempt that hits a `429` or `5xx` response is retried (honouring `Retry-After`) rather than
+failed outright, and records `retried` (paired with a `bfeed_errors_total` bump reasoned
+`rate_limited`/`http_5xx`) rather than `failed`. Both counters pre-register every enum value
+at zero at startup so `rate()`/`increase()` never have to wait for a first occurrence.
+
+The feed-poll and article-scrape duration histograms use the same explicit bucket boundaries
+(seconds): `0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60` — sized for network I/O rather than the
+client's sub-second HTTP-handler defaults. `bfeed_http_request_duration_seconds` uses the
+Prometheus client's default buckets instead, since in-process request handling is fast.
 
 | Question | Metric |
 |---|---|
-| How many users? | `bfeed_users_total` (gauge) |
-| Subscriptions per user? | `bfeed_feeds_total{user}` (gauge; safe at O(1) users) |
-| Entries total? | `bfeed_entries_total` (gauge) |
+| How many users? | `bfeed_users` (gauge) |
+| How many feeds (across all users)? | `bfeed_feeds` (gauge; unlabelled — MVP is single-user, so a per-user label would add cardinality for no query benefit yet) |
+| Entries total? | `bfeed_entries` (gauge) |
 | Entries per feed? | not labelled (high cardinality) — admin view / logs |
-| Time to update feeds? / per-feed poll time? | `bfeed_feed_poll_duration_seconds` (histogram); individual values → logs |
-| Article scrape time? | `bfeed_article_scrape_duration_seconds` (histogram) |
-| Queued / in progress? | `bfeed_poll_queue_depth`, `bfeed_poll_inflight`, `bfeed_scrape_queue_depth`, `bfeed_scrape_inflight` (gauges) |
+| Time to update feeds? / per-feed poll time? | `bfeed_feed_poll_duration_seconds` (histogram, explicit buckets above); individual values → logs |
+| Article scrape time? | `bfeed_article_scrape_duration_seconds` (histogram, same buckets) |
 | Feed-poll attempts (denominator)? | `bfeed_feed_polls_total{result}` (counter) |
+| Article-scrape attempts (denominator)? | `bfeed_article_scrapes_total{result}` (counter) |
+| How many feeds/entries are overdue right now? | `bfeed_poll_backlog`, `bfeed_scrape_backlog` (gauges; computed at scrape time by a custom collector — a live due-count, not a persisted queue-depth counter) |
+| Polls/scrapes in progress? | `bfeed_poll_inflight`, `bfeed_scrape_inflight` (gauges) |
+| Is the background poller/scraper still alive? | `bfeed_poller_last_tick_timestamp_seconds`, `bfeed_scraper_last_tick_timestamp_seconds` (gauges, set every tick — alert on staleness vs. wall-clock) |
+| What build is running? | `bfeed_build_info{version}` (gauge, always `1`) |
 | Errors (all kinds)? | `bfeed_errors_total{component, reason}` (counter) |
 | Database size? | periodic slog line + host/container disk metrics (no custom gauge) |
 | DB operation latency? | slog slow-query log + `go_sql_wait_*` (pool contention) |
 
-HTTP: `bfeed_http_requests_total{route,method,status}`, `bfeed_http_request_duration_seconds{route}`.
+HTTP: `bfeed_http_requests_total{route,method,status}` (counter),
+`bfeed_http_request_duration_seconds{route}` (histogram, default buckets). `route` is the
+matched `http.ServeMux` pattern (`"unmatched"` for a 404 with no matching route — never the
+raw request path, which would be unbounded cardinality for unknown paths). `method` is
+normalized through a closed allowlist (`GET`/`POST`/`HEAD`/`PUT`/`DELETE`/`OPTIONS`/`PATCH`) —
+anything else (WebDAV verbs, typos, probes) collapses to `other`.
 
 ## 21. Configuration (12-factor)
 

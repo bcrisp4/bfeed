@@ -13,7 +13,7 @@ A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binar
 
 Daily-drivable as a single-user reader — the full subscribe → poll → read loop plus everything listed above. **No in-app login yet**: it is designed to sit behind a private network such as Tailscale.
 
-Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import/export, retention cleanup, and Prometheus metrics, among others.
+Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import/export, retention cleanup, among others.
 
 License: [Apache-2.0](LICENSE).
 
@@ -76,6 +76,7 @@ All configuration is via environment variables (12-factor), validated at startup
 |---|---|---|
 | `BFEED_BASE_URL` | — (**required**) | External URL bfeed is reached at; used for absolute links, cookies, and the polling User-Agent. |
 | `BFEED_LISTEN_ADDR` | `:8080` | Address the HTTP server binds to. |
+| `BFEED_METRICS_ADDR` | — (disabled) | Optional separate bind address for a Prometheus `/metrics` endpoint (plus its own `/healthz`); leave unset to disable metrics entirely. |
 | `BFEED_DATABASE_PATH` | `./bfeed.db` | Path to the SQLite database file (WAL/SHM files live alongside it). |
 | `BFEED_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error`. |
 | `BFEED_LOG_FORMAT` | `json` | `json` (prod) or `text` (dev). |
