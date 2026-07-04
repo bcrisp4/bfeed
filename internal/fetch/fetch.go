@@ -204,6 +204,62 @@ func (c *Client) Fetch(ctx context.Context, req core.FetchRequest) (*core.FetchR
 	return out, nil
 }
 
+// FetchStream fetches like Fetch but returns the body as a stream instead of
+// buffering it, for the image proxy (peak memory is a fixed copy buffer, not the
+// whole image). It reuses c.http, so the SSRF dial-guard and the ≤5-redirect cap
+// still apply. The per-host token is held until the returned Body is closed — i.e.
+// for the full client-write duration — which is acceptable on the image path (that
+// is exactly what per-host budgets bound) and is time-bounded by c.http's Timeout.
+func (c *Client) FetchStream(ctx context.Context, req core.FetchRequest) (*core.FetchStreamResponse, error) {
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return nil, fmt.Errorf("bad url: %w", err)
+	}
+	release, err := c.acquire(ctx, hostKey(u))
+	if err != nil {
+		return nil, err
+	}
+	// Every error path from here MUST release, or the host token leaks permanently.
+	rt := &redirectTracker{permanent: true}
+	ctx = context.WithValue(ctx, redirectKey{}, rt)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	hreq.Header.Set("User-Agent", c.cfg.UserAgent)
+	resp, err := c.http.Do(hreq) //nolint:bodyclose // resp.Body is closed by the returned releaseReadCloser.Close (caller owns it)
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("http get: %w", err)
+	}
+	return &core.FetchStreamResponse{
+		Status:        resp.StatusCode,
+		ContentType:   resp.Header.Get("Content-Type"),
+		ContentLength: resp.ContentLength, // -1 when unknown
+		Body:          &releaseReadCloser{body: resp.Body, release: release},
+	}, nil
+}
+
+// releaseReadCloser closes the upstream body and releases the per-host token exactly
+// once, whichever the caller's Close (or a double Close) triggers.
+type releaseReadCloser struct {
+	body    io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *releaseReadCloser) Read(p []byte) (int, error) { return r.body.Read(p) }
+
+func (r *releaseReadCloser) Close() error {
+	var err error
+	r.once.Do(func() {
+		err = r.body.Close()
+		r.release()
+	})
+	return err
+}
+
 // maxRetryAfter caps a server-supplied Retry-After. Feed servers are untrusted,
 // so an uncapped value could park a feed far in the future (bypassing backoff)
 // and, for large numeric values, overflow the int64 nanosecond multiply into a

@@ -156,6 +156,23 @@ func (s *Store) EntryStatsByFeed(ctx context.Context, userID core.ID) (map[core.
 	return out, nil
 }
 
+// UnreadCount returns the user's total unread entries (list-header total), via an
+// index-covered COUNT rather than summing the full per-feed GROUP BY.
+func (s *Store) UnreadCount(ctx context.Context, userID core.ID) (int, error) {
+	n, err := s.q.UnreadCount(ctx, int64(userID))
+	return int(n), mapErr(err)
+}
+
+// FeedEntryStatsByID returns total/unread counts for a single feed, seeking one
+// feed's rows instead of aggregating every entry (the feed-row self-poll hot path).
+func (s *Store) FeedEntryStatsByID(ctx context.Context, userID, feedID core.ID) (core.FeedEntryStats, error) {
+	r, err := s.q.FeedEntryStatsByID(ctx, sqlc.FeedEntryStatsByIDParams{UserID: int64(userID), FeedID: int64(feedID)})
+	if err != nil {
+		return core.FeedEntryStats{}, mapErr(err)
+	}
+	return core.FeedEntryStats{Total: int(r.Total), Unread: int(r.Unread)}, nil
+}
+
 // SetFeedFullContent flips the flag and reconciles the backlog in one transaction
 // so the two can never diverge (flag on with an unqueued backlog, or vice versa —
 // audit B10). On enable it marks existing entries pending (due at `at`); on disable

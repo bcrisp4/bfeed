@@ -99,6 +99,14 @@ func (statsErrStore) EntryStatsByFeed(context.Context, core.ID) (map[core.ID]cor
 	return nil, errDB
 }
 
+func (statsErrStore) FeedEntryStatsByID(context.Context, core.ID, core.ID) (core.FeedEntryStats, error) {
+	return core.FeedEntryStats{}, errDB
+}
+
+func (statsErrStore) UnreadCount(context.Context, core.ID) (int, error) {
+	return 0, errDB
+}
+
 func TestFeedEditFormHidesCountsOnStatsError(t *testing.T) {
 	inner := coretest.NewMemStore()
 	h := newWebOver(t, statsErrStore{inner})

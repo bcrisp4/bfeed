@@ -63,6 +63,8 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 				Author:        e.Author,
 				Content:       e.Content,
 				Summary:       e.Summary,
+				ContentText:   core.PlainText(e.Content),
+				SummaryText:   core.PlainText(e.Summary),
 				PublishedAt:   toUnix(e.PublishedAt),
 				CreatedAt:     toUnix(e.CreatedAt),
 				Hash:          e.Hash,
@@ -86,6 +88,8 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 					Author:      e.Author,
 					Content:     e.Content,
 					Summary:     e.Summary,
+					ContentText: core.PlainText(e.Content),
+					SummaryText: core.PlainText(e.Summary),
 					PublishedAt: toUnix(e.PublishedAt),
 					Url:         e.URL,
 					Hash:        e.Hash,
@@ -197,8 +201,14 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	// List rows render only a short blurb (web.summaryText, first ~2048 bytes) and
+	// never the full body — reader view uses GetEntry. Project a character-bounded
+	// preview so a page of 50 rows doesn't read whole scraped articles (and their
+	// overflow pages) out of SQLite. substr on TEXT counts characters, so a
+	// multibyte rune is never split; the char count covers web.maxSummaryScan bytes.
 	query := fmt.Sprintf( //nolint:gosec // G201: orderCol is allowlisted; values are bound params
-		`SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author, e.content, e.summary,
+		`SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author,
+		        substr(e.content, 1, 2048), substr(e.summary, 1, 2048),
 		        e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash
 		 FROM entries e%s WHERE %s ORDER BY %s DESC, e.id DESC LIMIT ?`,
 		join, strings.Join(where, " AND "), orderCol)
@@ -335,7 +345,7 @@ func (s *Store) ListPendingExtractions(ctx context.Context, now time.Time, limit
 }
 
 func (s *Store) SetEntryContent(ctx context.Context, entryID core.ID, content string) error {
-	return mapErr(s.q.SetEntryContent(ctx, sqlc.SetEntryContentParams{Content: content, ID: int64(entryID)}))
+	return mapErr(s.q.SetEntryContent(ctx, sqlc.SetEntryContentParams{Content: content, ContentText: core.PlainText(content), ID: int64(entryID)}))
 }
 
 func (s *Store) UpdateExtractState(ctx context.Context, entryID core.ID, state core.ExtractState, attempts int, nextAt *time.Time, reason string) error {
@@ -346,6 +356,59 @@ func (s *Store) UpdateExtractState(ctx context.Context, entryID core.ID, state c
 		ExtractError:    reason,
 		ID:              int64(entryID),
 	}))
+}
+
+// EntryDedup returns, for the given feed and GUIDs, existing entries' content
+// hashes (guid→hash) and the set of tombstoned GUIDs, so ingest sanitises only new
+// or hash-changed, non-tombstoned entries. Hand-written (variadic IN, not sqlc, per
+// the documented dynamic-SQL exception) and chunked so a feed shipping thousands of
+// items can't overflow SQLite's bound-variable limit.
+func (s *Store) EntryDedup(ctx context.Context, feedID core.ID, guids []string) (map[string]string, map[string]bool, error) {
+	existing := make(map[string]string, len(guids))
+	tombstoned := make(map[string]bool)
+	const chunk = 500
+	for start := 0; start < len(guids); start += chunk {
+		end := min(start+chunk, len(guids))
+		batch := guids[start:end]
+
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		args = append(args, int64(feedID))
+		for i, g := range batch {
+			ph[i] = "?"
+			args = append(args, g)
+		}
+		inList := strings.Join(ph, ",")
+
+		//nolint:gosec // G201: inList is a generated ?-placeholder list; guids are bound params
+		hq := fmt.Sprintf(`SELECT guid, hash FROM entries WHERE feed_id = ? AND guid IN (%s)`, inList)
+		if err := queryGUIDMap(ctx, s.db, hq, args, func(g, h string) { existing[g] = h }); err != nil {
+			return nil, nil, err
+		}
+		//nolint:gosec // G201: inList is a generated ?-placeholder list; guids are bound params
+		tq := fmt.Sprintf(`SELECT guid, guid FROM tombstones WHERE feed_id = ? AND guid IN (%s)`, inList)
+		if err := queryGUIDMap(ctx, s.db, tq, args, func(g, _ string) { tombstoned[g] = true }); err != nil {
+			return nil, nil, err
+		}
+	}
+	return existing, tombstoned, nil
+}
+
+// queryGUIDMap runs a two-column (guid, value) query and calls fn per row.
+func queryGUIDMap(ctx context.Context, db *sql.DB, query string, args []any, fn func(guid, val string)) error {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return mapErr(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g, v string
+		if err := rows.Scan(&g, &v); err != nil {
+			return mapErr(err)
+		}
+		fn(g, v)
+	}
+	return mapErr(rows.Err())
 }
 
 func placeholders(ids []core.ID) (string, []any) {

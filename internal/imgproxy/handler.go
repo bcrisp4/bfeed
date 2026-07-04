@@ -1,23 +1,37 @@
 package imgproxy
 
 import (
+	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
 
+// maxImageBytes caps a proxied image. Streaming means peak memory is a fixed copy
+// buffer regardless, but the cap still bounds how much we'll relay for one request.
+const maxImageBytes = 10 << 20
+
+// StreamFetcher fetches through the SSRF-guarded client and returns the body as a
+// stream (not a buffered []byte), so the proxy never holds a whole image in memory.
+// Consumer-owned interface (only imgproxy needs streaming); *fetch.Client satisfies it.
+type StreamFetcher interface {
+	FetchStream(ctx context.Context, req core.FetchRequest) (*core.FetchStreamResponse, error)
+}
+
 // Handler serves GET /img?u=<url>&s=<sig>: verify signature, fetch through the
-// SSRF-guarded Fetcher, and serve only image/* with a long browser cache.
+// SSRF-guarded StreamFetcher, and stream only image/* with a long browser cache.
 type Handler struct {
-	fetcher core.Fetcher
+	fetcher StreamFetcher
 	signer  *Signer
 	log     *slog.Logger
 }
 
-func New(fetcher core.Fetcher, signer *Signer, log *slog.Logger) *Handler {
+func New(fetcher StreamFetcher, signer *Signer, log *slog.Logger) *Handler {
 	return &Handler{fetcher: fetcher, signer: signer, log: log}
 }
 
@@ -39,12 +53,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad url", http.StatusBadRequest)
 		return
 	}
-	resp, err := h.fetcher.Fetch(r.Context(), core.FetchRequest{URL: raw})
+	resp, err := h.fetcher.FetchStream(r.Context(), core.FetchRequest{URL: raw})
 	if err != nil {
 		h.log.Debug("image proxy fetch", "url", raw, "error", err)
 		http.Error(w, "fetch failed", http.StatusBadGateway)
 		return
 	}
+	defer resp.Body.Close() // also releases the fetcher's per-host token
 	if resp.Status != http.StatusOK {
 		http.Error(w, "upstream status", http.StatusBadGateway)
 		return
@@ -53,6 +68,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not an image", http.StatusBadGateway)
 		return
 	}
+	// Reject an over-cap image BEFORE writing any headers: the response carries an
+	// immutable year-long cache, so a truncated body must never reach the client as
+	// a "complete" 200. A lying/absent Content-Length is caught while streaming below.
+	if resp.ContentLength > maxImageBytes {
+		http.Error(w, "image too large", http.StatusBadGateway)
+		return
+	}
+
 	w.Header().Set("Content-Type", resp.ContentType)
 	// Long-lived browser cache. This Set overrides the no-store header the web
 	// layer's noStore middleware applies to every dynamic response (the last write
@@ -65,5 +88,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// locked-down policy neutralises script execution and any subresource load,
 	// while still letting the bytes render as an inert image.
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	_, _ = w.Write(resp.Body)
+	if resp.ContentLength >= 0 { // known and (checked above) within cap
+		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+	}
+
+	// Read one byte past the cap so an image that streams over it (unknown/lying
+	// Content-Length) is detected. On over-cap OR any mid-copy read error, abort the
+	// connection (ErrAbortHandler) instead of returning a normal 200 — a clean 200
+	// would let the browser cache the truncated bytes, immutable, for a year.
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil || n > maxImageBytes {
+		panic(http.ErrAbortHandler)
+	}
 }

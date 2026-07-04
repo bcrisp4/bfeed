@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,43 @@ type StubFetcher struct {
 
 func (f StubFetcher) Fetch(context.Context, core.FetchRequest) (*core.FetchResponse, error) {
 	return f.Resp, f.Err
+}
+
+// StubStreamFetcher serves a streamed response for imgproxy tests. Body is the raw
+// bytes streamed; Closes (when set) is incremented each time the returned Body is
+// closed, so a test can assert exactly-once close / token release.
+type StubStreamFetcher struct {
+	Status        int
+	ContentType   string
+	ContentLength int64
+	Body          string
+	Err           error
+	Closes        *int
+}
+
+func (f StubStreamFetcher) FetchStream(context.Context, core.FetchRequest) (*core.FetchStreamResponse, error) {
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	return &core.FetchStreamResponse{
+		Status:        f.Status,
+		ContentType:   f.ContentType,
+		ContentLength: f.ContentLength,
+		Body:          &countingCloser{r: strings.NewReader(f.Body), closes: f.Closes},
+	}, nil
+}
+
+type countingCloser struct {
+	r      io.Reader
+	closes *int
+}
+
+func (c *countingCloser) Read(p []byte) (int, error) { return c.r.Read(p) }
+func (c *countingCloser) Close() error {
+	if c.closes != nil {
+		*c.closes++
+	}
+	return nil
 }
 
 type StubParser struct{ PF *core.ParsedFeed }

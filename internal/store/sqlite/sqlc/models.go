@@ -20,9 +20,9 @@ type Category struct {
 }
 
 type EntriesFt struct {
-	Title   string
-	Content string
-	Summary string
+	Title       string
+	ContentText string
+	SummaryText string
 }
 
 type Entry struct {
@@ -45,6 +45,8 @@ type Entry struct {
 	ExtractAttempts int64
 	NextExtractAt   sql.NullInt64
 	ExtractError    string
+	ContentText     string
+	SummaryText     string
 }
 
 type Feed struct {

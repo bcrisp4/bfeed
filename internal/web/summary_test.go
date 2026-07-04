@@ -3,6 +3,7 @@ package web
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -92,5 +93,50 @@ func TestGoodPreview(t *testing.T) {
 		if got := goodPreview(c.text); got != c.want {
 			t.Errorf("%s: goodPreview(%q) = %v, want %v", c.name, c.text, got, c.want)
 		}
+	}
+}
+
+// F6: the scan window can arrive cut mid-tag (from a DB substr projection or the
+// byte slice) or mid-rune. trimScanWindow drops a dangling unterminated tag and any
+// trailing invalid UTF-8 so the fragment neither leaks into htmlToText nor inflates
+// goodPreview's link-density check.
+func TestTrimScanWindow(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"unterminated tag trimmed", `Real prose here <a href="https://example.com/very/long`, "Real prose here "},
+		{"closed tag kept", `Real <a href="x">prose</a>`, `Real <a href="x">prose</a>`},
+		{"no tag unchanged", "plain prose", "plain prose"},
+		{"trailing invalid utf8 dropped", "prose" + "\xc3", "prose"},
+		{"lone lt trimmed", "prose <", "prose "},
+	}
+	for _, c := range cases {
+		if got := trimScanWindow(c.in); got != c.want {
+			t.Errorf("%s: trimScanWindow(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+// F6 integration: a valid short prose blurb followed by a dangling long-URL tag
+// (the 2048 cut lands inside the href) must still preview. Without the trim, the
+// dangling URL's characters dominate goodPreview's density and suppress the blurb.
+func TestSummaryTextSurvivesDanglingURL(t *testing.T) {
+	prose := "A short genuine opening sentence with plenty of real words to preview. "
+	tag := `<a href="https://example.com/` + strings.Repeat("segment/", 300) + `">link</a>`
+	e := &core.Entry{Content: prose + tag}
+	if len(e.Content) <= maxSummaryScan {
+		t.Fatalf("fixture too short (%d bytes); need the cut inside the tag", len(e.Content))
+	}
+	got := summaryText(e)
+	if !strings.HasPrefix(got, "A short genuine opening sentence") {
+		t.Fatalf("blurb suppressed/garbled by dangling URL: %q", got)
+	}
+	if strings.Contains(got, "href") || strings.Contains(got, "https") || strings.Contains(got, "<") {
+		t.Fatalf("tag fragment leaked into blurb: %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("blurb contains invalid UTF-8: %q", got)
 	}
 }

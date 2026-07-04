@@ -182,6 +182,28 @@ func (s *MemStore) DeleteFeed(_ context.Context, u, id core.ID) error {
 	return nil
 }
 
+func (s *MemStore) EntryDedup(_ context.Context, feedID core.ID, guids []string) (map[string]string, map[string]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := make(map[string]bool, len(guids))
+	for _, g := range guids {
+		want[g] = true
+	}
+	existing := make(map[string]string)
+	for _, e := range s.entries {
+		if e.FeedID == feedID && want[e.GUID] {
+			existing[e.GUID] = e.Hash
+		}
+	}
+	tombstoned := make(map[string]bool)
+	for _, g := range guids {
+		if s.tombstones[tkey(feedID, g)] {
+			tombstoned[g] = true
+		}
+	}
+	return existing, tombstoned, nil
+}
+
 func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.Entry) ([]*core.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,8 +325,7 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		if f.Order == core.OrderReadAtDesc && e.ReadAt == nil { // history membership
 			continue
 		}
-		cp := *e
-		out = append(out, &cp)
+		out = append(out, previewEntry(e))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		ki, kj := memSortKey(out[i], f.Order), memSortKey(out[j], f.Order)
@@ -334,6 +355,24 @@ func (s *MemStore) ListEntries(_ context.Context, u core.ID, f core.EntryFilter)
 		out = out[:limit]
 	}
 	return out, next, nil
+}
+
+// previewEntry copies an entry with Content/Summary truncated to the list-preview
+// length, mirroring the store's substr(content,1,2048) projection. Rune-based (not
+// a byte slice) so the fake matches SQLite substr's character semantics — a byte
+// slice would split a multibyte rune the real store never splits.
+func previewEntry(e *core.Entry) *core.Entry {
+	cp := *e
+	cp.Content = truncRunes(cp.Content, 2048)
+	cp.Summary = truncRunes(cp.Summary, 2048)
+	return &cp
+}
+
+func truncRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // memSortKey returns the unix-seconds value of the entry's active order column.
@@ -595,7 +634,9 @@ func (s *MemStore) Search(_ context.Context, u core.ID, query string, _ core.Ent
 		if e.UserID != u {
 			continue
 		}
-		hay := strings.ToLower(e.Title + " " + e.Content + " " + e.Summary)
+		// Match visible text only, mirroring the store's plain-text FTS projection
+		// (a query for "https" or "href" must not match markup). See core.PlainText.
+		hay := strings.ToLower(e.Title + " " + core.PlainText(e.Content) + " " + core.PlainText(e.Summary))
 		match := true
 		for _, t := range terms {
 			if !strings.Contains(hay, t) {
@@ -604,8 +645,7 @@ func (s *MemStore) Search(_ context.Context, u core.ID, query string, _ core.Ent
 			}
 		}
 		if match {
-			cp := *e
-			out = append(out, &cp)
+			out = append(out, previewEntry(e))
 		}
 	}
 	// Published-desc with an id-desc tiebreak, matching ListEntries so equal
@@ -701,6 +741,34 @@ func (s *MemStore) EntryStatsByFeed(_ context.Context, u core.ID) (map[core.ID]c
 		out[e.FeedID] = st
 	}
 	return out, nil
+}
+
+func (s *MemStore) UnreadCount(_ context.Context, u core.ID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, e := range s.entries {
+		if e.UserID == u && e.Status == core.StatusUnread {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *MemStore) FeedEntryStatsByID(_ context.Context, u, feedID core.ID) (core.FeedEntryStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var st core.FeedEntryStats
+	for _, e := range s.entries {
+		if e.UserID != u || e.FeedID != feedID {
+			continue
+		}
+		st.Total++
+		if e.Status == core.StatusUnread {
+			st.Unread++
+		}
+	}
+	return st, nil
 }
 
 func (s *MemStore) GetSetting(_ context.Context, key string) (string, error) {
