@@ -65,6 +65,9 @@ func TestAppJSLocalizesTimestamps(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("app.js status %d, want 200", rec.Code)
+	}
 	js := rec.Body.String()
 	for _, want := range []string{"time[datetime]", "datetime", "toLocaleString", "htmx:load"} {
 		if !strings.Contains(js, want) {
