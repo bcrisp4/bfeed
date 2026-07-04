@@ -168,15 +168,17 @@ func (l *loader) dur(k string, def time.Duration) time.Duration {
 }
 
 func (l *loader) boolean(k string, def bool) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(k))) {
-	case "":
-		return def
+	raw := os.Getenv(k)
+	if raw == "" {
+		return def // truly unset → default; a whitespace-only value is invalid, not unset
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "1", "true", "on", "yes":
 		return true
 	case "0", "false", "off", "no":
 		return false
 	default:
-		l.errs = append(l.errs, fmt.Errorf("%s: invalid boolean %q (want true/false/on/off/1/0)", k, os.Getenv(k)))
+		l.errs = append(l.errs, fmt.Errorf("%s: invalid boolean %q (want true/false/on/off/1/0)", k, raw))
 		return def
 	}
 }

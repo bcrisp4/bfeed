@@ -132,6 +132,7 @@ func TestLoadRejectsMalformedEnv(t *testing.T) {
 		{"BFEED_SCHED_FACTOR", "fast"},            // not a number
 		{"BFEED_IMAGE_PROXY", "disabled"},         // not a recognised boolean
 		{"BFEED_BLOCK_PRIVATE_NETWORKS", "maybe"}, // not a recognised boolean
+		{"BFEED_IMAGE_PROXY", "   "},              // whitespace-only is set-but-invalid, not unset
 	}
 	for _, c := range cases {
 		t.Run(c.key, func(t *testing.T) {
