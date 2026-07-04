@@ -2,6 +2,7 @@ package parse
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -102,6 +103,48 @@ func TestParseNoDoubleTranscodeWhenEncodingDeclared(t *testing.T) {
 				t.Fatalf("title = %q, want %q (double-transcode corruption?)", pf.Title, "Тест")
 			}
 		})
+	}
+}
+
+// #99: a valid-UTF-8 feed with no encoding declaration anywhere (no XML decl
+// encoding attr, no HTTP charset) whose first 1KB is pure ASCII must stay
+// UTF-8. The charset sniff examines only the first 1024 bytes and its UTF-8
+// autodetect needs a high byte in that window, so it would otherwise fall back
+// to windows-1252 and mojibake every multibyte rune past the window
+// ("’" -> "â€™") — the feed-path twin of the #96 scrape bug.
+func TestParseUndeclaredValidUTF8StaysUTF8(t *testing.T) {
+	pad := strings.Repeat("all ascii filler text pushing the interesting bytes past the sniff window. ", 20)
+	body := []byte(`<rss version="2.0"><channel><title>t</title><item><title>i</title><description>` +
+		pad + `It’s past the window — with multibyte punctuation.` +
+		`</description></item></channel></rss>`)
+	if idx := strings.IndexFunc(string(body), func(r rune) bool { return r > 0x7f }); idx < 1024 {
+		t.Fatalf("fixture broken: first multibyte rune at byte %d, need >= 1024", idx)
+	}
+	pf, err := New().Parse(body, "application/rss+xml", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pf.Entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(pf.Entries))
+	}
+	sum := pf.Entries[0].Summary
+	if !strings.Contains(sum, "It’s past the window — with multibyte punctuation.") {
+		t.Fatalf("multibyte text mojibaked; summary tail = %q", sum[len(sum)-80:])
+	}
+}
+
+// #99 guard: genuine cp1252 bytes (0x80–0x9F punctuation) are invalid UTF-8, so
+// the utf8.Valid override must NOT fire for them — an undeclared real cp1252
+// feed still gets transcoded by the windows-1252 fallback. 0x92 = cp1252 "’".
+func TestParseUndeclaredCP1252StillTranscoded(t *testing.T) {
+	body := []byte(`<rss version="2.0"><channel><title>It` + "\x92" +
+		`s</title><item><title>i</title></item></channel></rss>`)
+	pf, err := New().Parse(body, "application/rss+xml", "https://e.com/f")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if pf.Title != "It’s" {
+		t.Fatalf("title = %q, want %q (cp1252 salvage lost?)", pf.Title, "It’s")
 	}
 }
 

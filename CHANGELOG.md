@@ -13,6 +13,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- Feed content no longer shows garbled punctuation (e.g. `’` rendered as `â€™`) when a feed is valid UTF-8 but declares no encoding anywhere (no XML `encoding=` declaration and no charset in the `Content-Type` header) and its first kilobyte is plain ASCII. The charset sniff examines only the first 1024 bytes and previously fell back to Windows-1252 in that case, corrupting accented characters and curly quotes later in the feed — the feed-path counterpart of the article-scraper decoding fix below. Affected entries heal on the feed's next poll: the corrected text no longer matches the stored content hash, so the entry is updated in place.
+
 - Fetched full-content articles no longer show garbled punctuation (e.g. `’` rendered as `â€™`) when the site serves valid UTF-8 but omits the charset from its `Content-Type` header. The article scraper now decodes pages using the declared HTTP/BOM/`<meta charset>` encoding instead of a statistical guess that could misread short, mostly-ASCII pages as Windows-1252. Articles already fetched with garbled text need a re-fetch to heal.
 
 ### Changed

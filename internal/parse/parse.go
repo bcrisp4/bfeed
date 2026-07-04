@@ -11,11 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mmcdole/gofeed"
 	ext "github.com/mmcdole/gofeed/extensions"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/text/transform"
 
 	"github.com/bcrisp4/bfeed/internal/core"
 )
@@ -91,18 +93,27 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 // decodeReader returns a UTF-8 reader for the feed bytes. gofeed only transcodes
 // when the XML declaration names a non-UTF-8 encoding, so a feed whose charset
 // lives only in the HTTP Content-Type (RFC 3023) fails as "invalid UTF-8". We
-// bridge that gap with charset.NewReader, which honors the HTTP charset, a BOM,
-// and content sniffing. Crucially we do this ONLY when the bytes carry no in-band
-// encoding declaration: if we pre-transcoded a feed that also declares its
-// encoding, encoding/xml would re-invoke gofeed's CharsetReader on the now-UTF-8
-// stream and double-transcode it into mojibake. Falls back to the raw bytes if a
-// charset reader can't be built.
+// bridge that gap with charset.DetermineEncoding, which honors the HTTP charset,
+// a BOM, and content sniffing. Crucially we do this ONLY when the bytes carry no
+// in-band encoding declaration: if we pre-transcoded a feed that also declares
+// its encoding, encoding/xml would re-invoke gofeed's CharsetReader on the
+// now-UTF-8 stream and double-transcode it into mojibake.
+//
+// The windows-1252 exception mirrors the scrape path (extract.decodeReader,
+// #96/#99): the sniff sees only the first 1024 bytes and its UTF-8 autodetect
+// needs a high byte in that window, so an ASCII-heavy prefix yields the
+// uncertain windows-1252 fallback and would mojibake multibyte runes further
+// down. When that uncertain answer disagrees with a full body of valid UTF-8,
+// keep UTF-8. Genuine cp1252 high bytes (0x80–0x9F punctuation) are bare UTF-8
+// continuation bytes, so utf8.Valid rejects real cp1252 text and its fallback
+// transcode still happens; only mislabeled UTF-8 is overridden.
 func decodeReader(data []byte, contentType string) io.Reader {
 	if hasXMLEncodingDecl(data) {
 		return bytes.NewReader(data)
 	}
-	if r, err := charset.NewReader(bytes.NewReader(data), contentType); err == nil {
-		return r
+	enc, name, certain := charset.DetermineEncoding(data, contentType)
+	if certain || name != "windows-1252" || !utf8.Valid(data) {
+		return transform.NewReader(bytes.NewReader(data), enc.NewDecoder())
 	}
 	return bytes.NewReader(data)
 }
