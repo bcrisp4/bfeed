@@ -168,3 +168,26 @@ func TestLoadMinimalDefaults(t *testing.T) {
 		t.Fatalf("LoadMinimal defaults wrong: %+v", c)
 	}
 }
+
+func TestLoadMetricsAddrDefaultsEmpty(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MetricsAddr != "" {
+		t.Fatalf("MetricsAddr should default empty (metrics disabled), got %q", c.MetricsAddr)
+	}
+}
+
+func TestLoadMetricsAddrOverride(t *testing.T) {
+	t.Setenv("BFEED_BASE_URL", "http://x")
+	t.Setenv("BFEED_METRICS_ADDR", ":9090")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MetricsAddr != ":9090" {
+		t.Fatalf("MetricsAddr override not applied: %+v", c)
+	}
+}
