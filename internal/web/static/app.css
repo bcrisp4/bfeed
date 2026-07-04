@@ -12,7 +12,7 @@
   --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
   --sp-1:.25rem;--sp-2:.5rem;--sp-3:.75rem;--sp-4:1rem;--sp-5:1.5rem;--sp-6:2rem;
   --radius:.5rem;--radius-sm:.375rem;--tap:44px;--bottombar-h:72px;--ease:160ms ease;
-  --measure:34rem;--measure-list:40rem;
+  --measure:34rem;--measure-list:40rem;--measure-wide:56rem;
   /* Light (default) */
   --bg:#fbfaf7;--surface:#fff;--surface-2:#f6f2ea;--ink:#232020;--ink-soft:#2c2722;
   --muted:#8a8278;--faint:#a59a86;--rule:#e8e3d8;--accent:#8a2f2f;--accent-ink:#fbfaf7;--star:#c08a2e;--focus:#8a2f2f;
@@ -28,7 +28,7 @@
 :root[data-theme="dark"]{--bg:#181613;--surface:#201d18;--surface-2:#211d18;--ink:#e7e0d3;--ink-soft:#d8d0c2;--muted:#978d7e;--faint:#8a8071;--rule:#2a251e;--accent:#d98a6a;--accent-ink:#181613;--star:#e0b25c;--focus:#d98a6a;}
 
 *{box-sizing:border-box}
-html{background:var(--bg)}
+html{background:var(--bg);overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-serif);line-height:1.62;
   margin:0 auto;max-width:var(--measure-list);padding:var(--sp-4);}
 :root[data-width="wide"] body{max-width:42rem}
@@ -146,6 +146,22 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 .article table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}
 .article blockquote{border-left:3px solid var(--accent);margin:0 0 var(--sp-4);padding-left:var(--sp-3);color:var(--muted);font-style:italic}
 .article a{overflow-wrap:anywhere}
+/* full-bleed reader media (#84): prose keeps the measure, wide media bleeds
+   to min(--measure-wide, viewport). Slot margins go negative; min(0px,...)
+   keeps them from ever narrowing the column. Logical properties = RTL-safe.
+   See docs/superpowers/specs/2026-07-04-full-bleed-reader-design.md. */
+.reader>*{max-inline-size:var(--measure);margin-inline:auto}
+.reader .article figure{margin-inline:0}
+.reader .article :is(figure:has(img),p:has(> img:only-child),div:has(> img:only-child)){
+  margin-inline:min(0px,max(50% - var(--measure-wide)/2,50% - 50vw));
+  text-align:center}
+.reader .article img{inline-size:auto;max-inline-size:100%;block-size:auto}
+.reader .article figcaption{max-inline-size:var(--measure);margin-inline:auto}
+.reader .article table{
+  margin-inline:min(0px,max(50% - var(--measure-wide)/2,50% - 50vw));
+  display:flex;flex-direction:column;
+  align-items:center;align-items:safe center;
+  overflow-x:auto}
 .cat-heading{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 
 /* settings */
