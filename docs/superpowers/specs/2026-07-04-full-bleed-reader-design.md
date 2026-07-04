@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-04
 **Issue:** [#84](https://github.com/bcrisp4/bfeed/issues/84)
-**Status:** approved
+**Status:** implemented (with fallbacks — see Validation outcome)
 
 ## Goal
 
@@ -208,6 +208,27 @@ committing.)
 Curated subset (~8 PNGs: images + tables entries at 375 and 1440,
 before/after) committed under `docs/img/pr-84/` on the branch and embedded
 as a markdown table in the PR body; the full matrix stays in the scratchpad.
+
+## Validation outcome (2026-07-04, screenshot round 1)
+
+Both pre-documented fallbacks were invoked after the first before/after
+screenshot round; round 2 passed every invariant.
+
+- **`p:has(> img:only-child)` dropped from the slot set.** `:only-child`
+  counts element children only, so `<p>text <img> text</p>` matched and its
+  *text* bled to 56rem — violating the core prose-measure invariant. Cost:
+  bare `<p><img></p>` images stay at the measure. `figure:has(img)` (any
+  depth) and `div:has(> img:only-child)` remain.
+- **Table rule dropped.** `display:flex` on a `table` blockifies `thead`/
+  `tbody` into *separate* flex items, each wrapping its own anonymous table
+  box — header and body column widths no longer sync (columns visibly
+  misaligned in both the 12-col and 2-col fixtures). Same applies to grid.
+  Tables keep the pre-existing `display:block; overflow-x:auto` scroll at
+  the measure. A future table bleed needs a render-time wrapper div (store
+  or template post-processing), not CSS alone.
+
+Shipped bleed set: `figure` (any nesting depth) + `div`-wrapped single
+images. Everything else unchanged.
 
 ## Rollout
 
