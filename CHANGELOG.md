@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-04
+
 ### Added
 
 - Reader view: wide images and figures now bleed past the text column — up to a comfortable width (about 1.6x the reading measure) on large screens, edge-to-edge on phones. Small images keep their natural size, captions stay at the reading measure, and article text never leaves its column.
@@ -212,7 +214,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/bcrisp4/bfeed/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bcrisp4/bfeed/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bcrisp4/bfeed/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bcrisp4/bfeed/compare/v0.4.0...v0.5.0
