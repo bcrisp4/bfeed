@@ -30,7 +30,8 @@
 *{box-sizing:border-box}
 html{background:var(--bg);overflow-x:hidden;overflow-x:clip}
 body{background:var(--bg);color:var(--ink);font-family:var(--font-serif);line-height:1.62;
-  margin:0 auto;max-width:var(--measure-list);padding:var(--sp-4);}
+  margin:0 auto;max-width:var(--measure-list);
+  padding:var(--sp-4) max(var(--sp-4),env(safe-area-inset-right)) var(--sp-4) max(var(--sp-4),env(safe-area-inset-left));}
 :root[data-width="wide"] body{max-width:42rem}
 a{color:var(--accent);transition:color var(--ease)}
 a:hover{text-decoration:underline;text-underline-offset:2px}
@@ -175,7 +176,7 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 
 @media (max-width:639px){
   .topnav{display:none}
-  body{padding-bottom:calc(var(--bottombar-h) + var(--sp-5))} /* clear the fixed bottom bar (mobile only) */
+  body{padding-bottom:calc(var(--bottombar-h) + var(--sp-5) + env(safe-area-inset-bottom))} /* clear the fixed bottom bar (mobile only) */
   .bottombar{display:flex;position:fixed;left:0;right:0;bottom:0;border-top:1px solid var(--rule);background:var(--surface-2);
     padding-top:6px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
   .bottombar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
@@ -185,7 +186,7 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
   .bottombar .tab[aria-current="page"]{color:var(--accent)}
   .more{position:relative;flex:1}
   .more>summary{list-style:none;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-family:var(--font-mono);font-size:.6rem;text-transform:uppercase}
-  .more-sheet{position:absolute;bottom:var(--bottombar-h);right:0;background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-3);min-width:12rem}
+  .more-sheet{position:absolute;bottom:calc(var(--bottombar-h) + env(safe-area-inset-bottom));right:0;background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-3);min-width:12rem}
   .more-sheet a{color:var(--ink);text-decoration:none;min-height:var(--tap);display:flex;align-items:center}
 }
 @media (min-width:640px){.more-sheet a{display:none}} /* desktop: overflow lives in the top bar */
