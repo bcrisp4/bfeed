@@ -13,6 +13,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Fixed
 
+- On mobile, entry-list action buttons (star / mark-read / delete) and the date stamp no longer paint on top of the fixed bottom tab bar when a row scrolls behind it — they now slide underneath the bar as expected.
+
 - Installed as a home-screen app, the mobile bottom tab bar now clears the iOS home indicator and other safe-area insets instead of sitting flush against the bottom edge of the screen. In landscape, page content also keeps clear of a display notch on the sides.
 
 ## [0.9.0] - 2026-07-05
