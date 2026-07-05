@@ -91,6 +91,9 @@ func TestLayoutHasPWAHead(t *testing.T) {
 		`rel="apple-touch-icon"`,
 		`name="theme-color"`,
 		`manifest.webmanifest`,
+		// viewport-fit=cover: without it env(safe-area-inset-*) resolves to 0 and
+		// the standalone bottom bar sits flush on the iOS home indicator (#107).
+		`viewport-fit=cover`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("layout <head> missing %q:\n%s", want, body)
