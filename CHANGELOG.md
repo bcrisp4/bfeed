@@ -21,6 +21,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 - Fetched full-content articles no longer show garbled punctuation (e.g. `’` rendered as `â€™`) when the site serves valid UTF-8 but omits the charset from its `Content-Type` header. The article scraper now decodes pages using the declared HTTP/BOM/`<meta charset>` encoding instead of a statistical guess that could misread short, mostly-ASCII pages as Windows-1252. Articles already fetched with garbled text need a re-fetch to heal.
 
+- Wide images now bleed past the reading measure when the article wraps them in a bare paragraph (`<p><img></p>`) or a paragraph-wrapped link (`<p><a><img></a></p>`) — the most common feed markup shapes, previously missed by the full-bleed reader introduced in 0.8.0. Paragraphs that mix text with an image keep the reading measure, and small images are centered but never upscaled.
+
 ### Changed
 
 - Timestamps now render in your browser's local timezone with locale-aware formatting, instead of always showing the stored UTC instant. Older articles show a localized date and the hover tooltip shows the full local date and time; with JavaScript disabled the original UTC render still appears.
