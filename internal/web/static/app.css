@@ -154,6 +154,8 @@ button:hover{border-color:var(--muted);background:var(--surface-2)}
 .reader .article figure{margin-inline:0}
 /* p:has(> img:only-child) deliberately NOT a slot: :only-child ignores text
    nodes, so a text+img paragraph would bleed its text past the measure.
+   Image-only <p> (incl. <p><a><img></a></p>) is instead promoted to <figure>
+   at render time (internal/web/transform.go, #90), which this slot catches.
    Tables keep block-scroll-at-measure: display:flex/grid on a table splits
    thead/tbody into separate anonymous table boxes and breaks column
    alignment (validated by screenshot round 1). */
