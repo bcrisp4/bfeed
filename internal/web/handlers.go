@@ -333,9 +333,7 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	// Reading time from the original content, before the image-proxy rewrite
 	// lengthens img src URLs (the rewrite must not skew the estimate).
 	readMin := readingTime(string(ev.Content))
-	if h.imgRewrite != nil {
-		ev.Content = templateHTML(proxifyImages(string(ev.Content), h.imgRewrite))
-	}
+	ev.Content = templateHTML(transformContent(string(ev.Content), h.imgRewrite))
 	vm := entryPageVM{Entry: ev, ReadingTime: readMin}
 	vm.chrome = h.chromeFor(r, "")
 	vm.PageTitle = ev.Title
