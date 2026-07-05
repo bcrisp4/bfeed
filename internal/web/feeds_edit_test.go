@@ -163,9 +163,13 @@ func TestEditFormOnRefreshingFeedHasNoPollTrigger(t *testing.T) {
 // changed, editFeed starts a background refresh and returns the self-polling
 // refreshing row fragment (not an HX-Refresh full reload).
 func TestEditSaveURLChangedSwapsRefreshingRow(t *testing.T) {
-	// Use a fetcher that returns a non-nil NotModified response so the background
-	// goroutine (startRefresh → feeds.Refresh) doesn't nil-deref on a zero resp.
-	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 304, NotModified: true}}
+	// Block the background refresh inside Fetch so the busy flag stays set through
+	// the synchronous renderFeedRow. An instant fetcher (e.g. a 304 stub) lets the
+	// goroutine's deferred busy.done run before the render reads it, so the row
+	// would flakily render without the self-poll trigger (seen under -shuffle).
+	release := make(chan struct{})
+	defer close(release)
+	fetcher := coretest.BlockingFetcher(make(chan struct{}), release)
 	h, st := newTestHandler(t, fetcher)
 	id := seedFeed(t, st)
 	// Post a URL different from the seeded "https://example.com/feed.xml".

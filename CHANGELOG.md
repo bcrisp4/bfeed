@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-05
+
 ### Added
 
 - bfeed can now be installed to a phone home screen as an app, with its own icon, name, and standalone (chrome-less) display, via a web app manifest and app icons. There is no offline mode — this is add-to-home-screen only, no service worker.
@@ -231,7 +233,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/bcrisp4/bfeed/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bcrisp4/bfeed/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bcrisp4/bfeed/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bcrisp4/bfeed/compare/v0.5.0...v0.6.0
