@@ -21,8 +21,9 @@ import (
 //     same-origin proxy URL) when rewrite is non-nil. data: and other-scheme
 //     srcs are left untouched.
 //
-// The input is already safe; this only renames nodes and swaps attribute
-// values, never re-introduces markup. Parsed as a body fragment so no
+// The input is already safe; this only renames nodes (p and figure are both
+// sanitizer-allowed elements) and swaps attribute values — it adds no new
+// nodes or attributes and relies on no unsanitized input. Parsed as a body fragment so no
 // <html>/<head>/<body> wrapper is added. On parse/render error the input is
 // returned unchanged.
 func transformContent(in string, rewrite func(string) string) string {

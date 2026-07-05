@@ -88,8 +88,9 @@ The existing CSS then applies with **zero changes**:
 
 ## Placement / plumbing
 
-`internal/web/proxify.go` currently does parse → per-node img-src rewrite →
-render, called only from the reader handler (`handlers.go`, `getEntry`) and
+`internal/web/proxify.go` (renamed to `transform.go` by this change) did
+parse → per-node img-src rewrite → render, called only from the reader
+handler (`handlers.go`, `(*Handler).entry`) and
 gated behind `if h.imgRewrite != nil`. Refactor into a single
 parse → transforms → render pipeline over one walk:
 
@@ -106,7 +107,7 @@ ordering comment about proxy URLs stands).
 ## CSS comment update
 
 The `app.css` comment "p:has(> img:only-child) deliberately NOT a slot"
-gains one line: the Go render-time transform (`internal/web/proxify.go`,
+gains one line: the Go render-time transform (`internal/web/transform.go`,
 #90) promotes image-only `<p>` to `<figure>` instead, so bare-paragraph
 images are covered without the text-bleed hazard.
 

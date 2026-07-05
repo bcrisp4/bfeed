@@ -330,8 +330,9 @@ func (h *Handler) entry(w http.ResponseWriter, r *http.Request) {
 	// Single-entry: direct feed lookup (only one feed involved).
 	feedTitle := h.singleFeedTitle(r.Context(), e.FeedID)
 	ev := toEntryVM(e, feedTitle)
-	// Reading time from the original content, before the image-proxy rewrite
-	// lengthens img src URLs (the rewrite must not skew the estimate).
+	// Reading time from the original content, before the render transforms
+	// (p→figure promotion + image-proxy rewrite; the latter lengthens img
+	// src URLs and must not skew the estimate).
 	readMin := readingTime(string(ev.Content))
 	ev.Content = templateHTML(transformContent(string(ev.Content), h.imgRewrite))
 	vm := entryPageVM{Entry: ev, ReadingTime: readMin}
