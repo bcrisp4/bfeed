@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Pull down from the top of the page to refresh when bfeed is installed as a home-screen app. Standalone (installed) mode gave no way to load newly-fetched entries without force-quitting and relaunching, and it disables the browser's own pull-to-refresh; this restores the familiar gesture. It is active only in the installed app, so it doesn't interfere with the browser's built-in pull-to-refresh in a normal tab.
+
 ### Security
 
 - Updated the Go toolchain to 1.26.5, picking up the fix for GO-2026-5856 (an Encrypted Client Hello privacy leak in the standard library's `crypto/tls`).
