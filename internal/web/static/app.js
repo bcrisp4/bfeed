@@ -150,7 +150,9 @@ addEventListener("htmx:load", function (e) {
       if (!pulling && d < 6) return; // tiny move: leave native scroll alone
       pulling = true;
       // We own this gesture now — stop the page from scrolling/rubber-banding.
-      e.preventDefault();
+      // Guard on cancelable: a non-cancelable touchmove (some scroll contexts)
+      // would only log a console warning and change nothing.
+      if (e.cancelable) e.preventDefault();
       var el = ensureIndicator();
       el.classList.add("ptr-pulling");
       if (!reduceMotion) el.style.transform = "translateY(" + d + "px)";
