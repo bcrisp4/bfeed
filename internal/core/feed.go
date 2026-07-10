@@ -103,7 +103,7 @@ func (s *FeedService) ensureCategoryOwned(ctx context.Context, userID ID, catego
 // until ResolveAndIngest runs. Returns the feed with ID set.
 func (s *FeedService) CreateSubscription(ctx context.Context, userID ID, rawURL string, categoryID *ID, fetchFullContent bool) (*Feed, error) {
 	rawURL = normalizeFeedURL(rawURL)
-	if u, err := url.Parse(rawURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	if httpURL(rawURL) == "" {
 		return nil, fmt.Errorf("%w: invalid feed URL", ErrValidation)
 	}
 	if err := s.ensureCategoryOwned(ctx, userID, categoryID); err != nil {
@@ -470,11 +470,14 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 	return err
 }
 
-// httpURL returns raw only when it parses as an absolute http(s) URL, else "".
-// The comments URL comes from untrusted feed content and the web layer renders
-// it as a plain href, so anything but a web URL is dropped at the ingest
-// boundary - same posture as CreateSubscription's feed-URL check.
+// httpURL returns raw only when it parses as an absolute http(s) URL with a
+// host, else "". The one shared URL-trust predicate: feed URLs at subscribe/
+// edit time and entry comments URLs at ingest all pass through it, so the
+// validation posture can't drift between the sites.
 func httpURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return ""
@@ -638,7 +641,7 @@ func (s *FeedService) EditFeed(ctx context.Context, userID, feedID ID, in EditFe
 	newURL := strings.TrimSpace(in.URL)
 	if newURL != "" {
 		newURL = normalizeFeedURL(newURL)
-		if u, perr := url.Parse(newURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if httpURL(newURL) == "" {
 			return res, fmt.Errorf("%w: invalid feed URL", ErrValidation)
 		}
 	}

@@ -59,6 +59,7 @@ func TestReaderHidesCommentsLinkWhenAbsentOrSameAsURL(t *testing.T) {
 	}{
 		{"absent", ""},
 		{"same as entry URL", "https://x.test/a"},
+		{"same page, trailing slash", "https://x.test/a/"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

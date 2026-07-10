@@ -1,6 +1,8 @@
 package parse
 
 import (
+	"maps"
+
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/rss"
 )
@@ -38,11 +40,11 @@ func (t *commentsTranslator) Translate(feed interface{}) (*gofeed.Feed, error) {
 		}
 		it := f.Items[i]
 		// The default translator ALIASES item.Custom to rss.Item.Custom (the
-		// map the rss parser fills with unknown elements). Copy before writing
+		// map the rss parser fills with unknown elements). Clone before writing
 		// so we never mutate a map another struct owns.
-		m := make(map[string]string, len(it.Custom)+1)
-		for k, v := range it.Custom {
-			m[k] = v
+		m := maps.Clone(it.Custom)
+		if m == nil {
+			m = make(map[string]string, 1)
 		}
 		m[commentsCustomKey] = ri.Comments
 		it.Custom = m

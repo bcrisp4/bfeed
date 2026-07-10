@@ -52,6 +52,10 @@ func TestParseCommentsURL(t *testing.T) {
 		{"absent", mk(``), ""},
 		{"coexists with unknown custom element", mk(`<funky>x</funky><comments>https://news.test/c</comments>`), "https://news.test/c"},
 		{"atom has none", atom, ""},
+		// A bare word is comment-count misuse, not a relative link: resolving it
+		// would mint https://e.com/12 and the ingest scheme guard would keep it.
+		{"bare count not resolved", mk(`<comments>12</comments>`), ""},
+		{"free text not resolved", mk(`<comments>not a url</comments>`), ""},
 	}
 	p := New()
 	for _, tc := range cases {

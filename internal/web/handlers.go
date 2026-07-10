@@ -1109,9 +1109,10 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 	}
 	// A comments link identical to the article link adds nothing; fold the
 	// display rule here so every render site (list, row re-render, reader)
-	// inherits it.
+	// inherits it. Trailing-slash-insensitive: feeds commonly emit the same
+	// page with and without the slash across the two elements.
 	comments := e.CommentsURL
-	if comments == e.URL {
+	if strings.TrimSuffix(comments, "/") == strings.TrimSuffix(e.URL, "/") {
 		comments = ""
 	}
 	return entryVM{
