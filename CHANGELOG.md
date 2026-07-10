@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- Entries now capture the feed's per-item discussion link (the RSS `<comments>` element, used by aggregator feeds such as Hacker News and Lobste.rs). When present and different from the article link, a quiet "comments" link appears in the entry row's meta line and a "Comments" link sits next to "Open original" in the reader. Only http(s) URLs are accepted; existing entries pick the link up when the feed item's content next changes.
+
 ## [0.10.0] - 2026-07-10
 
 ### Added

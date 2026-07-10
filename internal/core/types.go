@@ -78,6 +78,7 @@ type Entry struct {
 	ReadAt          *time.Time
 	CreatedAt       time.Time
 	Hash            string
+	CommentsURL     string // discussion-page URL; poll-owned, refreshed on hash change like URL
 	ExtractState    ExtractState
 	ExtractAttempts int
 	ExtractError    string // last extraction-failure reason ("" once done/never-failed)

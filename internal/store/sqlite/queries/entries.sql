@@ -9,14 +9,14 @@ SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?;
 -- the FTS index reads, so searches match visible words, not markup. The store fills
 -- them via core.PlainText from the already-sanitised content/summary.
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
-  content_text, summary_text,
+  content_text, summary_text, comments_url,
   published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
-  content_text = ?, summary_text = ?,
+  content_text = ?, summary_text = ?, comments_url = ?,
   published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?;
 
 -- name: GetEntry :one

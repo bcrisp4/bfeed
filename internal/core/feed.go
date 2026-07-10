@@ -463,11 +463,23 @@ func (s *FeedService) ingest(ctx context.Context, f *Feed, pf *ParsedFeed, baseU
 			Author: pe.Author, Content: s.san.Sanitize(pe.Content, baseURL),
 			Summary: s.san.Sanitize(pe.Summary, baseURL), PublishedAt: published,
 			Status: StatusUnread, CreatedAt: now,
-			Hash: pe.Hash,
+			Hash: pe.Hash, CommentsURL: httpURL(pe.CommentsURL),
 		})
 	}
 	_, err = s.store.UpsertEntries(ctx, f.ID, entries)
 	return err
+}
+
+// httpURL returns raw only when it parses as an absolute http(s) URL, else "".
+// The comments URL comes from untrusted feed content and the web layer renders
+// it as a plain href, so anything but a web URL is dropped at the ingest
+// boundary - same posture as CreateSubscription's feed-URL check.
+func httpURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return raw
 }
 
 // nextCheck computes the adaptive next-poll time for a successfully-polled feed.

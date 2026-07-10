@@ -47,6 +47,7 @@ type Entry struct {
 	ExtractError    string
 	ContentText     string
 	SummaryText     string
+	CommentsUrl     string
 }
 
 type Feed struct {

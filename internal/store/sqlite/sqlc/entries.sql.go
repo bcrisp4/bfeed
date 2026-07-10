@@ -66,7 +66,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, arg DeleteEntryParams) (int64
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text FROM entries WHERE id = ? AND user_id = ?
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text, comments_url FROM entries WHERE id = ? AND user_id = ?
 `
 
 type GetEntryParams struct {
@@ -99,6 +99,7 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 		&i.ExtractError,
 		&i.ContentText,
 		&i.SummaryText,
+		&i.CommentsUrl,
 	)
 	return i, err
 }
@@ -142,9 +143,9 @@ func (q *Queries) GetFeedFullContent(ctx context.Context, id int64) (int64, erro
 
 const insertEntry = `-- name: InsertEntry :one
 INSERT INTO entries (user_id, feed_id, guid, url, title, author, content, summary,
-  content_text, summary_text,
+  content_text, summary_text, comments_url,
   published_at, status, starred, read_at, created_at, hash, extract_state, next_extract_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unread', 0, NULL, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -159,6 +160,7 @@ type InsertEntryParams struct {
 	Summary       string
 	ContentText   string
 	SummaryText   string
+	CommentsUrl   string
 	PublishedAt   int64
 	CreatedAt     int64
 	Hash          string
@@ -181,6 +183,7 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (int64
 		arg.Summary,
 		arg.ContentText,
 		arg.SummaryText,
+		arg.CommentsUrl,
 		arg.PublishedAt,
 		arg.CreatedAt,
 		arg.Hash,
@@ -209,7 +212,7 @@ func (q *Queries) InsertTombstone(ctx context.Context, arg InsertTombstoneParams
 }
 
 const listPendingExtractions = `-- name: ListPendingExtractions :many
-SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text FROM entries
+SELECT id, user_id, feed_id, guid, url, title, author, content, summary, published_at, status, starred, read_at, created_at, hash, extract_state, extract_attempts, next_extract_at, extract_error, content_text, summary_text, comments_url FROM entries
 WHERE extract_state = 'pending' AND next_extract_at <= ?
 ORDER BY published_at DESC, id DESC LIMIT ?
 `
@@ -250,6 +253,7 @@ func (q *Queries) ListPendingExtractions(ctx context.Context, arg ListPendingExt
 			&i.ExtractError,
 			&i.ContentText,
 			&i.SummaryText,
+			&i.CommentsUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -324,7 +328,7 @@ func (q *Queries) TombstoneExists(ctx context.Context, arg TombstoneExistsParams
 
 const updateEntryContent = `-- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
-  content_text = ?, summary_text = ?,
+  content_text = ?, summary_text = ?, comments_url = ?,
   published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?
 `
 
@@ -335,6 +339,7 @@ type UpdateEntryContentParams struct {
 	Summary     string
 	ContentText string
 	SummaryText string
+	CommentsUrl string
 	PublishedAt int64
 	Url         string
 	Hash        string
@@ -350,6 +355,7 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 		arg.Summary,
 		arg.ContentText,
 		arg.SummaryText,
+		arg.CommentsUrl,
 		arg.PublishedAt,
 		arg.Url,
 		arg.Hash,

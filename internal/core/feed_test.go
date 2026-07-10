@@ -727,6 +727,98 @@ func TestIngestSubstitutesIngestTimeForUndatedEntries(t *testing.T) {
 	}
 }
 
+func TestIngestStoresCommentsURL(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: "https://b.test/1", Title: "a", Hash: "h1", CommentsURL: "https://news.test/item?id=1"},
+	}}}
+	svc, _ := newFeedSvc(store, fetcher, parser)
+
+	if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	es, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{})
+	if len(es) != 1 {
+		t.Fatalf("entries = %d, want 1", len(es))
+	}
+	if es[0].CommentsURL != "https://news.test/item?id=1" {
+		t.Fatalf("CommentsURL = %q", es[0].CommentsURL)
+	}
+}
+
+// The comments URL comes from untrusted feed content and is rendered as a plain
+// href, so ingest keeps only absolute http(s) URLs — same posture as the feed-URL
+// check in CreateSubscription.
+func TestIngestDropsNonHTTPCommentsURL(t *testing.T) {
+	cases := []struct {
+		name, raw, want string
+	}{
+		{"https kept", "https://news.test/1", "https://news.test/1"},
+		{"http kept", "http://news.test/1", "http://news.test/1"},
+		{"javascript dropped", "javascript:alert(1)", ""},
+		{"data dropped", "data:text/html,x", ""},
+		{"ftp dropped", "ftp://news.test/1", ""},
+		{"scheme-relative dropped", "//news.test/1", ""},
+		{"garbage dropped", "not a url", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := coretest.NewMemStore()
+			fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+			parser := coretest.StubParser{PF: &core.ParsedFeed{Title: "Blog", Entries: []core.ParsedEntry{
+				{GUID: "g1", URL: "https://b.test/1", Title: "a", Hash: "h1", CommentsURL: tc.raw},
+			}}}
+			svc, _ := newFeedSvc(store, fetcher, parser)
+			if _, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false); err != nil {
+				t.Fatalf("Subscribe: %v", err)
+			}
+			es, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{})
+			if len(es) != 1 {
+				t.Fatalf("entries = %d, want 1", len(es))
+			}
+			if es[0].CommentsURL != tc.want {
+				t.Fatalf("CommentsURL = %q, want %q", es[0].CommentsURL, tc.want)
+			}
+		})
+	}
+}
+
+// CommentsURL is outside the entry hash, so it refreshes exactly like URL: only
+// when the entry's content hash changes on a re-poll.
+func TestIngestRefreshesCommentsURLOnHashChange(t *testing.T) {
+	ctx := context.Background()
+	store := coretest.NewMemStore()
+	fetcher := coretest.StubFetcher{Resp: &core.FetchResponse{Status: 200, Body: []byte("<rss/>")}}
+	pf := &core.ParsedFeed{Title: "Blog", Entries: []core.ParsedEntry{
+		{GUID: "g1", URL: "https://b.test/1", Title: "a", Hash: "h1", CommentsURL: "https://news.test/1"},
+	}}
+	svc, _ := newFeedSvc(store, fetcher, coretest.StubParser{PF: pf})
+
+	f, err := svc.Subscribe(ctx, core.DefaultUserID, "https://b.test/feed.xml", nil, false)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Same GUID, changed content hash, new comments URL: value must refresh.
+	pf.Entries[0].Title = "a2"
+	pf.Entries[0].Hash = "h2"
+	pf.Entries[0].CommentsURL = "https://news.test/2"
+	got, _ := store.GetFeed(ctx, core.DefaultUserID, f.ID)
+	if err := svc.PollFeed(ctx, got); err != nil {
+		t.Fatalf("PollFeed: %v", err)
+	}
+	es, _, _ := store.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{})
+	if len(es) != 1 {
+		t.Fatalf("entries = %d, want 1", len(es))
+	}
+	if es[0].CommentsURL != "https://news.test/2" {
+		t.Fatalf("CommentsURL = %q, want refreshed value", es[0].CommentsURL)
+	}
+}
+
 // B4/F3: a store-layer ingest failure must still reschedule the feed with
 // backoff (via recordError), not return early leaving next_check_at in the past
 // — otherwise ListDueFeeds re-dispatches the feed (full-body) every tick.

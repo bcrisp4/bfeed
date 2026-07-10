@@ -26,6 +26,71 @@ func TestParseRSS(t *testing.T) {
 	if e.Hash == "" {
 		t.Fatal("hash must be set")
 	}
+	if e.CommentsURL != "https://sample.test/posts/1/comments" {
+		t.Fatalf("comments url = %q", e.CommentsURL)
+	}
+}
+
+func TestParseCommentsURL(t *testing.T) {
+	mk := func(itemExtra string) string {
+		return `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+			<item><title>i</title><link>https://e.com/a</link><guid>g1</guid>` + itemExtra + `</item></channel></rss>`
+	}
+	atom := `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+		<title>t</title><entry><id>g1</id><title>i</title></entry></feed>`
+
+	cases := []struct {
+		name string
+		xml  string
+		want string
+	}{
+		{"absolute", mk(`<comments>https://news.test/item?id=1</comments>`), "https://news.test/item?id=1"},
+		{"relative resolved against feed base", mk(`<comments>/posts/1#comments</comments>`), "https://e.com/posts/1#comments"},
+		{"whitespace trimmed", mk(`<comments>
+			https://news.test/item?id=1
+		</comments>`), "https://news.test/item?id=1"},
+		{"absent", mk(``), ""},
+		{"coexists with unknown custom element", mk(`<funky>x</funky><comments>https://news.test/c</comments>`), "https://news.test/c"},
+		{"atom has none", atom, ""},
+	}
+	p := New()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pf, err := p.Parse([]byte(tc.xml), "", "https://e.com/f")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pf.Entries) != 1 {
+				t.Fatalf("entries = %d", len(pf.Entries))
+			}
+			if got := pf.Entries[0].CommentsURL; got != tc.want {
+				t.Fatalf("CommentsURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The comments URL is deliberately outside EntryHash: a feed that changes only
+// its per-item discussion link must not re-write (or visually resurrect) the
+// entry. Guard that at the adapter boundary.
+func TestParseCommentsURLDoesNotAffectHash(t *testing.T) {
+	mk := func(comments string) string {
+		return `<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+			<item><title>i</title><link>https://e.com/a</link><guid>g1</guid>
+			<description>d</description><comments>` + comments + `</comments></item></channel></rss>`
+	}
+	p := New()
+	a, err := p.Parse([]byte(mk("https://news.test/1")), "", "https://e.com/f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := p.Parse([]byte(mk("https://news.test/2")), "", "https://e.com/f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Entries[0].Hash != b.Entries[0].Hash {
+		t.Fatalf("hash changed with comments URL: %q vs %q", a.Entries[0].Hash, b.Entries[0].Hash)
+	}
 }
 
 // B13: text-only title/author/feed fields must be reduced to plain text — an

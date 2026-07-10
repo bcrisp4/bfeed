@@ -24,7 +24,13 @@ import (
 
 type Parser struct{ fp *gofeed.Parser }
 
-func New() *Parser { return &Parser{fp: gofeed.NewParser()} }
+func New() *Parser {
+	fp := gofeed.NewParser()
+	// Eager assignment (vs gofeed's lazy first-parse init) also removes a
+	// latent data race: this Parser is shared across concurrent poller workers.
+	fp.RSSTranslator = &commentsTranslator{inner: &gofeed.DefaultRSSTranslator{}}
+	return &Parser{fp: fp}
+}
 
 var _ core.FeedParser = (*Parser)(nil)
 
@@ -83,6 +89,7 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 			Author:      author,
 			Content:     content,
 			Summary:     summary,
+			CommentsURL: resolve(base, strings.TrimSpace(it.Custom[commentsCustomKey])),
 			PublishedAt: pub,
 			Hash:        EntryHash(title, content, summary),
 		})
