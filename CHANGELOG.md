@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-10
+
 ### Added
 
 - Pull down from the top of the page to refresh when bfeed is installed as a home-screen app. Standalone (installed) mode gave no way to load newly-fetched entries without force-quitting and relaunching, and it disables the browser's own pull-to-refresh; this restores the familiar gesture. It is active only in the installed app, so it doesn't interfere with the browser's built-in pull-to-refresh in a normal tab.
@@ -249,7 +251,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/bcrisp4/bfeed/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/bcrisp4/bfeed/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/bcrisp4/bfeed/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bcrisp4/bfeed/compare/v0.7.0...v0.8.0
