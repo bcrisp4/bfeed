@@ -264,3 +264,21 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .htmx-indicator{opacity:0;transition:opacity 200ms ease-in}
 .htmx-request .htmx-indicator{opacity:1}
 .htmx-request.htmx-indicator{opacity:1}
+/* Pull-to-refresh indicator (issue #112): JS-injected into <body>, standalone
+   PWA only. Parked above the viewport top and translated down by JS as the user
+   pulls; JS toggles .ptr-ready past the trigger threshold and .ptr-active once a
+   reload fires. Top safe-area inset keeps it clear of the notch under
+   viewport-fit=cover; it sits at the top, away from the fixed bottom bar. */
+.ptr{position:fixed;top:calc(env(safe-area-inset-top) + var(--sp-2));left:0;right:0;z-index:20;
+  display:flex;justify-content:center;pointer-events:none;opacity:0;transition:opacity var(--ease)}
+.ptr.ptr-pulling,.ptr.ptr-active{opacity:1}
+.ptr-spinner{width:1.5rem;height:1.5rem;border-radius:50%;
+  border:2px solid var(--rule);border-top-color:var(--muted);background:var(--surface);
+  box-shadow:0 1px 3px rgba(0,0,0,.12);transition:border-top-color var(--ease)}
+.ptr.ptr-ready .ptr-spinner{border-top-color:var(--accent)}
+.ptr.ptr-active .ptr-spinner{border-top-color:var(--accent);animation:ptrspin .8s linear infinite}
+@keyframes ptrspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ptr.ptr-active .ptr-spinner{animation:none}}
+/* Contain overscroll only in the installed PWA so it doesn't suppress the
+   browser's own pull-to-refresh / scroll chaining in a normal mobile tab. */
+@media (display-mode:standalone){html,body{overscroll-behavior-y:contain}}

@@ -80,6 +80,26 @@ func TestIconAssetsServed(t *testing.T) {
 	}
 }
 
+// TestAppJSHasPullToRefresh guards that the pull-to-refresh gesture (issue #112)
+// ships in the served app.js. iOS standalone mode disables Safari's built-in
+// pull-to-refresh, so the app provides its own — gated to standalone display so
+// it doesn't double up with the browser's own in normal mobile tabs. JS can't be
+// exercised in Go, so this asserts the handler markers survive in the embedded
+// asset (mirrors TestLayoutHasBfcacheReloadScript).
+func TestAppJSHasPullToRefresh(t *testing.T) {
+	h, _ := newWeb(t)
+	rec := do(t, h, http.MethodGet, "/static/app.js")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("app.js status %d, want 200", rec.Code)
+	}
+	js := rec.Body.String()
+	for _, want := range []string{"display-mode: standalone", "touchmove", "location.reload"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js missing pull-to-refresh marker %q:\n%s", want, js)
+		}
+	}
+}
+
 // TestLayoutHasPWAHead guards that the layout advertises the manifest, icons and
 // theme-color so browsers can offer add-to-home-screen (companion to
 // TestLayoutHasBfcacheReloadScript).
