@@ -11,6 +11,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Security
+
+- Updated the Go toolchain to 1.26.5, picking up the fix for GO-2026-5856 (an Encrypted Client Hello privacy leak in the standard library's `crypto/tls`).
+
 ## [0.9.1] - 2026-07-05
 
 ### Fixed
