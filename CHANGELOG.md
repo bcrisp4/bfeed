@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-12
+
 ### Added
 
 - Entries now capture the feed's per-item discussion link (the RSS `<comments>` element, used by aggregator feeds such as Hacker News and Lobste.rs). When present and different from the article link, a quiet "comments" link appears in the entry row's meta line and a "Comments" link sits next to "Open original" in the reader. Only http(s) URLs are accepted; existing entries pick the link up when the feed item's content next changes.
@@ -259,7 +261,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/bcrisp4/bfeed/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/bcrisp4/bfeed/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/bcrisp4/bfeed/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/bcrisp4/bfeed/compare/v0.8.0...v0.9.0
