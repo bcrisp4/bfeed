@@ -461,6 +461,93 @@ func TestFullContentReenableResetsFailedEntry(t *testing.T) {
 	}
 }
 
+// A poll that re-delivers an entry with a changed hash must not clobber scraped
+// full content: extraction-'done' rows keep their content/content_text while the
+// feed-owned fields (title, summary, comments_url, hash, ...) still refresh.
+// Feeds that embed live counters in entry summaries re-fire this update on
+// nearly every poll, which used to overwrite the scraped article permanently.
+func TestUpsertPreservesScrapedContentOnHashChange(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid := mustFeed(t, st, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x.example/feed", NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: true})
+
+	e := mkEntry(fid, "g1", now)
+	e.Summary = "<p>blurb v1</p>"
+	ins, err := st.UpsertEntries(ctx, fid, []*core.Entry{e})
+	if err != nil || len(ins) != 1 {
+		t.Fatalf("insert: ins=%d err=%v", len(ins), err)
+	}
+	id := ins[0].ID
+	if ins[0].ExtractState != core.ExtractPending {
+		t.Fatalf("want pending after insert, got %q", ins[0].ExtractState)
+	}
+	if err := st.SetEntryContent(ctx, id, "<p>scraped article</p>"); err != nil {
+		t.Fatalf("SetEntryContent: %v", err)
+	}
+
+	changed := mkEntry(fid, "g1", now)
+	changed.Title = "T2"
+	changed.Author = "A2"
+	changed.Content = "<p>blurb v2</p>"
+	changed.Summary = "<p>summary v2</p>"
+	changed.Hash = "h2"
+	changed.CommentsURL = "https://news.test/item?id=9"
+	if _, err := st.UpsertEntries(ctx, fid, []*core.Entry{changed}); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+
+	got, err := st.GetEntry(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.Content != "<p>scraped article</p>" {
+		t.Fatalf("scraped content clobbered: %q", got.Content)
+	}
+	if got.ExtractState != core.ExtractDone {
+		t.Fatalf("extract state = %q, want done", got.ExtractState)
+	}
+	if got.Title != "T2" || got.Author != "A2" || got.Summary != "<p>summary v2</p>" ||
+		got.Hash != "h2" || got.CommentsURL != "https://news.test/item?id=9" {
+		t.Fatalf("feed-owned fields not refreshed: %+v", got)
+	}
+	// The FTS projection must still index the scraped article, not the new blurb.
+	var ct string
+	if err := st.db.QueryRowContext(ctx, `SELECT content_text FROM entries WHERE id = ?`, int64(id)).Scan(&ct); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ct, "scraped article") || strings.Contains(ct, "blurb v2") {
+		t.Fatalf("content_text = %q, want scraped text", ct)
+	}
+}
+
+// Counter-case: an entry whose extraction has NOT completed (still 'pending')
+// keeps the original behavior — a hash-changed re-poll overwrites content, and
+// the in-flight scrape (if any) lands afterwards via SetEntryContent's CAS.
+func TestUpsertOverwritesContentWhileExtractPending(t *testing.T) {
+	st, ctx := newTestStore(t), context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	fid := mustFeed(t, st, &core.Feed{UserID: core.DefaultUserID, FeedURL: "https://x.example/feed", NextCheckAt: now, CreatedAt: now, UpdatedAt: now, FetchFullContent: true})
+
+	ins, err := st.UpsertEntries(ctx, fid, []*core.Entry{mkEntry(fid, "g1", now)})
+	if err != nil || len(ins) != 1 {
+		t.Fatalf("insert: ins=%d err=%v", len(ins), err)
+	}
+
+	changed := mkEntry(fid, "g1", now)
+	changed.Content = "<p>blurb v2</p>"
+	changed.Hash = "h2"
+	if _, err := st.UpsertEntries(ctx, fid, []*core.Entry{changed}); err != nil {
+		t.Fatalf("re-upsert: %v", err)
+	}
+	got, _ := st.GetEntry(ctx, core.DefaultUserID, ins[0].ID)
+	if got.Content != "<p>blurb v2</p>" {
+		t.Fatalf("pending entry content = %q, want feed update to win", got.Content)
+	}
+	if got.ExtractState != core.ExtractPending {
+		t.Fatalf("extract state = %q, want still pending", got.ExtractState)
+	}
+}
+
 func TestListPendingExtractionsUsesPartialIndex(t *testing.T) {
 	st, ctx := newTestStore(t), context.Background()
 	rows, err := st.db.QueryContext(ctx,

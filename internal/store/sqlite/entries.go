@@ -84,6 +84,27 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 		default:
 			// Existing: update only if content hash changed (in-place edit).
 			if existing.Hash != e.Hash {
+				// Extraction-'done' entries hold scraped article content, which a
+				// poll must never clobber: refresh only the feed-owned fields. Some
+				// feeds churn their summaries every poll (embedded vote/comment
+				// counters), so this branch fires constantly for them.
+				if existing.ExtractState == string(core.ExtractDone) {
+					if err := q.UpdateEntryMetadata(ctx, sqlc.UpdateEntryMetadataParams{
+						Title:       e.Title,
+						Author:      e.Author,
+						Summary:     e.Summary,
+						SummaryText: core.PlainText(e.Summary),
+						CommentsUrl: e.CommentsURL,
+						PublishedAt: toUnix(e.PublishedAt),
+						Url:         e.URL,
+						Hash:        e.Hash,
+						ID:          existing.ID,
+						UserID:      int64(e.UserID),
+					}); err != nil {
+						return nil, mapErr(err)
+					}
+					continue
+				}
 				if err := q.UpdateEntryContent(ctx, sqlc.UpdateEntryContentParams{
 					Title:       e.Title,
 					Author:      e.Author,

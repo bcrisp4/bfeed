@@ -1,5 +1,7 @@
 -- name: GetEntryByGUID :one
-SELECT id, hash FROM entries WHERE feed_id = ? AND guid = ?;
+-- extract_state is read so UpsertEntries can route a hash-changed re-poll to
+-- UpdateEntryMetadata (extraction 'done') vs UpdateEntryContent (everything else).
+SELECT id, hash, extract_state FROM entries WHERE feed_id = ? AND guid = ?;
 
 -- name: TombstoneExists :one
 SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?;
@@ -17,6 +19,16 @@ RETURNING id;
 -- name: UpdateEntryContent :exec
 UPDATE entries SET title = ?, author = ?, content = ?, summary = ?,
   content_text = ?, summary_text = ?, comments_url = ?,
+  published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?;
+
+-- name: UpdateEntryMetadata :exec
+-- Hash-changed update for an entry whose extraction is 'done': content and
+-- content_text hold the scraped article, which the poll must not clobber.
+-- Some feeds embed live counters (points, comment tallies) in entry summaries,
+-- changing the hash on nearly every poll; overwriting content there would
+-- permanently destroy the scraped article. Feed-owned fields still refresh.
+UPDATE entries SET title = ?, author = ?, summary = ?,
+  summary_text = ?, comments_url = ?,
   published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?;
 
 -- name: GetEntry :one
