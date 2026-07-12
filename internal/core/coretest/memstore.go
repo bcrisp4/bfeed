@@ -236,10 +236,14 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 			// Mirror store/sqlite: re-fetched entries upsert by content hash — when
 			// the hash changed, overwrite the poll-owned content fields in place and
 			// leave user state (Status/Starred/ReadAt) untouched. Not an "insert".
+			// Extraction-'done' entries keep their scraped Content (the real store
+			// routes those through UpdateEntryMetadata, which skips content).
 			if existing.Hash != e.Hash {
 				existing.Title = e.Title
 				existing.Author = e.Author
-				existing.Content = e.Content
+				if existing.ExtractState != core.ExtractDone {
+					existing.Content = e.Content
+				}
 				existing.Summary = e.Summary
 				existing.PublishedAt = e.PublishedAt
 				existing.URL = e.URL

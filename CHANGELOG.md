@@ -15,6 +15,10 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 - Entries now capture the feed's per-item discussion link (the RSS `<comments>` element, used by aggregator feeds such as Hacker News and Lobste.rs). When present and different from the article link, a quiet "comments" link appears in the entry row's meta line and a "Comments" link sits next to "Open original" in the reader. Only http(s) URLs are accepted; existing entries pick the link up when the feed item's content next changes.
 
+### Fixed
+
+- Scraped full-article content is no longer overwritten when a feed re-delivers an entry with changed text. Aggregator feeds that embed live vote/comment counters in entry summaries change on nearly every poll, which used to replace the scraped article with the feed's short summary blurb; the entry's title, summary, and links still refresh, but fetched full content is now kept.
+
 ## [0.10.0] - 2026-07-10
 
 ### Added

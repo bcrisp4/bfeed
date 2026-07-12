@@ -105,7 +105,7 @@ func (q *Queries) GetEntry(ctx context.Context, arg GetEntryParams) (Entry, erro
 }
 
 const getEntryByGUID = `-- name: GetEntryByGUID :one
-SELECT id, hash FROM entries WHERE feed_id = ? AND guid = ?
+SELECT id, hash, extract_state FROM entries WHERE feed_id = ? AND guid = ?
 `
 
 type GetEntryByGUIDParams struct {
@@ -114,14 +114,17 @@ type GetEntryByGUIDParams struct {
 }
 
 type GetEntryByGUIDRow struct {
-	ID   int64
-	Hash string
+	ID           int64
+	Hash         string
+	ExtractState string
 }
 
+// extract_state is read so UpsertEntries can route a hash-changed re-poll to
+// UpdateEntryMetadata (extraction 'done') vs UpdateEntryContent (everything else).
 func (q *Queries) GetEntryByGUID(ctx context.Context, arg GetEntryByGUIDParams) (GetEntryByGUIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getEntryByGUID, arg.FeedID, arg.Guid)
 	var i GetEntryByGUIDRow
-	err := row.Scan(&i.ID, &i.Hash)
+	err := row.Scan(&i.ID, &i.Hash, &i.ExtractState)
 	return i, err
 }
 
@@ -354,6 +357,46 @@ func (q *Queries) UpdateEntryContent(ctx context.Context, arg UpdateEntryContent
 		arg.Content,
 		arg.Summary,
 		arg.ContentText,
+		arg.SummaryText,
+		arg.CommentsUrl,
+		arg.PublishedAt,
+		arg.Url,
+		arg.Hash,
+		arg.ID,
+		arg.UserID,
+	)
+	return err
+}
+
+const updateEntryMetadata = `-- name: UpdateEntryMetadata :exec
+UPDATE entries SET title = ?, author = ?, summary = ?,
+  summary_text = ?, comments_url = ?,
+  published_at = ?, url = ?, hash = ? WHERE id = ? AND user_id = ?
+`
+
+type UpdateEntryMetadataParams struct {
+	Title       string
+	Author      string
+	Summary     string
+	SummaryText string
+	CommentsUrl string
+	PublishedAt int64
+	Url         string
+	Hash        string
+	ID          int64
+	UserID      int64
+}
+
+// Hash-changed update for an entry whose extraction is 'done': content and
+// content_text hold the scraped article, which the poll must not clobber.
+// Some feeds embed live counters (points, comment tallies) in entry summaries,
+// changing the hash on nearly every poll; overwriting content there would
+// permanently destroy the scraped article. Feed-owned fields still refresh.
+func (q *Queries) UpdateEntryMetadata(ctx context.Context, arg UpdateEntryMetadataParams) error {
+	_, err := q.db.ExecContext(ctx, updateEntryMetadata,
+		arg.Title,
+		arg.Author,
+		arg.Summary,
 		arg.SummaryText,
 		arg.CommentsUrl,
 		arg.PublishedAt,

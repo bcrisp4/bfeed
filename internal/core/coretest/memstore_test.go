@@ -66,6 +66,50 @@ func TestMemStoreUpsertUpdatesOnHashChange(t *testing.T) {
 	}
 }
 
+// A hash-changed re-poll of an extraction-'done' entry must preserve the
+// scraped content while refreshing the feed-owned fields, mirroring
+// store/sqlite's UpdateEntryMetadata path.
+func TestMemStoreUpsertPreservesScrapedContentOnHashChange(t *testing.T) {
+	ctx := context.Background()
+	s := coretest.NewMemStore()
+	fd := feed("https://f/x", "F")
+	fd.FetchFullContent = true
+	fid, _ := s.CreateFeed(ctx, fd)
+
+	ins, _ := s.UpsertEntries(ctx, fid, []*core.Entry{{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "old", Content: "<p>blurb v1</p>",
+		Status: core.StatusUnread, PublishedAt: time.Unix(100, 0), Hash: "h1",
+	}})
+	if len(ins) != 1 || ins[0].ExtractState != core.ExtractPending {
+		t.Fatalf("insert: ins=%d state=%q", len(ins), ins[0].ExtractState)
+	}
+	id := ins[0].ID
+	if err := s.SetEntryContent(ctx, id, "<p>scraped article</p>"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{{
+		UserID: core.DefaultUserID, FeedID: fid, GUID: "g", Title: "new", Content: "<p>blurb v2</p>",
+		Summary: "<p>summary v2</p>", Status: core.StatusUnread, PublishedAt: time.Unix(200, 0), Hash: "h2",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetEntry(ctx, core.DefaultUserID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "<p>scraped article</p>" {
+		t.Fatalf("scraped content clobbered: %q", got.Content)
+	}
+	if got.ExtractState != core.ExtractDone {
+		t.Fatalf("extract state = %q, want done", got.ExtractState)
+	}
+	if got.Title != "new" || got.Summary != "<p>summary v2</p>" || got.Hash != "h2" {
+		t.Fatalf("feed-owned fields not refreshed: %+v", got)
+	}
+}
+
 // Same GUID, same hash → no change (and no phantom insert).
 func TestMemStoreUpsertSkipsWhenHashUnchanged(t *testing.T) {
 	ctx := context.Background()
