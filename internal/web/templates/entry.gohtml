@@ -11,7 +11,7 @@
     <button class="act del" hx-post="/entries/{{.Entry.ID}}/delete" hx-vals='{"from":"reader"}' hx-confirm="Delete this entry?" hx-swap="none" hx-disabled-elt="this"
       title="Delete" aria-label="Delete">{{template "ic-trash"}}</button>
   </div>
-  <a class="orig" href="{{.Entry.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a>
+  <span class="reader-links">{{if .Entry.CommentsURL}}<a class="orig" href="{{.Entry.CommentsURL}}" rel="noopener noreferrer" target="_blank">Comments ↗</a>{{end}}<a class="orig" href="{{.Entry.URL}}" rel="noopener noreferrer" target="_blank">Open original ↗</a></span>
 </div>
 {{if .Entry.ExtractFailed}}<p class="extract-note">Full-text extraction failed{{if .Entry.ExtractError}} ({{.Entry.ExtractError}}){{end}} — showing the feed's own content.</p>{{end}}
 <article class="article">{{.Entry.Content}}</article>

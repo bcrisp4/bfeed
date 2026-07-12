@@ -65,6 +65,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 				Summary:       e.Summary,
 				ContentText:   core.PlainText(e.Content),
 				SummaryText:   core.PlainText(e.Summary),
+				CommentsUrl:   e.CommentsURL,
 				PublishedAt:   toUnix(e.PublishedAt),
 				CreatedAt:     toUnix(e.CreatedAt),
 				Hash:          e.Hash,
@@ -90,6 +91,7 @@ func (s *Store) UpsertEntries(ctx context.Context, feedID core.ID, entries []*co
 					Summary:     e.Summary,
 					ContentText: core.PlainText(e.Content),
 					SummaryText: core.PlainText(e.Summary),
+					CommentsUrl: e.CommentsURL,
 					PublishedAt: toUnix(e.PublishedAt),
 					Url:         e.URL,
 					Hash:        e.Hash,
@@ -124,22 +126,25 @@ func entryFromRow(r sqlc.Entry) *core.Entry {
 		ReadAt:          ptrUnix(r.ReadAt),
 		CreatedAt:       fromUnix(r.CreatedAt),
 		Hash:            r.Hash,
+		CommentsURL:     r.CommentsUrl,
 		ExtractState:    core.ExtractState(r.ExtractState),
 		ExtractAttempts: int(r.ExtractAttempts),
 		ExtractError:    r.ExtractError,
 	}
 }
 
-// scanEntry scans one row of the canonical 15-column entries projection
+// scanEntry scans one row of the canonical 16-column entries projection
 // (id, user_id, feed_id, guid, url, title, author, content, summary,
-// published_at, status, starred, read_at, created_at, hash) into a core.Entry.
+// published_at, status, starred, read_at, created_at, hash, comments_url)
+// into a core.Entry.
 // Shared by ListEntries and Search so the column list lives in one place.
-// This is a deliberate 15-column subset — extract_state/extract_attempts/next_extract_at
+// This is a deliberate 16-column subset — extract_state/extract_attempts/next_extract_at
 // are omitted because list/search views don't need them.
 func scanEntry(rows *sql.Rows) (*core.Entry, error) {
 	var r sqlc.Entry
 	if err := rows.Scan(&r.ID, &r.UserID, &r.FeedID, &r.Guid, &r.Url, &r.Title, &r.Author,
-		&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash); err != nil {
+		&r.Content, &r.Summary, &r.PublishedAt, &r.Status, &r.Starred, &r.ReadAt, &r.CreatedAt, &r.Hash,
+		&r.CommentsUrl); err != nil {
 		return nil, err
 	}
 	return entryFromRow(r), nil
@@ -209,7 +214,8 @@ func (s *Store) ListEntries(ctx context.Context, userID core.ID, f core.EntryFil
 	query := fmt.Sprintf( //nolint:gosec // G201: orderCol is allowlisted; values are bound params
 		`SELECT e.id, e.user_id, e.feed_id, e.guid, e.url, e.title, e.author,
 		        substr(e.content, 1, 2048), substr(e.summary, 1, 2048),
-		        e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash
+		        e.published_at, e.status, e.starred, e.read_at, e.created_at, e.hash,
+		        e.comments_url
 		 FROM entries e%s WHERE %s ORDER BY %s DESC, e.id DESC LIMIT ?`,
 		join, strings.Join(where, " AND "), orderCol)
 	args = append(args, int64(limit+1)) // fetch one extra to detect next page

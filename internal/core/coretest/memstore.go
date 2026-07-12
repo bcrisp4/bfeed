@@ -244,6 +244,7 @@ func (s *MemStore) UpsertEntries(_ context.Context, feedID core.ID, es []*core.E
 				existing.PublishedAt = e.PublishedAt
 				existing.URL = e.URL
 				existing.Hash = e.Hash
+				existing.CommentsURL = e.CommentsURL
 			}
 			continue
 		}

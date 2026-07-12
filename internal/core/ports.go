@@ -51,6 +51,7 @@ type ParsedFeed struct {
 type ParsedEntry struct {
 	GUID, URL, Title, Author string
 	Content, Summary         string // RAW; sanitise before persistence
+	CommentsURL              string // RSS <comments> discussion URL; "" when absent. NOT in Hash.
 	PublishedAt              time.Time
 	Hash                     string // sha256(title|content|summary)
 }

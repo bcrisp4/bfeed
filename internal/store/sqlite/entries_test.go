@@ -61,6 +61,63 @@ func TestUpsertSkipsTombstoned(t *testing.T) {
 	}
 }
 
+// comments_url is poll-owned and refreshes exactly like url: written on insert,
+// rewritten by UpdateEntryContent when the content hash changes, untouched on a
+// hash-unchanged re-poll.
+func TestCommentsURLPersistsAndRefreshesOnHashChange(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	fid := seedFeed(t, s)
+	p := time.Unix(1_700_000_100, 0).UTC()
+
+	e := mkEntry(fid, "g1", p)
+	e.Content = "<p>zebra content</p>"
+	e.CommentsURL = "https://news.test/item?id=1"
+	ins, err := s.UpsertEntries(ctx, fid, []*core.Entry{e})
+	if err != nil || len(ins) != 1 {
+		t.Fatalf("insert: ins=%d err=%v", len(ins), err)
+	}
+	id := ins[0].ID
+
+	got, err := s.GetEntry(ctx, core.DefaultUserID, id)
+	if err != nil || got.CommentsURL != e.CommentsURL {
+		t.Fatalf("GetEntry CommentsURL = %q err=%v", got.CommentsURL, err)
+	}
+	list, _, err := s.ListEntries(ctx, core.DefaultUserID, core.EntryFilter{})
+	if err != nil || len(list) != 1 || list[0].CommentsURL != e.CommentsURL {
+		t.Fatalf("ListEntries CommentsURL = %q err=%v", list[0].CommentsURL, err)
+	}
+	found, _, err := s.Search(ctx, core.DefaultUserID, "zebra", core.EntryFilter{})
+	if err != nil || len(found) != 1 || found[0].CommentsURL != e.CommentsURL {
+		t.Fatalf("Search CommentsURL err=%v found=%+v", err, found)
+	}
+
+	// Hash-unchanged re-poll with a different comments URL: no write at all.
+	same := mkEntry(fid, "g1", p)
+	same.Content = e.Content
+	same.CommentsURL = "https://news.test/item?id=other"
+	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{same}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetEntry(ctx, core.DefaultUserID, id)
+	if got.CommentsURL != e.CommentsURL {
+		t.Fatalf("hash-unchanged re-poll rewrote CommentsURL: %q", got.CommentsURL)
+	}
+
+	// Hash-changed re-poll: comments URL refreshes alongside the content fields.
+	changed := mkEntry(fid, "g1", p)
+	changed.Content = "<p>zebra v2</p>"
+	changed.Hash = "h-g1-v2"
+	changed.CommentsURL = "https://news.test/item?id=2"
+	if _, err := s.UpsertEntries(ctx, fid, []*core.Entry{changed}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetEntry(ctx, core.DefaultUserID, id)
+	if got.CommentsURL != "https://news.test/item?id=2" {
+		t.Fatalf("hash-changed re-poll did not refresh CommentsURL: %q", got.CommentsURL)
+	}
+}
+
 func TestListEntriesKeysetAndStatusFilter(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

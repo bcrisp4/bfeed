@@ -29,6 +29,7 @@ type entryVM struct {
 	PublishedFull string // full date+time, shown as the hover tooltip
 	PublishedAttr string // RFC3339, the machine-readable <time datetime>
 	Summary       string
+	CommentsURL   string // discussion link; "" when absent or same as URL, so templates need only {{if}}
 	ExtractFailed bool   // full-content extraction gave up; show a reader note
 	ExtractError  string // the last failure reason (only meaningful when ExtractFailed)
 }
@@ -1106,6 +1107,14 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 	if body == "" {
 		body = e.Summary
 	}
+	// A comments link identical to the article link adds nothing; fold the
+	// display rule here so every render site (list, row re-render, reader)
+	// inherits it. Trailing-slash-insensitive: feeds commonly emit the same
+	// page with and without the slash across the two elements.
+	comments := e.CommentsURL
+	if strings.TrimSuffix(comments, "/") == strings.TrimSuffix(e.URL, "/") {
+		comments = ""
+	}
 	return entryVM{
 		ID:            e.ID,
 		Title:         e.Title,
@@ -1120,6 +1129,7 @@ func toEntryVM(e *core.Entry, feedTitle string) entryVM {
 		PublishedFull: e.PublishedAt.Format("2 Jan 2006, 15:04"),
 		PublishedAttr: e.PublishedAt.Format(time.RFC3339),
 		Summary:       summaryText(e),
+		CommentsURL:   comments,
 		ExtractFailed: e.ExtractState == core.ExtractFailed,
 		ExtractError:  e.ExtractError,
 	}

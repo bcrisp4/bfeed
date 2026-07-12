@@ -24,7 +24,16 @@ import (
 
 type Parser struct{ fp *gofeed.Parser }
 
-func New() *Parser { return &Parser{fp: gofeed.NewParser()} }
+func New() *Parser {
+	fp := gofeed.NewParser()
+	fp.RSSTranslator = &commentsTranslator{inner: &gofeed.DefaultRSSTranslator{}}
+	// Eagerly assign the other translators too: gofeed lazily writes each
+	// translator field on the first parse of that feed type, an unsynchronized
+	// write to this Parser, which is shared across concurrent poller workers.
+	fp.AtomTranslator = &gofeed.DefaultAtomTranslator{}
+	fp.JSONTranslator = &gofeed.DefaultJSONTranslator{}
+	return &Parser{fp: fp}
+}
 
 var _ core.FeedParser = (*Parser)(nil)
 
@@ -83,6 +92,7 @@ func (p *Parser) Parse(data []byte, contentType, feedURL string) (*core.ParsedFe
 			Author:      author,
 			Content:     content,
 			Summary:     summary,
+			CommentsURL: commentsURL(base, it.Custom[commentsCustomKey]),
 			PublishedAt: pub,
 			Hash:        EntryHash(title, content, summary),
 		})
@@ -292,6 +302,33 @@ func (p *Parser) Discover(data []byte, pageURL string) ([]string, error) {
 	}
 	walk(doc)
 	return out, nil
+}
+
+// commentsURL turns a raw RSS <comments> value into a resolvable URL. Unlike
+// <link>, a bare word here ("12", "yes") is far more likely comment-COUNT
+// misuse than a relative link — resolving it against the feed base would mint
+// a plausible-looking URL to a nonexistent page that the ingest http(s) guard
+// then happily accepts. So only deliberate relative forms (rooted, dot-rooted,
+// fragment, query) resolve against the base; anything else must already be
+// absolute. Scheme filtering stays at the ingest boundary (core.httpURL).
+func commentsURL(base *url.URL, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if u.IsAbs() {
+		return raw
+	}
+	for _, p := range []string{"/", "./", "../", "#", "?"} {
+		if strings.HasPrefix(raw, p) {
+			return resolve(base, raw)
+		}
+	}
+	return ""
 }
 
 func resolve(base *url.URL, ref string) string {
