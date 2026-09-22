@@ -11,6 +11,14 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+### Added
+
+- The Feeds page and `bfeed export [-o file.opml]` provide OPML 2.0 exports. Exports include categories and feed URLs, but not articles or read status. The export omits URL userinfo such as `user:password@host`, but retains query strings. OPML files can contain access tokens and require private storage.
+
+### Security
+
+- The release uses Go 1.26.6 and `golang.org/x/text` 0.39.0 to fix known vulnerabilities in the standard library and text processing.
+
 ## [0.11.0] - 2026-07-12
 
 ### Added

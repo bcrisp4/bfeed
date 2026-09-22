@@ -31,7 +31,7 @@ Everything not on that loop is deferred. Leanest possible first ship; iterate fr
 | Organisation | Flat feed list | Categories (§9.1) — shipped iter 3 (see `docs/superpowers/specs/2026-06-20-feed-categories-design.md`) |
 | Retention | **Tombstones on delete** (correctness). No TTL cleaner. | TTL cleaner, prune, WAL maintenance job (§14) |
 | API | — | REST API + bearer tokens (§17) |
-| Data portability | — | OPML import/export (§19) |
+| Data portability | OPML export (now available from the Feeds page and CLI) | OPML import (§19) |
 | Mobile install | — | PWA add-to-home (manifest/icons) (§18) |
 | Theme | — | Light/dark/system toggle (§18) |
 | Reading extras | — | Bulk mark-all-read (§9.2) |
@@ -424,7 +424,10 @@ bfeed healthcheck   probe local /healthz, exit 0/1 — for container HEALTHCHECK
 bfeed version       version, git commit, build date
 ```
 
-Deferred subcommands (`user`, `token`, `import`, `export`) arrive with their features.
+Deferred subcommands (`user`, `token`, `import`) arrive with their features.
+
+The CLI now supports `bfeed export [-o file.opml]` for the implicit user. The Feeds page
+also offers `GET /feeds/export` as a download. Both use the same OPML 2.0 serializer.
 
 ## 15. Observability
 

@@ -9,6 +9,7 @@
   <label class="opt"><input type="checkbox" name="full_content"> Full content</label>
   <button class="primary" type="submit">Add feed</button>
 </form>
+<p class="fm-export"><a href="/feeds/export" download="bfeed-feeds.opml">Export OPML</a></p>
 <div id="subscribe-msg" role="alert"></div>
 {{if .HasFeeds}}
   {{range .Groups}}
