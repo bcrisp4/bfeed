@@ -2,7 +2,7 @@ module github.com/bcrisp4/bfeed
 
 go 1.25.7
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
@@ -12,7 +12,7 @@ require (
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.56.0
-	golang.org/x/text v0.38.0
+	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.52.0
 )
 
