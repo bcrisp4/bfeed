@@ -11,6 +11,8 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-23
+
 ### Added
 
 - The Feeds page and `bfeed export [-o file.opml]` provide OPML 2.0 exports. Exports include categories and feed URLs, but not articles or read status. The export omits URL userinfo such as `user:password@host`, but retains query strings. OPML files can contain access tokens and require private storage.
@@ -269,7 +271,8 @@ auth; the tailnet is the security boundary.
 - 12-factor environment config validated at startup, structured slog logging
   (JSON in prod, text in dev), and a distroless container image.
 
-[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/bcrisp4/bfeed/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/bcrisp4/bfeed/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/bcrisp4/bfeed/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/bcrisp4/bfeed/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/bcrisp4/bfeed/compare/v0.9.0...v0.9.1
