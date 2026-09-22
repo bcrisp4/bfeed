@@ -2,7 +2,7 @@
 
 A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binary backed by one SQLite file, with a minimal, mobile-first, content-first htmx UI. Inspired by [Miniflux](https://miniflux.app/). Built to run comfortably on Raspberry Pi–class hardware for one to a handful of users.
 
-- Subscribe with feed auto-discovery; organise feeds into categories
+- Subscribe with feed auto-discovery, organise feeds into categories, and export subscriptions as OPML.
 - Clean single-column reader — mobile-first, Light/Sepia/Dark themes, reading-time estimate, settings page
 - Unread / Starred / History / per-feed / per-category views; full-text search (SQLite FTS5)
 - Opt-in per-feed **full-content extraction** (readability) for feeds that only ship summaries
@@ -13,7 +13,7 @@ A free, self-hosted **RSS / Atom / JSON Feed reader** — a single pure-Go binar
 
 Daily-drivable as a single-user reader — the full subscribe → poll → read loop plus everything listed above. **No in-app login yet**: it is designed to sit behind a private network such as Tailscale.
 
-Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import/export, retention cleanup, among others.
+Remaining work is tracked in [GitHub issues and milestones](https://github.com/bcrisp4/bfeed/milestones): authentication & multi-user, REST API + tokens, OPML import, retention cleanup, among others.
 
 License: [Apache-2.0](LICENSE).
 
@@ -53,9 +53,17 @@ defined — run `make` with no target to lint+test+build (the `all` target).
 ```
 bfeed serve         run the HTTP server + background poller (default if omitted)
 bfeed migrate       apply SQLite schema migrations (serve also auto-migrates on boot)
+bfeed export [-o file.opml]  export subscriptions as OPML 2.0 (stdout by default)
 bfeed healthcheck   probe local /healthz, exit 0/1 (for container HEALTHCHECK)
 bfeed version       print version / build info
 ```
+
+The Feeds page offers an "Export OPML" link that downloads `bfeed-feeds.opml`.
+The CLI reads `BFEED_DATABASE_PATH` and does not need `BFEED_BASE_URL`.
+The export includes categories, renamed feeds, and disabled feeds. It does not
+include articles or read status. It removes usernames and passwords from URLs.
+Feed URL query strings
+can contain tokens, so the exported file can contain them.
 
 ### Container
 

@@ -75,6 +75,7 @@ func New(feeds *core.FeedService, entries *core.EntryService, cats *core.Categor
 	mux.HandleFunc("GET /readyz", readyzHandler(ready))
 	mux.HandleFunc("GET /{$}", h.unread)
 	mux.HandleFunc("GET /feeds", h.listFeeds)
+	mux.HandleFunc("GET /feeds/export", h.exportOPML)
 	mux.HandleFunc("GET /feeds/{id}", h.feedEntries)
 	mux.HandleFunc("GET /feeds/{id}/row", h.feedRow)
 	mux.HandleFunc("GET /starred", h.starred)

@@ -224,6 +224,8 @@ button.primary:hover{background:var(--surface);color:var(--accent);border-color:
 .fm-add{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin:var(--sp-4) 0 var(--sp-5)}
 .fm-add input[type=url]{flex:1;min-width:16rem}
 .fm-add .opt{font-family:var(--font-mono);font-size:.72rem;color:var(--muted);display:inline-flex;align-items:center;gap:.35rem}
+.fm-export{font-family:var(--font-mono);font-size:.75rem;margin:calc(-1 * var(--sp-4)) 0 var(--sp-4)}
+.fm-export a{display:inline-flex;align-items:center;min-height:var(--tap)}
 .fm-group{margin-top:var(--sp-5)}
 .fm-group-head{display:flex;align-items:baseline;gap:var(--sp-2);font-family:var(--font-mono);font-size:.7rem;
   text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding-bottom:var(--sp-1);border-bottom:1px solid var(--rule)}

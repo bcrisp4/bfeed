@@ -19,7 +19,7 @@
 | [Scrape & politeness](https://github.com/bcrisp4/bfeed/milestone/3) | Extraction lease/re-scrape/backfill-cap, per-host token-bucket limiter, robots Crawl-Delay |
 | [Storage](https://github.com/bcrisp4/bfeed/milestone/4) | TTL cleaner, tombstone pruning, WAL maintenance, DB stats |
 | [Operability](https://github.com/bcrisp4/bfeed/milestone/5) | Prometheus metrics + `/metrics` |
-| [Integrations](https://github.com/bcrisp4/bfeed/milestone/6) | OPML import/export, REST API + bearer tokens |
+| [Integrations](https://github.com/bcrisp4/bfeed/milestone/6) | OPML import, REST API + bearer tokens |
 | [Multi-user](https://github.com/bcrisp4/bfeed/milestone/7) | Sessions/argon2id → CSRF → multi-user → admin → per-user prefs |
 
 **Labels:**
@@ -47,6 +47,7 @@ exception: they restructure code, but must be behaviour- and data-compatible.
 
 ## Done
 
+- OPML 2.0 export from the Feeds page and `bfeed export`.
 - Starred view (`/starred`) — MVP.
 - History view (`/history`, read entries by `read_at`) — iter 2.
 - Categories (feeds → categories, aggregated category stream, CRUD) — iter 3.

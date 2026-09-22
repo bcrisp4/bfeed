@@ -23,12 +23,14 @@ func main() {
 		os.Exit(runServe())
 	case "migrate":
 		os.Exit(runMigrate())
+	case "export":
+		os.Exit(runExport(os.Args[2:], os.Stdout, os.Stderr))
 	case "healthcheck":
 		os.Exit(runHealthcheck())
 	case "version":
 		fmt.Printf("bfeed %s\n", version)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q (serve|migrate|healthcheck|version)\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q (serve|migrate|export|healthcheck|version)\n", cmd)
 		os.Exit(2)
 	}
 }
