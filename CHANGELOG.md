@@ -13,7 +13,7 @@ section is renamed to the new version and becomes the GitHub Release notes.
 
 ### Added
 
-- The Feeds page and `bfeed export [-o file.opml]` provide OPML 2.0 exports. Exports include categories and feed URLs, but not articles or read status. The export removes usernames and passwords from URLs. URL query strings remain unchanged.
+- The Feeds page and `bfeed export [-o file.opml]` provide OPML 2.0 exports. Exports include categories and feed URLs, but not articles or read status. The export omits URL userinfo such as `user:password@host`, but retains query strings. OPML files can contain access tokens and require private storage.
 
 ### Security
 

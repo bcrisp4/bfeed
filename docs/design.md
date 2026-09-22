@@ -853,7 +853,7 @@ Errors return `{ "error": { "code", "message" } }`; core sentinels map to status
 
 ## 19. OPML import/export
 
-- **Export:** OPML 2.0 with categories as `<outline>` groups. Plaintext, no credentials.
+- **Export:** OPML 2.0 with categories as `<outline>` groups. Exports omit URL userinfo but keep complete feed URL query strings. Query strings can contain access tokens. OPML files are plaintext and require private storage. `docs/decisions.md` records the rationale.
 - **Import:** parse OPML, create missing categories, subscribe to each feed (dedupe per user
   by `feed_url`), skip duplicates. Best-effort: malformed entries are reported, not fatal.
 

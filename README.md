@@ -61,9 +61,11 @@ bfeed version       print version / build info
 The Feeds page offers an "Export OPML" link that downloads `bfeed-feeds.opml`.
 The CLI reads `BFEED_DATABASE_PATH` and does not need `BFEED_BASE_URL`.
 The export includes categories, renamed feeds, and disabled feeds. It does not
-include articles or read status. It removes usernames and passwords from URLs.
+include articles or read status. It omits URL userinfo such as `user:password@host`.
 Feed URL query strings
 can contain tokens, so the exported file can contain them.
+
+Store exported OPML files privately.
 
 ### Container
 

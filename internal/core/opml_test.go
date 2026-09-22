@@ -80,15 +80,15 @@ func TestMarshalOPML(t *testing.T) {
 
 func TestMarshalOPMLOmitsURLUserinfo(t *testing.T) {
 	feeds := []*core.Feed{{
-		FeedURL: "https://name:secret@example.test/feed?ref=1&lang=en",
-		SiteURL: "https://reader:password@example.test/",
+		FeedURL: "https://name:basicpass@example.test/feed?token=querysecret&lang=en",
+		SiteURL: "https://reader:sitepass@example.test/",
 		Title:   "Private feed",
 	}}
 	data, err := core.MarshalOPML(feeds, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "secret") || strings.Contains(string(data), "password") || strings.Contains(string(data), "name:") {
+	if strings.Contains(string(data), "basicpass") || strings.Contains(string(data), "sitepass") || strings.Contains(string(data), "name:") {
 		t.Fatalf("userinfo leaked: %s", data)
 	}
 	var doc struct {
@@ -102,7 +102,7 @@ func TestMarshalOPMLOmitsURLUserinfo(t *testing.T) {
 	if err := xml.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Body.Outlines) != 1 || doc.Body.Outlines[0].XMLURL != "https://example.test/feed?ref=1&lang=en" || doc.Body.Outlines[0].HTMLURL != "https://example.test/" {
+	if len(doc.Body.Outlines) != 1 || doc.Body.Outlines[0].XMLURL != "https://example.test/feed?token=querysecret&lang=en" || doc.Body.Outlines[0].HTMLURL != "https://example.test/" {
 		t.Fatalf("URLs after userinfo removal: %+v", doc.Body.Outlines)
 	}
 }
@@ -118,6 +118,31 @@ func TestMarshalOPMLOmitsInvalidSiteURL(t *testing.T) {
 				t.Fatalf("invalid site URL in OPML: %s", data)
 			}
 		})
+	}
+}
+
+func TestMarshalOPMLKeepsUppercaseSchemes(t *testing.T) {
+	data, err := core.MarshalOPML([]*core.Feed{{
+		FeedURL: "HTTPS://example.test/feed?format=atom",
+		SiteURL: "HTTP://example.test/",
+		Title:   "Feed",
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Body struct {
+			Outlines []struct {
+				XMLURL  string `xml:"xmlUrl,attr"`
+				HTMLURL string `xml:"htmlUrl,attr"`
+			} `xml:"outline"`
+		} `xml:"body"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Body.Outlines) != 1 || doc.Body.Outlines[0].XMLURL != "HTTPS://example.test/feed?format=atom" || doc.Body.Outlines[0].HTMLURL != "HTTP://example.test/" {
+		t.Fatalf("uppercase URL schemes lost: %+v", doc.Body.Outlines)
 	}
 }
 
